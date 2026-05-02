@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Test Assist</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <nav class="topbar">
+    <a href="../index.html" class="back">← Hub</a>
+    <span class="title">🔍 Test Assist</span>
+    <div class="toolbar-group">
+      <button id="btnScreenshot" class="btn-primary" title="Capture Screenshot">📷 Screenshot</button>
+      <button id="btnRecord"     class="btn-outline" title="Record Video">⏺ Record</button>
+    </div>
+  </nav>
+
+  <div class="main-layout">
+
+    <!-- ── Left: Annotation Tools ── -->
+    <aside class="tools-panel">
+      <h3>Tools</h3>
+      <div class="tool-list">
+        <button class="tool-btn active" data-tool="select"    title="Select / Move">🖱️ Select</button>
+        <button class="tool-btn"        data-tool="highlight" title="Highlight area">🟡 Highlight</button>
+        <button class="tool-btn"        data-tool="text"      title="Add text comment">📝 Text</button>
+        <button class="tool-btn"        data-tool="circle"    title="Draw circle">⭕ Circle</button>
+        <button class="tool-btn"        data-tool="arrow"     title="Draw arrow">➡️ Arrow</button>
+        <button class="tool-btn"        data-tool="rect"      title="Draw rectangle">▭ Rectangle</button>
+        <button class="tool-btn"        data-tool="pen"       title="Free draw">✏️ Pen</button>
+      </div>
+
+      <div class="tool-options">
+        <label>Colour</label>
+        <input type="color" id="strokeColor" value="#ff3b30" />
+
+        <label>Size</label>
+        <input type="range" id="strokeSize" min="1" max="20" value="3" />
+        <span id="strokeSizeLabel">3px</span>
+
+        <label>Fill opacity (highlight)</label>
+        <input type="range" id="fillOpacity" min="0" max="100" value="30" />
+        <span id="fillOpacityLabel">30%</span>
+      </div>
+
+      <div class="tool-actions">
+        <button id="btnUndo"      class="btn-outline sm">↩ Undo</button>
+        <button id="btnRedo"      class="btn-outline sm">↪ Redo</button>
+        <button id="btnClearAnno" class="btn-danger  sm">🗑 Clear</button>
+      </div>
+
+      <div class="tool-actions" style="margin-top:8px;">
+        <button id="btnExportPng"  class="btn-primary sm">💾 Save PNG</button>
+        <button id="btnExportJson" class="btn-outline sm">📋 Export JSON</button>
+      </div>
+
+      <div style="margin-top:18px;">
+        <label class="section-label">Snapshots</label>
+        <div id="snapshotList" class="snapshot-list"></div>
+      </div>
+    </aside>
+
+    <!-- ── Right: Canvas area ── -->
+    <main class="canvas-wrap">
+      <div class="canvas-container" id="canvasContainer">
+        <!-- Base image layer -->
+        <canvas id="baseCanvas"></canvas>
+        <!-- Annotation layer -->
+        <canvas id="annoCanvas"></canvas>
+        <!-- Placeholder when no image loaded -->
+        <div class="canvas-placeholder" id="placeholder">
+          <span class="ph-icon">🖼️</span>
+          <p>Take a screenshot or upload an image to begin annotating</p>
+          <label class="btn-outline upload-label">
+            📁 Upload Image
+            <input type="file" id="uploadImage" accept="image/*" style="display:none;" />
+          </label>
+          <button class="btn-primary" id="btnCaptureTab" style="margin-top:10px;">📷 Capture Screen</button>
+        </div>
+      </div>
+    </main>
+
+  </div>
+
+  <!-- Recording indicator -->
+  <div id="recordingBadge" class="recording-badge" style="display:none;">
+    <span class="rec-dot"></span> REC
+    <span id="recTime">00:00</span>
+    <button id="btnStopRecord" class="btn-danger sm">■ Stop</button>
+  </div>
+
+  <!-- Text input popup -->
+  <div id="textPopup" class="text-popup" style="display:none;">
+    <textarea id="textInput" rows="3" placeholder="Type your comment…"></textarea>
+    <div style="display:flex;gap:8px;margin-top:8px;">
+      <button id="btnTextOk"     class="btn-primary sm">Add</button>
+      <button id="btnTextCancel" class="btn-outline sm">Cancel</button>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
