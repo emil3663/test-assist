@@ -115,9 +115,25 @@ function loadImageSrc(src) {
 document.getElementById('uploadImage').addEventListener('change', e => {
   const file = e.target.files[0];
   if (!file) return;
-  const url = URL.createObjectURL(file);
-  loadImageSrc(url);
+  loadFromFile(file);
 });
+
+/* ─── Drag-and-drop onto canvas area ─── */
+const canvasWrap = document.querySelector('.canvas-wrap');
+canvasWrap.addEventListener('dragover', e => { e.preventDefault(); canvasWrap.style.outline = '3px dashed #7c83fd'; });
+canvasWrap.addEventListener('dragleave', () => { canvasWrap.style.outline = ''; });
+canvasWrap.addEventListener('drop', e => {
+  e.preventDefault();
+  canvasWrap.style.outline = '';
+  const file = e.dataTransfer.files[0];
+  if (file && file.type.startsWith('image/')) loadFromFile(file);
+});
+
+function loadFromFile(file) {
+  const reader = new FileReader();
+  reader.onload = e => loadImageSrc(e.target.result);
+  reader.readAsDataURL(file);
+}
 
 /* ─── Video Recording ─── */
 document.getElementById('btnRecord').addEventListener('click', startRecording);
