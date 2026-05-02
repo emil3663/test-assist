@@ -286,9 +286,9 @@ function onMouseUp(e) {
 }
 
 function pushAnnotation(anno) {
+  undoStack.push(JSON.parse(JSON.stringify(annotations)));
   annotations.push(anno);
   redoStack = [];
-  undoStack.push(JSON.parse(JSON.stringify(annotations)));
   redrawAnnotations();
 }
 
@@ -417,15 +417,13 @@ document.getElementById('btnTextCancel').addEventListener('click', () => {
 document.getElementById('btnUndo').addEventListener('click', () => {
   if (undoStack.length === 0) return;
   redoStack.push(JSON.parse(JSON.stringify(annotations)));
-  annotations = undoStack.pop() || [];
-  if (annotations === undoStack[undoStack.length-1]) annotations = undoStack.pop() || [];
-  // Simple undo: remove last annotation
-  if (annotations.length > 0) annotations = annotations.slice(0,-1);
+  annotations = undoStack.pop();
   redrawAnnotations();
 });
 
 document.getElementById('btnRedo').addEventListener('click', () => {
   if (redoStack.length === 0) return;
+  undoStack.push(JSON.parse(JSON.stringify(annotations)));
   annotations = redoStack.pop();
   redrawAnnotations();
 });
