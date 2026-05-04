@@ -1,0 +1,7 @@
+PySide6>=6.7.0
+pytest>=8.0.0
+
+# Optional: enables MP4 export for video recording.
+# If not installed, recordings are saved as a PNG frame sequence instead.
+# opencv-python>=4.9.0
+# numpy>=1.26.0

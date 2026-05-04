@@ -6,17 +6,45 @@
   <title>Test Assist</title>
   <link rel="stylesheet" href="style.css" />
 </head>
-<body>
-  <nav class="topbar">
-    <a href="../index.html" class="back">← Hub</a>
-    <span class="title">🔍 Test Assist</span>
-    <div class="toolbar-group">
-      <button id="btnScreenshot" class="btn-primary" title="Capture Screenshot">📷 Screenshot</button>
-      <button id="btnRecord"     class="btn-outline" title="Record Video">⏺ Record</button>
+<body data-capture-mode="photo" data-editor-state="idle">
+  <aside class="capture-launcher" aria-label="Floating capture control mock">
+    <div class="launcher-grip" aria-hidden="true"></div>
+    <div class="launcher-head">
+      <div>
+        <p class="launcher-kicker">Overlay Mock</p>
+        <h1>Quick Capture</h1>
+      </div>
+      <span class="launcher-dot" aria-hidden="true"></span>
     </div>
-  </nav>
 
-  <div class="main-layout">
+    <div class="launcher-toggle" role="tablist" aria-label="Capture mode">
+      <button id="modePhoto" class="mode-btn active" type="button" role="tab" aria-selected="true">Photo</button>
+      <button id="modeVideo" class="mode-btn" type="button" role="tab" aria-selected="false">Video</button>
+    </div>
+
+    <div class="launcher-actions">
+      <button id="btnScreenshot" class="btn-primary launcher-primary" title="Capture Screenshot">📷 Quick Capture</button>
+      <button id="btnRecord" class="btn-danger launcher-primary" title="Record Video" hidden>⏺ Start Recording</button>
+      <button id="openEditorWindow" class="btn-outline" type="button">Open Editor</button>
+    </div>
+
+    <p id="launcherStatus" class="launcher-status">Capture a still image to open the editor in the background. The launcher stays on top in this mock.</p>
+  </aside>
+
+  <div class="app-shell">
+    <nav class="topbar">
+      <a href="../index.html" class="back">← Hub</a>
+      <div class="title-wrap">
+        <span class="title">🔍 Test Assist</span>
+        <span class="subtitle">Launcher-first mock for the future desktop overlay</span>
+      </div>
+      <div class="toolbar-group surface-group">
+        <span class="surface-pill">Floating launcher</span>
+        <span id="editorStatePill" class="surface-pill state-pill">Editor parked</span>
+      </div>
+    </nav>
+
+    <div class="main-layout">
 
     <!-- ── Left: Annotation Tools ── -->
     <aside class="tools-panel">
@@ -32,15 +60,15 @@
       </div>
 
       <div class="tool-options">
-        <label>Color</label>
-        <input type="color" id="strokeColor" value="#ff3b30" />
+        <label for="strokeColor">Color</label>
+        <input type="color" id="strokeColor" value="#ff3b30" title="Annotation colour" />
 
-        <label>Size</label>
-        <input type="range" id="strokeSize" min="1" max="20" value="3" />
+        <label for="strokeSize">Size</label>
+        <input type="range" id="strokeSize" min="1" max="20" value="3" title="Stroke size" />
         <span id="strokeSizeLabel">3px</span>
 
-        <label>Fill opacity (highlight)</label>
-        <input type="range" id="fillOpacity" min="0" max="100" value="30" />
+        <label for="fillOpacity">Fill opacity (highlight)</label>
+        <input type="range" id="fillOpacity" min="0" max="100" value="30" title="Highlight opacity" />
         <span id="fillOpacityLabel">30%</span>
       </div>
 
@@ -50,12 +78,12 @@
         <button id="btnClearAnno" class="btn-danger  sm">🗑 Clear</button>
       </div>
 
-      <div class="tool-actions" style="margin-top:8px;">
+      <div class="tool-actions tool-actions-extra">
         <button id="btnExportPng"  class="btn-primary sm">💾 Save PNG</button>
         <button id="btnExportJson" class="btn-outline sm">📋 Export JSON</button>
       </div>
 
-      <div style="margin-top:18px;">
+      <div class="snapshot-section">
         <label class="section-label">Snapshots</label>
         <div id="snapshotList" class="snapshot-list"></div>
       </div>
@@ -63,6 +91,13 @@
 
     <!-- ── Right: Canvas area ── -->
     <main class="canvas-wrap">
+      <section id="editorStage" class="editor-stage" aria-live="polite">
+        <span class="editor-stage-chip">Background Editor Window</span>
+        <h2 id="editorStageTitle">Editor is parked behind the launcher</h2>
+        <p id="editorStageText">Use the floating capture control to grab a screenshot. In this browser mock, the editor stays visually recessed until you choose to bring it forward.</p>
+        <button id="editorStageAction" class="btn-primary sm" type="button">Bring Editor Forward</button>
+      </section>
+
       <div class="canvas-container" id="canvasContainer">
         <!-- Base image layer -->
         <canvas id="baseCanvas"></canvas>
@@ -74,26 +109,27 @@
           <p>Take a screenshot or upload an image to begin annotating</p>
           <label class="btn-outline upload-label">
             📁 Upload Image
-            <input type="file" id="uploadImage" accept="image/*" style="display:none;" />
+            <input type="file" id="uploadImage" class="hidden-file-input" accept="image/*" />
           </label>
-          <button class="btn-primary" id="btnCaptureTab" style="margin-top:10px;">📷 Capture Screen</button>
+          <button class="btn-primary placeholder-capture-btn" id="btnCaptureTab">📷 Capture Screen</button>
         </div>
       </div>
     </main>
 
+    </div>
   </div>
 
   <!-- Recording indicator -->
-  <div id="recordingBadge" class="recording-badge" style="display:none;">
+  <div id="recordingBadge" class="recording-badge">
     <span class="rec-dot"></span> REC
     <span id="recTime">00:00</span>
     <button id="btnStopRecord" class="btn-danger sm">■ Stop</button>
   </div>
 
   <!-- Text input popup -->
-  <div id="textPopup" class="text-popup" style="display:none;">
+  <div id="textPopup" class="text-popup">
     <textarea id="textInput" rows="3" placeholder="Type your comment…"></textarea>
-    <div style="display:flex;gap:8px;margin-top:8px;">
+    <div class="text-popup-actions">
       <button id="btnTextOk"     class="btn-primary sm">Add</button>
       <button id="btnTextCancel" class="btn-outline sm">Cancel</button>
     </div>

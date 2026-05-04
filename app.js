@@ -25,6 +25,7 @@ let mediaRecorder = null;
 let recordedChunks = [];
 let recInterval   = null;
 let recSeconds    = 0;
+let captureMode   = 'photo';
 
 /* ─── Canvas setup ─── */
 const baseCanvas = document.getElementById('baseCanvas');
@@ -33,6 +34,18 @@ const baseCtx    = baseCanvas.getContext('2d');
 const annoCtx    = annoCanvas.getContext('2d');
 const container  = document.getElementById('canvasContainer');
 const placeholder= document.getElementById('placeholder');
+const body       = document.body;
+const launcherStatus = document.getElementById('launcherStatus');
+const editorStage = document.getElementById('editorStage');
+const editorStageTitle = document.getElementById('editorStageTitle');
+const editorStageText = document.getElementById('editorStageText');
+const editorStageAction = document.getElementById('editorStageAction');
+const editorStatePill = document.getElementById('editorStatePill');
+const modePhotoBtn = document.getElementById('modePhoto');
+const modeVideoBtn = document.getElementById('modeVideo');
+const openEditorWindowBtn = document.getElementById('openEditorWindow');
+const screenshotBtn = document.getElementById('btnScreenshot');
+const recordBtn = document.getElementById('btnRecord');
 
 function resizeCanvases(w, h) {
   baseCanvas.width  = annoCanvas.width  = w;
@@ -71,8 +84,12 @@ document.getElementById('fillOpacity').addEventListener('input', e => {
 });
 
 /* ─── Screenshot / Capture ─── */
-document.getElementById('btnScreenshot').addEventListener('click', captureScreen);
+screenshotBtn.addEventListener('click', captureScreen);
 document.getElementById('btnCaptureTab').addEventListener('click', captureScreen);
+modePhotoBtn.addEventListener('click', () => setCaptureMode('photo'));
+modeVideoBtn.addEventListener('click', () => setCaptureMode('video'));
+openEditorWindowBtn.addEventListener('click', () => setEditorState('active'));
+editorStageAction.addEventListener('click', () => setEditorState('active'));
 
 async function captureScreen() {
   try {
@@ -82,7 +99,7 @@ async function captureScreen() {
       const capture= new ImageCapture(track);
       const bitmap = await capture.grabFrame();
       track.stop();
-      loadImageBitmap(bitmap);
+      loadImageBitmap(bitmap, 'background');
     } else {
       alert('Screen capture is not supported in this browser. Upload an image instead.');
     }
@@ -93,20 +110,22 @@ async function captureScreen() {
   }
 }
 
-function loadImageBitmap(bitmap) {
+function loadImageBitmap(bitmap, nextState = 'active') {
   resizeCanvases(bitmap.width, bitmap.height);
   baseCtx.drawImage(bitmap, 0, 0);
   placeholder.style.display = 'none';
   clearAnnotations(false);
+  setEditorState(nextState);
 }
 
-function loadImageSrc(src) {
+function loadImageSrc(src, nextState = 'active') {
   const img = new Image();
   img.onload = () => {
     resizeCanvases(img.naturalWidth, img.naturalHeight);
     baseCtx.drawImage(img, 0, 0);
     placeholder.style.display = 'none';
     clearAnnotations(false);
+    setEditorState(nextState);
   };
   img.src = src;
 }
@@ -136,7 +155,7 @@ function loadFromFile(file) {
 }
 
 /* ─── Video Recording ─── */
-document.getElementById('btnRecord').addEventListener('click', startRecording);
+recordBtn.addEventListener('click', startRecording);
 document.getElementById('btnStopRecord').addEventListener('click', stopRecording);
 
 async function startRecording() {
@@ -155,8 +174,9 @@ async function startRecording() {
     }, 1000);
 
     document.getElementById('recordingBadge').style.display = 'flex';
-    document.getElementById('btnRecord').textContent = '⏺ Recording…';
-    document.getElementById('btnRecord').disabled = true;
+    recordBtn.textContent = '⏺ Recording…';
+    recordBtn.disabled = true;
+    launcherStatus.textContent = 'Recording is running from the floating control. Stop from the badge when you are done.';
   } catch (err) {
     if (err.name !== 'NotAllowedError') alert('Recording failed: ' + err.message);
   }
@@ -169,8 +189,11 @@ function stopRecording() {
   }
   clearInterval(recInterval);
   document.getElementById('recordingBadge').style.display = 'none';
-  document.getElementById('btnRecord').textContent = '⏺ Record';
-  document.getElementById('btnRecord').disabled = false;
+  recordBtn.textContent = '⏺ Start Recording';
+  recordBtn.disabled = false;
+  if (captureMode === 'video') {
+    launcherStatus.textContent = 'Record short clips from the launcher. Image capture is what stages the editor window in this mock.';
+  }
 }
 
 function saveRecording() {
@@ -514,6 +537,63 @@ window.deleteSnapshot = id => {
   snapshots = snapshots.filter(s => s.id !== id);
   renderSnapshots();
 };
+
+/* ─── Launcher / Editor window mock ─── */
+function setCaptureMode(mode) {
+  captureMode = mode;
+  body.dataset.captureMode = mode;
+
+  const isPhoto = mode === 'photo';
+  modePhotoBtn.classList.toggle('active', isPhoto);
+  modeVideoBtn.classList.toggle('active', !isPhoto);
+  modePhotoBtn.setAttribute('aria-selected', String(isPhoto));
+  modeVideoBtn.setAttribute('aria-selected', String(!isPhoto));
+  screenshotBtn.hidden = !isPhoto;
+  recordBtn.hidden = isPhoto;
+
+  if (isPhoto) {
+    launcherStatus.textContent = body.dataset.editorState === 'background'
+      ? 'Another still capture will refresh the background editor window.'
+      : 'Capture a still image to open the editor in the background. The launcher stays on top in this mock.';
+  } else {
+    launcherStatus.textContent = 'Record short clips from the launcher. Image capture is what stages the editor window in this mock.';
+  }
+}
+
+function setEditorState(state) {
+  body.dataset.editorState = state;
+
+  if (state === 'idle') {
+    editorStatePill.dataset.state = 'idle';
+    editorStatePill.textContent = 'Editor parked';
+    editorStageTitle.textContent = 'Editor is parked behind the launcher';
+    editorStageText.textContent = 'Use the floating capture control to grab a screenshot. In this browser mock, the editor stays visually recessed until you choose to bring it forward.';
+    editorStageAction.textContent = 'Bring Editor Forward';
+    openEditorWindowBtn.disabled = true;
+    return;
+  }
+
+  openEditorWindowBtn.disabled = false;
+
+  if (state === 'background') {
+    editorStatePill.dataset.state = 'background';
+    editorStatePill.textContent = 'Editor opened in background';
+    editorStageTitle.textContent = 'Capture loaded into the background editor';
+    editorStageText.textContent = 'The screenshot is staged and ready for markup. Stay in the launcher workflow or bring the editor forward when you want to annotate.';
+    editorStageAction.textContent = 'Bring Editor Forward';
+    launcherStatus.textContent = 'Screenshot captured. The editor mock has opened in the background.';
+    return;
+  }
+
+  editorStatePill.dataset.state = 'active';
+  editorStatePill.textContent = 'Editor in front';
+  launcherStatus.textContent = captureMode === 'photo'
+    ? 'The editor is active. Capture again from the launcher whenever you want a new still.'
+    : 'The editor is active. Switch back to Photo mode when you want to stage a new image.';
+}
+
+setCaptureMode('photo');
+setEditorState('idle');
 
 /* ─── Keyboard shortcuts ─── */
 document.addEventListener('keydown', e => {
