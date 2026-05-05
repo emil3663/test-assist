@@ -2,11 +2,10 @@
 
 from __future__ import annotations
 
-from PySide6.QtCore import QPoint, Qt, QTimer, Signal
-from PySide6.QtGui import QBrush, QColor, QPainter, QPen, QPixmap
+from PySide6.QtCore import QPoint, QSize, Qt, QTimer
+from PySide6.QtGui import QBrush, QColor, QIcon, QPainter, QPen, QPixmap, QPolygonF
 from PySide6.QtWidgets import (
     QApplication,
-    QFrame,
     QHBoxLayout,
     QLabel,
     QPushButton,
@@ -44,7 +43,7 @@ class FloatingLauncher(QWidget):
             | Qt.WindowType.Tool
         )
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
-        self.setFixedWidth(310)
+        self.setFixedWidth(280)
 
         # Screenshot overlay (shared, reused across captures)
         self._overlay = ScreenshotOverlay()
@@ -70,80 +69,95 @@ class FloatingLauncher(QWidget):
     def _build_ui(self) -> None:
         outer = QVBoxLayout(self)
         outer.setContentsMargins(14, 14, 14, 14)
-        outer.setSpacing(10)
+        outer.setSpacing(8)
 
         # Grip handle
         grip = QLabel()
-        grip.setFixedHeight(5)
-        grip.setStyleSheet("""
-            QLabel {
-                background-color: rgba(255,255,255,0.12);
-                border-radius: 3px;
-                margin: 0px 90px;
-            }
-        """)
+        grip.setFixedHeight(4)
+        grip.setStyleSheet(
+            "QLabel { background-color: rgba(200,120,60,0.25); border-radius: 2px;"
+            " margin: 0px 70px; }"
+        )
         outer.addWidget(grip, alignment=Qt.AlignmentFlag.AlignHCenter)
 
-        # Header
-        kicker = QLabel("Floating Control")
-        kicker.setStyleSheet(
-            "color:#9aa3ff; font-size:10px; letter-spacing:2px;"
-            " font-weight:700; background:transparent;"
-        )
-        title = QLabel("Quick Capture")
+        # Header row: title + dock + close
+        header_row = QHBoxLayout()
+        header_row.setContentsMargins(0, 0, 0, 0)
+        header_row.setSpacing(6)
+
+        title = QLabel("Test Assist")
         title.setStyleSheet(
-            "color:#e0e6f0; font-size:16px; font-weight:700; background:transparent;"
+            "color:#f0d0a0; font-size:14px; font-weight:700;"
+            " background:transparent; letter-spacing:1px;"
         )
-        outer.addWidget(kicker)
-        outer.addWidget(title)
+        header_row.addWidget(title, 1)
 
-        # Mode toggle
-        toggle_frame = QFrame()
-        toggle_frame.setStyleSheet("""
-            QFrame {
-                background-color: rgba(255,255,255,0.04);
-                border-radius: 12px;
-                border: none;
-            }
-        """)
-        toggle_row = QHBoxLayout(toggle_frame)
-        toggle_row.setContentsMargins(6, 6, 6, 6)
-        toggle_row.setSpacing(6)
+        self._btn_dock_right = QPushButton()
+        self._btn_dock_right.setFixedSize(26, 26)
+        self._btn_dock_right.setIcon(self._make_dock_icon())
+        self._btn_dock_right.setIconSize(QSize(14, 14))
+        self._btn_dock_right.setToolTip("Dock to right side")
+        self._btn_dock_right.setStyleSheet(self._style_icon_btn())
 
-        self._btn_photo = QPushButton("📷  Photo")
-        self._btn_video = QPushButton("🎥  Video")
-        for btn in (self._btn_photo, self._btn_video):
-            btn.setFixedHeight(34)
-        toggle_row.addWidget(self._btn_photo)
-        toggle_row.addWidget(self._btn_video)
-        outer.addWidget(toggle_frame)
-
-        # Primary action row
-        self._btn_capture = QPushButton("📷  Quick Capture")
-        self._btn_capture.setFixedHeight(38)
-        self._btn_capture.setStyleSheet(self._style_primary())
-
-        self._btn_record = QPushButton("⏺  Start Recording")
-        self._btn_record.setFixedHeight(38)
-        self._btn_record.setStyleSheet(self._style_danger())
-
-        self._btn_open_editor = QPushButton("Open Editor")
-        self._btn_open_editor.setFixedHeight(38)
-        self._btn_open_editor.setStyleSheet(self._style_outline())
+        self._btn_open_editor = QPushButton()
+        self._btn_open_editor.setFixedSize(26, 26)
+        self._btn_open_editor.setIcon(self._make_pencil_icon())
+        self._btn_open_editor.setIconSize(QSize(14, 14))
+        self._btn_open_editor.setToolTip("Open Editor")
+        self._btn_open_editor.setStyleSheet(self._style_icon_btn())
         self._btn_open_editor.setEnabled(False)
 
+        self._btn_close = QPushButton()
+        self._btn_close.setFixedSize(26, 26)
+        self._btn_close.setIcon(self._make_close_icon())
+        self._btn_close.setIconSize(QSize(12, 12))
+        self._btn_close.setToolTip("Close Test Assist")
+        self._btn_close.setStyleSheet(self._style_icon_btn())
+
+        header_row.addWidget(self._btn_open_editor)
+        header_row.addWidget(self._btn_dock_right)
+        header_row.addWidget(self._btn_close)
+        outer.addLayout(header_row)
+
+        # Action row: [Quick Capture] [📷] [🎥]
         action_row = QHBoxLayout()
-        action_row.setSpacing(8)
-        action_row.addWidget(self._btn_capture,     6)
-        action_row.addWidget(self._btn_record,      6)
-        action_row.addWidget(self._btn_open_editor, 4)
+        action_row.setSpacing(6)
+
+        self._btn_capture = QPushButton("Quick Capture")
+        self._btn_capture.setFixedHeight(36)
+        self._btn_capture.setStyleSheet(self._style_primary())
+
+        self._btn_photo = QPushButton()
+        self._btn_photo.setFixedSize(36, 36)
+        self._btn_photo.setCheckable(True)
+        self._btn_photo.setChecked(True)
+        self._btn_photo.setToolTip("Photo mode — capture screenshot (Alt+P)")
+        self._btn_photo.setStyleSheet(self._style_mode_icon(active=True))
+
+        self._btn_video = QPushButton()
+        self._btn_video.setFixedSize(36, 36)
+        self._btn_video.setCheckable(True)
+        self._btn_video.setToolTip("Video mode — record screen (Alt+V)")
+        self._btn_video.setStyleSheet(self._style_mode_icon(active=False))
+
+        self._refresh_mode_icons()
+
+        action_row.addWidget(self._btn_capture, 1)
+        action_row.addWidget(self._btn_photo)
+        action_row.addWidget(self._btn_video)
         outer.addLayout(action_row)
+
+        # Shortcut hint line below action row
+        hint = QLabel("Alt+P · capture   ·   Alt+V · record")
+        hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        hint.setStyleSheet("color:#7a6050; font-size:10px; background:transparent;")
+        outer.addWidget(hint)
 
         # Recording timer (hidden until recording starts)
         self._rec_label = QLabel()
         self._rec_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._rec_label.setStyleSheet(
-            "color:#e94560; font-size:12px; font-weight:700; background:transparent;"
+            "color:#c04040; font-size:12px; font-weight:700; background:transparent;"
         )
         self._rec_label.hide()
         outer.addWidget(self._rec_label)
@@ -151,39 +165,49 @@ class FloatingLauncher(QWidget):
         # Status text
         self._status_lbl = QLabel()
         self._status_lbl.setWordWrap(True)
-        self._status_lbl.setStyleSheet(
-            "color:#aab0c2; font-size:11px; background:transparent; line-height:1.5;"
-        )
-        outer.addWidget(self._status_lbl)
+        self._status_lbl.hide()
 
         # Wire signals
         self._btn_photo.clicked.connect(lambda: self._set_mode("photo"))
         self._btn_video.clicked.connect(lambda: self._set_mode("video"))
-        self._btn_capture.clicked.connect(self._start_capture)
-        self._btn_record.clicked.connect(self._toggle_recording)
+        self._btn_capture.clicked.connect(self._on_action_click)
         self._btn_open_editor.clicked.connect(self._editor.bring_forward)
+        self._btn_dock_right.clicked.connect(self._dock_right)
+        self._btn_close.clicked.connect(self._close_launcher)
+
+    # ── Action dispatch ───────────────────────────────────────────────────────
+
+    def _on_action_click(self) -> None:
+        """Single action button dispatches to photo capture or video toggle."""
+        if self._mode == "photo":
+            self._start_capture()
+        else:
+            self._toggle_recording()
 
     # ── Mode management ───────────────────────────────────────────────────────
 
     def _set_mode(self, mode: str) -> None:
         self._mode = mode
-        is_photo   = mode == "photo"
+        is_photo = mode == "photo"
 
-        self._btn_photo.setStyleSheet(self._style_mode_btn(active=is_photo))
-        self._btn_video.setStyleSheet(self._style_mode_btn(active=not is_photo))
-        self._btn_capture.setVisible(is_photo)
-        self._btn_record.setVisible(not is_photo)
+        self._btn_photo.setChecked(is_photo)
+        self._btn_video.setChecked(not is_photo)
+        self._btn_photo.setStyleSheet(self._style_mode_icon(active=is_photo))
+        self._btn_video.setStyleSheet(self._style_mode_icon(active=not is_photo))
+        self._refresh_mode_icons()
 
         if is_photo:
+            self._btn_capture.setText("Quick Capture")
+            self._btn_capture.setStyleSheet(self._style_primary())
             self._status_lbl.setText(
-                "Drag to select a region after clicking Quick Capture. "
-                "The editor opens in the background after capture."
+                "Drag to select a region after clicking Quick Capture."
             )
         else:
-            self._status_lbl.setText(
-                "Start a full-screen recording. "
-                "Stop when done — the file is saved to your home folder."
-            )
+            # Don't overwrite "■ Stop Recording" if recording is in progress
+            if not self._rec_timer.isActive():
+                self._btn_capture.setText("⏺  Start Recording")
+                self._btn_capture.setStyleSheet(self._style_danger())
+            self._status_lbl.setText("Click to start a full-screen recording.")
 
         self.adjustSize()
 
@@ -198,10 +222,6 @@ class FloatingLauncher(QWidget):
         self.show()
         self._editor.load_pixmap(pixmap, background=True)
         self._btn_open_editor.setEnabled(True)
-        self._status_lbl.setText(
-            "Screenshot captured. Editor opened in the background — "
-            "click 'Open Editor' whenever you're ready to annotate."
-        )
 
     def _on_capture_cancelled(self) -> None:
         self.show()
@@ -219,18 +239,20 @@ class FloatingLauncher(QWidget):
         self._recorder.start()
         self._rec_seconds = 0
         self._rec_timer.start(1000)
-        self._btn_record.setText("■  Stop Recording")
+        self._btn_capture.setText("■  Stop Recording")
+        self._btn_capture.setStyleSheet(self._style_danger())
         self._rec_label.setText("⏺  00:00")
         self._rec_label.show()
         self._status_lbl.setText(
-            "Recording in progress — click 'Stop Recording' to finish and save."
+            "Recording in progress — click to stop and save."
         )
 
     def _stop_recording(self) -> None:
         self._rec_timer.stop()
         self._rec_label.hide()
         self._recorder.stop()
-        self._btn_record.setText("⏺  Start Recording")
+        self._btn_capture.setText("⏺  Start Recording")
+        self._btn_capture.setStyleSheet(self._style_danger())
         self._status_lbl.setText("Recording stopped. Saving file…")
 
     def _tick(self) -> None:
@@ -243,6 +265,22 @@ class FloatingLauncher(QWidget):
             self._status_lbl.setText(f"Saved: {path}")
         else:
             self._status_lbl.setText("Nothing was recorded.")
+
+    def _refresh_mode_icons(self) -> None:
+        """Repaint camera/video glyphs with active vs inactive colors."""
+        active = "#f0d0a0"
+        inactive = "#9b7a64"
+        self._btn_photo.setIcon(
+            self._make_camera_icon(active if self._mode == "photo" else inactive)
+        )
+        self._btn_video.setIcon(
+            self._make_video_icon(active if self._mode == "video" else inactive)
+        )
+        self._btn_photo.setIconSize(QSize(18, 18))
+        self._btn_video.setIconSize(QSize(18, 18))
+
+    def _close_launcher(self) -> None:
+        QApplication.instance().quit()
 
     # ── Drag-to-move ──────────────────────────────────────────────────────────
 
@@ -278,13 +316,26 @@ class FloatingLauncher(QWidget):
         act.triggered.connect(QApplication.instance().quit)
         menu.exec(event.globalPos())
 
+    def keyPressEvent(self, event) -> None:
+        key = event.key()
+        mods = event.modifiers()
+        if mods == Qt.KeyboardModifier.AltModifier and key == Qt.Key.Key_P:
+            self._set_mode("photo")
+            self._start_capture()
+            return
+        if mods == Qt.KeyboardModifier.AltModifier and key == Qt.Key.Key_V:
+            self._set_mode("video")
+            self._toggle_recording()
+            return
+        super().keyPressEvent(event)
+
     # ── Custom background paint ────────────────────────────────────────────────
 
     def paintEvent(self, _event) -> None:
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
-        p.setPen(QPen(QColor(124, 131, 253, 75), 1))
-        p.setBrush(QBrush(QColor(16, 17, 35, 238)))
+        p.setPen(QPen(QColor(200, 120, 60, 80), 1))
+        p.setBrush(QBrush(QColor(18, 12, 8, 242)))
         p.drawRoundedRect(self.rect().adjusted(1, 1, -1, -1), 20, 20)
         p.end()
 
@@ -295,36 +346,42 @@ class FloatingLauncher(QWidget):
         self.adjustSize()
         self.move(geom.right() - self.width() - 20, geom.top() + 20)
 
+    def _dock_right(self) -> None:
+        geom = QApplication.primaryScreen().availableGeometry()
+        self.adjustSize()
+        y = geom.top() + max(20, (geom.height() - self.height()) // 2)
+        self.move(geom.right() - self.width() - 20, y)
+
     # ── Button stylesheets ────────────────────────────────────────────────────
 
     @staticmethod
     def _style_primary() -> str:
         return """
             QPushButton {
-                background-color: #7c83fd;
-                color: #ffffff;
+                background-color: #c8763a;
+                color: #fff8f0;
                 border: none;
                 border-radius: 10px;
                 font-weight: 700;
                 font-size: 13px;
             }
-            QPushButton:hover   { background-color: #9098fe; }
-            QPushButton:pressed { background-color: #6870e8; }
+            QPushButton:hover   { background-color: #d88848; }
+            QPushButton:pressed { background-color: #a86030; }
         """
 
     @staticmethod
     def _style_danger() -> str:
         return """
             QPushButton {
-                background-color: #e94560;
+                background-color: #c04040;
                 color: #ffffff;
                 border: none;
                 border-radius: 10px;
                 font-weight: 700;
                 font-size: 13px;
             }
-            QPushButton:hover   { background-color: #f0607a; }
-            QPushButton:pressed { background-color: #d03050; }
+            QPushButton:hover   { background-color: #d05050; }
+            QPushButton:pressed { background-color: #a03030; }
         """
 
     @staticmethod
@@ -332,40 +389,128 @@ class FloatingLauncher(QWidget):
         return """
             QPushButton {
                 background-color: transparent;
-                color: #a0a8d8;
-                border: 1px solid #3a3a5e;
+                color: #b09070;
+                border: 1px solid rgba(200,120,60,0.3);
                 border-radius: 10px;
                 font-weight: 600;
-                font-size: 12px;
+                font-size: 13px;
             }
-            QPushButton:hover    { border-color: #7c83fd; color: #7c83fd; }
-            QPushButton:disabled { color: #3a3a5e; border-color: #2a2a4e; }
+            QPushButton:hover    { border-color: #c8763a; color: #f0b880; }
+            QPushButton:disabled { color: #5a4030; border-color: rgba(200,120,60,0.1); }
         """
 
     @staticmethod
-    def _style_mode_btn(active: bool) -> str:
+    def _style_icon_btn() -> str:
+        """Small icon button (dock / close) in muted orange."""
+        return """
+            QPushButton {
+                background-color: rgba(200,120,60,0.08);
+                color: #c8906a;
+                border: 1px solid rgba(200,120,60,0.25);
+                border-radius: 6px;
+                font-size: 11px;
+                font-weight: 600;
+            }
+            QPushButton:hover {
+                background-color: rgba(200,120,60,0.18);
+                color: #f0b880;
+                border-color: rgba(200,120,60,0.5);
+            }
+            QPushButton:pressed { background-color: rgba(200,120,60,0.30); }
+        """
+
+    @staticmethod
+    def _style_mode_icon(active: bool) -> str:
         if active:
             return """
                 QPushButton {
-                    background-color: rgba(124,131,253,0.16);
-                    color: #eef0ff;
-                    border: 1px solid rgba(124,131,253,0.5);
+                    background-color: rgba(200,120,60,0.22);
+                    border: 1px solid rgba(200,120,60,0.65);
                     border-radius: 8px;
-                    font-weight: 700;
-                    font-size: 12px;
                 }
+                QPushButton:hover { background-color: rgba(200,120,60,0.32); }
             """
         return """
             QPushButton {
                 background-color: transparent;
-                color: #8892a4;
-                border: 1px solid transparent;
+                border: 1px solid rgba(200,120,60,0.18);
                 border-radius: 8px;
-                font-weight: 600;
-                font-size: 12px;
             }
             QPushButton:hover {
-                color: #ccd0f0;
-                background-color: rgba(255,255,255,0.06);
+                background-color: rgba(200,120,60,0.10);
             }
         """
+
+    @staticmethod
+    def _make_close_icon(color: str = "#f8d3ad") -> QIcon:
+        pix = QPixmap(14, 14)
+        pix.fill(Qt.GlobalColor.transparent)
+        p = QPainter(pix)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        pen = QPen(QColor(color), 1.8)
+        p.setPen(pen)
+        p.drawLine(3, 3, 11, 11)
+        p.drawLine(11, 3, 3, 11)
+        p.end()
+        return QIcon(pix)
+
+    @staticmethod
+    def _make_dock_icon(color: str = "#f8d3ad") -> QIcon:
+        pix = QPixmap(14, 14)
+        pix.fill(Qt.GlobalColor.transparent)
+        p = QPainter(pix)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        pen = QPen(QColor(color), 1.6)
+        p.setPen(pen)
+        p.drawLine(2, 2, 2, 12)
+        p.drawLine(4, 7, 11, 7)
+        p.drawLine(8, 4, 11, 7)
+        p.drawLine(8, 10, 11, 7)
+        p.end()
+        return QIcon(pix)
+
+    @staticmethod
+    def _make_pencil_icon(color: str = "#f8d3ad") -> QIcon:
+        pix = QPixmap(14, 14)
+        pix.fill(Qt.GlobalColor.transparent)
+        p = QPainter(pix)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        pen = QPen(QColor(color), 1.6)
+        p.setPen(pen)
+        p.drawLine(3, 11, 10, 4)
+        p.drawLine(9, 3, 11, 5)
+        p.drawLine(2, 12, 4, 10)
+        p.end()
+        return QIcon(pix)
+
+    @staticmethod
+    def _make_camera_icon(color: str) -> QIcon:
+        pix = QPixmap(18, 18)
+        pix.fill(Qt.GlobalColor.transparent)
+        p = QPainter(pix)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        pen = QPen(QColor(color), 1.6)
+        p.setPen(pen)
+        p.setBrush(Qt.BrushStyle.NoBrush)
+        p.drawRoundedRect(2, 5, 14, 10, 2, 2)
+        p.drawEllipse(7, 8, 4, 4)
+        p.drawLine(5, 5, 7, 3)
+        p.drawLine(7, 3, 11, 3)
+        p.drawLine(11, 3, 13, 5)
+        p.end()
+        return QIcon(pix)
+
+    @staticmethod
+    def _make_video_icon(color: str) -> QIcon:
+        pix = QPixmap(18, 18)
+        pix.fill(Qt.GlobalColor.transparent)
+        p = QPainter(pix)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        pen = QPen(QColor(color), 1.6)
+        p.setPen(pen)
+        p.setBrush(Qt.BrushStyle.NoBrush)
+        p.drawRoundedRect(2, 6, 9, 8, 1.5, 1.5)
+        tri = QPolygonF([QPoint(11, 8), QPoint(16, 6), QPoint(16, 14), QPoint(11, 12)])
+        p.drawPolygon(tri)
+        p.end()
+        return QIcon(pix)

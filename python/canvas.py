@@ -17,7 +17,7 @@ from PySide6.QtGui import (
     QPen,
     QPixmap,
 )
-from PySide6.QtWidgets import QWidget
+from PySide6.QtWidgets import QInputDialog, QWidget
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -60,6 +60,7 @@ class AnnotationCanvas(QWidget):
         self.color:        str   = "#ff3b30"
         self.stroke_size:  int   = 3
         self.fill_opacity: float = 0.30
+        self.arrow_style:  str   = "classic"
 
         # Drawing state
         self._drawing     = False
@@ -81,6 +82,9 @@ class AnnotationCanvas(QWidget):
         self._text_buffer    = ""
         self._text_width     = 100  # Width of the text box
         self._text_height    = 24   # Height of the text box
+        self._text_resize_handle: str | None = None
+        self._text_resize_start = QPointF()
+        self._text_box_start = (0.0, 0.0, 100.0, 24.0)  # x, y, width, height
         self._cursor_visible = True
         self._cursor_timer   = QTimer(self)
         self._cursor_timer.setInterval(530)
@@ -187,6 +191,44 @@ class AnnotationCanvas(QWidget):
         self.update()
         self.annotation_changed.emit()
 
+    def update_selected_style(
+        self,
+        color: str | None = None,
+        size: int | None = None,
+        opacity: float | None = None,
+        arrow_style: str | None = None,
+    ) -> None:
+        """Apply style updates to the currently selected annotation, if any."""
+        if self._selected is None or self._selected not in self._annotations:
+            return
+
+        changed = False
+        anno = self._selected
+
+        if color is not None and anno.get("type") in {
+            "highlight", "text", "circle", "arrow", "rect", "pen"
+        }:
+            anno["color"] = color
+            changed = True
+
+        if size is not None and anno.get("type") in {
+            "highlight", "text", "circle", "arrow", "rect", "pen"
+        }:
+            anno["size"] = max(1, int(size))
+            changed = True
+
+        if opacity is not None and anno.get("type") == "highlight":
+            anno["opacity"] = max(0.0, min(1.0, float(opacity)))
+            changed = True
+
+        if arrow_style is not None and anno.get("type") == "arrow":
+            anno["arrow_style"] = arrow_style
+            changed = True
+
+        if changed:
+            self.update()
+            self.annotation_changed.emit()
+
     def export_pixmap(self) -> QPixmap | None:
         """Composite the base image and all annotations into a single QPixmap."""
         if not self._pixmap:
@@ -218,6 +260,17 @@ class AnnotationCanvas(QWidget):
         self.setFocus()
 
         if self._text_editing:
+            handle = self._get_live_text_resize_handle(pos)
+            if handle:
+                self._text_resize_handle = handle
+                self._text_resize_start = pos
+                self._text_box_start = (
+                    self._text_pos.x(),
+                    self._text_pos.y(),
+                    float(self._text_width),
+                    float(self._text_height),
+                )
+                return
             self._commit_text()
 
         # You can interact with already-added annotations from any tool.
@@ -257,6 +310,45 @@ class AnnotationCanvas(QWidget):
 
     def mouseMoveEvent(self, event) -> None:
         pos = QPointF(event.position())
+
+        if self._text_editing and self._text_resize_handle:
+            dx = pos.x() - self._text_resize_start.x()
+            dy = pos.y() - self._text_resize_start.y()
+            x0, y0, w0, h0 = self._text_box_start
+            min_w = 48.0
+            min_h = 24.0
+            handle = self._text_resize_handle
+
+            new_x = x0
+            new_y = y0
+            new_w = w0
+            new_h = h0
+
+            if "l" in handle:
+                new_x = x0 + dx
+                new_w = w0 - dx
+            if "r" in handle:
+                new_w = w0 + dx
+            if "t" in handle:
+                new_y = y0 + dy
+                new_h = h0 - dy
+            if "b" in handle:
+                new_h = h0 + dy
+
+            if new_w < min_w:
+                if "l" in handle:
+                    new_x -= (min_w - new_w)
+                new_w = min_w
+            if new_h < min_h:
+                if "t" in handle:
+                    new_y -= (min_h - new_h)
+                new_h = min_h
+
+            self._text_pos = QPointF(new_x, new_y)
+            self._text_width = int(round(new_w))
+            self._text_height = int(round(new_h))
+            self.update()
+            return
 
         if self._dragging and self._selected is not None:
             dx = pos.x() - self._drag_last_pos.x()
@@ -377,6 +469,10 @@ class AnnotationCanvas(QWidget):
             self.update()
 
     def mouseReleaseEvent(self, event) -> None:
+        if self._text_editing and self._text_resize_handle:
+            self._text_resize_handle = None
+            return
+
         if self._dragging:
             self._dragging = False
             self._drag_started = False
@@ -413,26 +509,30 @@ class AnnotationCanvas(QWidget):
             "color":   self.color,
             "size":    self.stroke_size,
             "opacity": self.fill_opacity,
+            "arrow_style": self.arrow_style if self.tool == "arrow" else None,
         })
 
     def mouseDoubleClickEvent(self, event) -> None:
-        """Double-click a placed text annotation to re-edit it inline."""
+        """Double-click text to edit it in a multiline editor dialog."""
         if not self._pixmap:
             return
         pos = QPointF(event.position())
         hit = self._find_annotation(pos)
         if hit and hit.get("type") == "text":
-            # Pull it out of the committed list and re-open as inline editor
-            self._undo_stack.append(self._clone_annotations())
-            self._annotations.remove(hit)
-            self._redo_stack  = []
-            self._selected    = None
-            self._text_pos    = QPointF(hit["x1"], hit["y1"])
-            self._text_buffer = hit.get("text", "")
-            self._text_editing   = True
-            self._cursor_visible = True
-            self._cursor_timer.start()
-            self.update()
+            current = hit.get("text", "")
+            text, ok = QInputDialog.getMultiLineText(
+                self,
+                "Edit Text",
+                "Update annotation text:",
+                current,
+            )
+            if ok:
+                new_text = text.rstrip()
+                self._undo_stack.append(self._clone_annotations())
+                hit["text"] = new_text
+                self._redo_stack = []
+                self.update()
+                self.annotation_changed.emit()
 
     def keyPressEvent(self, event) -> None:
         key  = event.key()
@@ -441,10 +541,10 @@ class AnnotationCanvas(QWidget):
         # ── Text editing mode ──────────────────────────────────────────────
         if self._text_editing:
             if key in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
-                if mods & Qt.KeyboardModifier.ShiftModifier:
-                    self._text_buffer += "\n"   # Shift+Enter = newline
+                if mods & Qt.KeyboardModifier.ControlModifier:
+                    self._commit_text()          # Ctrl+Enter = commit
                 else:
-                    self._commit_text()          # Enter = commit
+                    self._text_buffer += "\n"   # Enter = newline
             elif key == Qt.Key.Key_Escape:
                 self._cancel_text()
             elif key == Qt.Key.Key_Backspace:
@@ -549,22 +649,9 @@ class AnnotationCanvas(QWidget):
             h  = a.get("height", 24)
             text = a.get("text", "")
             line_h = font_size + 2
-            
-            # Wrap text to fit within the stored width
+
             fm = QFontMetricsF(f)
-            words = text.split()
-            lines = []
-            current_line = ""
-            for word in words:
-                test_line = current_line + (" " if current_line else "") + word
-                if fm.horizontalAdvance(test_line) < w - 8:
-                    current_line = test_line
-                else:
-                    if current_line:
-                        lines.append(current_line)
-                    current_line = word
-            if current_line:
-                lines.append(current_line)
+            lines = self._wrap_text_lines(text, fm, w - 8)
             
             # Draw a light grey text box border so the annotation remains visible as a layer.
             p.setBrush(Qt.BrushStyle.NoBrush)
@@ -628,6 +715,10 @@ class AnnotationCanvas(QWidget):
 
         elif t == "arrow":
             x1, y1, x2, y2 = a["x1"], a["y1"], a["x2"], a["y2"]
+            arrow_style = a.get("arrow_style") or "classic"
+            if arrow_style == "dashed":
+                pen.setStyle(Qt.PenStyle.DashLine)
+                p.setPen(pen)
             p.drawLine(QPointF(x1, y1), QPointF(x2, y2))
             head  = max(14, a.get("size", 3) * 3)
             angle = math.atan2(y2 - y1, x2 - x1)
@@ -637,6 +728,15 @@ class AnnotationCanvas(QWidget):
                     y2 - head * math.sin(angle - sign * math.pi / 6),
                 )
                 p.drawLine(QPointF(x2, y2), tip)
+
+            if arrow_style == "double":
+                angle2 = math.atan2(y1 - y2, x1 - x2)
+                for sign in (+1, -1):
+                    tail = QPointF(
+                        x1 - head * math.cos(angle2 - sign * math.pi / 6),
+                        y1 - head * math.sin(angle2 - sign * math.pi / 6),
+                    )
+                    p.drawLine(QPointF(x1, y1), tail)
             if selected:
                 bx = (min(x1, x2), min(y1, y2), max(x1, x2), max(y1, y2))
                 self._draw_selection_rect(
@@ -684,19 +784,7 @@ class AnnotationCanvas(QWidget):
         line_h = font_size + 2
 
         # Wrap text to fit within box width
-        words = self._text_buffer.split()
-        lines = []
-        current_line = ""
-        for word in words:
-            test_line = current_line + (" " if current_line else "") + word
-            if fm.horizontalAdvance(test_line) < w - 8:
-                current_line = test_line
-            else:
-                if current_line:
-                    lines.append(current_line)
-                current_line = word
-        if current_line:
-            lines.append(current_line)
+        lines = self._wrap_text_lines(self._text_buffer, fm, w - 8)
         
         # Update height based on number of lines
         needed_height = line_h * max(1, len(lines)) + 6
@@ -757,6 +845,50 @@ class AnnotationCanvas(QWidget):
         self._cursor_timer.start()
         self.text_editing_changed.emit(True)
         self.update()
+
+    @staticmethod
+    def _wrap_text_lines(text: str, fm: QFontMetricsF, max_width: float) -> list[str]:
+        """Wrap text while preserving explicit newlines and blank lines."""
+        max_width = max(12.0, max_width)
+        if not text:
+            return [""]
+
+        lines: list[str] = []
+        for paragraph in text.split("\n"):
+            if paragraph == "":
+                lines.append("")
+                continue
+
+            words = paragraph.split(" ")
+            current = ""
+            for word in words:
+                token = word if current == "" else f" {word}"
+                candidate = f"{current}{token}" if current else word
+                if current and fm.horizontalAdvance(candidate) > max_width:
+                    lines.append(current)
+                    current = word
+                else:
+                    current = candidate
+            lines.append(current)
+        return lines if lines else [""]
+
+    def _get_live_text_resize_handle(self, pos: QPointF) -> str | None:
+        """Detect resize-handle hit while editing inline text."""
+        x0 = self._text_pos.x()
+        y0 = self._text_pos.y()
+        w = self._text_width
+        h = self._text_height
+        handle_radius = 12
+        corners = {
+            "tl": QPointF(x0 - 4, y0 - 4),
+            "tr": QPointF(x0 + w + 4, y0 - 4),
+            "bl": QPointF(x0 - 4, y0 + h + 4),
+            "br": QPointF(x0 + w + 4, y0 + h + 4),
+        }
+        for name, corner in corners.items():
+            if math.hypot(pos.x() - corner.x(), pos.y() - corner.y()) < handle_radius:
+                return name
+        return None
 
     def _commit_text(self) -> None:
         if not self._text_editing:

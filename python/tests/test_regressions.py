@@ -7,6 +7,7 @@ from PySide6.QtGui import QKeyEvent
 
 from canvas import AnnotationCanvas
 from editor import EditorWindow
+from launcher import FloatingLauncher
 
 
 @dataclass
@@ -20,6 +21,22 @@ class _MouseEventStub:
 
 def _typed_event(char: str) -> QKeyEvent:
     return QKeyEvent(QEvent.Type.KeyPress, 0, Qt.KeyboardModifier.NoModifier, char)
+
+
+def _key_event(key: Qt.Key, modifiers: Qt.KeyboardModifier = Qt.KeyboardModifier.NoModifier) -> QKeyEvent:
+    return QKeyEvent(QEvent.Type.KeyPress, key, modifiers)
+
+
+class _EditorStub:
+    def __init__(self) -> None:
+        self.bring_forward_calls = 0
+        self.loaded = []
+
+    def bring_forward(self) -> None:
+        self.bring_forward_calls += 1
+
+    def load_pixmap(self, pixmap, background: bool = True) -> None:
+        self.loaded.append((pixmap, background))
 
 
 def _canvas_with_image(qapp, blank_pixmap) -> AnnotationCanvas:
@@ -157,3 +174,62 @@ def test_layer_order_controls_change_topmost_hit_target(qapp, blank_pixmap) -> N
 
     assert canvas._selected is canvas._annotations[0]
     canvas.close()
+
+
+def test_launcher_buttons_include_shortcut_hints(qapp) -> None:
+    launcher = FloatingLauncher(_EditorStub())
+    launcher.show()
+    qapp.processEvents()
+
+    # Action button shows "Quick Capture" in photo mode
+    assert launcher._btn_capture.text() == "Quick Capture"
+    # Mode icon buttons carry Alt shortcut hints in their tooltips
+    assert "Alt+P" in launcher._btn_photo.toolTip()
+    assert "Alt+V" in launcher._btn_video.toolTip()
+    launcher.close()
+
+
+def test_launcher_can_dock_to_right_side(qapp) -> None:
+    launcher = FloatingLauncher(_EditorStub())
+    launcher.show()
+    qapp.processEvents()
+
+    launcher._dock_right()
+    qapp.processEvents()
+
+    geom = qapp.primaryScreen().availableGeometry()
+    expected_x = geom.right() - launcher.width() - 20
+    assert launcher.x() == expected_x
+    launcher.close()
+
+
+def test_launcher_video_shortcut_toggles_recording_mode(qapp) -> None:
+    launcher = FloatingLauncher(_EditorStub())
+    launcher.show()
+    qapp.processEvents()
+
+    launcher.keyPressEvent(_key_event(Qt.Key.Key_V, Qt.KeyboardModifier.AltModifier))
+
+    assert launcher._mode == "video"
+    assert launcher._rec_timer.isActive()
+    # Action button text changes to stop indicator while recording
+    assert "Stop" in launcher._btn_capture.text()
+
+    launcher.keyPressEvent(_key_event(Qt.Key.Key_V, Qt.KeyboardModifier.AltModifier))
+    assert not launcher._rec_timer.isActive()
+    launcher.close()
+
+
+def test_launcher_plain_letter_shortcuts_do_not_trigger_actions(qapp) -> None:
+    launcher = FloatingLauncher(_EditorStub())
+    launcher.show()
+    qapp.processEvents()
+
+    launcher.keyPressEvent(_key_event(Qt.Key.Key_P))
+    assert launcher._mode == "photo"
+    assert not launcher.isHidden()
+
+    launcher.keyPressEvent(_key_event(Qt.Key.Key_V))
+    assert launcher._mode == "photo"
+    assert not launcher._rec_timer.isActive()
+    launcher.close()
