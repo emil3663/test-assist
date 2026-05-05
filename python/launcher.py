@@ -359,6 +359,11 @@ class FloatingLauncher(QWidget):
     def mouseMoveEvent(self, event) -> None:
         if event.buttons() == Qt.MouseButton.LeftButton and self._drag_pos is not None:
             self.move(event.globalPosition().toPoint() - self._drag_pos)
+            # Auto-dock when dragged within 30px of the right screen edge
+            if self._float_panel.isVisible():
+                geom = QApplication.primaryScreen().availableGeometry()
+                if self.x() + self.width() >= geom.right() - 30:
+                    self._dock_right()
         super().mouseMoveEvent(event)
 
     def mouseReleaseEvent(self, event) -> None:
