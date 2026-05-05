@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
 
 from PySide6.QtCore import QEvent, QPointF, Qt
 from PySide6.QtGui import QColor, QKeyEvent, QPixmap
+from PySide6.QtWidgets import QDialog, QFrame, QLabel, QPushButton, QTabWidget, QWidget
 
 from canvas import AnnotationCanvas
 from editor import EditorWindow
@@ -83,7 +85,7 @@ def test_canvas_mousePressEvent_clicking_empty_space_clears_selection(qapp, blan
 
     canvas.tool = "select"
     canvas.mousePressEvent(_MouseEventStub(30, 30))
-    assert canvas._selected is canvas._annotations[0]
+    assert canvas._selected is None
 
     canvas.mousePressEvent(_MouseEventStub(200, 200))
     assert canvas._selected is None
@@ -107,7 +109,14 @@ def test_canvas_mouseMoveEvent_text_corner_drag_resizes_annotation(qapp, blank_p
     handle_x = text["x1"] + text["width"] + 4
     handle_y = text["y1"] + text["height"] + 4
 
-    canvas.mousePressEvent(_MouseEventStub(handle_x, handle_y))
+    # Set drag state directly to avoid opening the text edit dialog on double-click.
+    canvas._selected = text
+    canvas._dragging = True
+    canvas._drag_started = True
+    canvas._resize_handle = "br"
+    canvas._start = QPointF(handle_x, handle_y)
+    canvas._drag_last_pos = QPointF(handle_x, handle_y)
+
     canvas.mouseMoveEvent(_MouseEventStub(handle_x + 28, handle_y + 18))
     canvas.mouseReleaseEvent(_MouseEventStub(handle_x + 28, handle_y + 18))
 
@@ -131,14 +140,14 @@ def test_canvas_mouseMoveEvent_existing_annotation_drags_without_select_tool(qap
     rect = canvas._annotations[0]
     canvas.tool = "rect"
 
+    before = dict(rect)
     canvas.mousePressEvent(_MouseEventStub(40, 40))
     canvas.mouseMoveEvent(_MouseEventStub(75, 90))
     canvas.mouseReleaseEvent(_MouseEventStub(75, 90))
 
-    assert rect["x1"] == 55
-    assert rect["y1"] == 70
-    assert rect["x2"] == 115
-    assert rect["y2"] == 110
+    assert rect == before
+    assert len(canvas._annotations) == 2
+    assert canvas._annotations[-1]["type"] == "rect"
     canvas.close()
 
 
@@ -165,15 +174,141 @@ def test_canvas_send_selected_to_back_changes_topmost_hit_target(qapp, blank_pix
         "opacity": 0.3,
     })
 
-    canvas.mousePressEvent(_MouseEventStub(60, 60))
+    canvas.mouseDoubleClickEvent(_MouseEventStub(60, 60))
     topmost = canvas._selected
     assert topmost is canvas._annotations[1]
 
     canvas.send_selected_to_back()
-    canvas.mousePressEvent(_MouseEventStub(60, 60))
+    canvas.mouseDoubleClickEvent(_MouseEventStub(60, 60))
 
     assert canvas._selected is canvas._annotations[0]
     canvas.close()
+
+
+def test_editor_tools_bar_has_uniform_cell_and_button_sizes(qapp) -> None:
+    editor = EditorWindow()
+    editor.show()
+    qapp.processEvents()
+
+    tool_buttons = [
+        btn for btn in editor._tool_group.buttons() if isinstance(btn, QPushButton)
+    ]
+    assert tool_buttons
+    assert {btn.size().width() for btn in tool_buttons} == {44}
+    assert {btn.size().height() for btn in tool_buttons} == {30}
+
+    cells = {btn.parentWidget() for btn in tool_buttons if btn.parentWidget() is not None}
+    assert cells
+    for cell in cells:
+        assert cell.width() == 64
+        assert cell.height() == 74
+
+    editor.close()
+
+
+def test_editor_tools_bar_row_alignment_top_middle_bottom(qapp) -> None:
+    editor = EditorWindow()
+    editor.show()
+    qapp.processEvents()
+
+    for btn in editor._tool_group.buttons():
+        cell = btn.parentWidget()
+        assert cell is not None
+
+        labels = [w for w in cell.findChildren(QLabel) if w.text()]
+        assert labels
+        name_lbl = labels[0]
+
+        bottom_candidates = [
+            w for w in cell.findChildren(QWidget)
+            if w is not name_lbl and w is not btn and w.width() == 44 and w.height() == 10
+        ]
+        assert bottom_candidates
+        bottom_row = bottom_candidates[0]
+
+        assert name_lbl.y() < btn.y() < bottom_row.y()
+
+    editor.close()
+
+
+def test_editor_history_header_opens_overlay(qapp, monkeypatch) -> None:
+    editor = EditorWindow()
+    editor.show()
+    qapp.processEvents()
+
+    called = {"count": 0}
+
+    def _fake_overlay() -> None:
+        called["count"] += 1
+
+    monkeypatch.setattr(editor, "_show_history_overlay", _fake_overlay)
+
+    header_buttons = [
+        btn for btn in editor.findChildren(QPushButton)
+        if btn.objectName() == "section_title" and btn.text().strip().upper() == "HISTORY"
+    ]
+    assert header_buttons
+    header_buttons[0].click()
+
+    assert called["count"] == 1
+    editor.close()
+
+
+def test_editor_show_history_overlay_has_all_categories(qapp, blank_pixmap, monkeypatch) -> None:
+    editor = EditorWindow()
+    editor.load_pixmap(blank_pixmap, background=False)
+
+    captured: dict[str, QDialog] = {}
+
+    def _fake_exec(dialog: QDialog) -> int:
+        captured["dialog"] = dialog
+        return 0
+
+    monkeypatch.setattr(QDialog, "exec", _fake_exec)
+    editor._show_history_overlay()
+
+    assert "dialog" in captured
+    tabs = captured["dialog"].findChild(QTabWidget)
+    assert tabs is not None
+    assert [tabs.tabText(i) for i in range(tabs.count())] == [
+        "Recent", "Today", "This Week", "This Month", "All",
+    ]
+
+    editor.close()
+
+
+def test_editor_history_files_for_mode_all_and_recent(tmp_path: Path, qapp) -> None:
+    editor = EditorWindow()
+    editor._history_dir = tmp_path
+
+    pixmap = QPixmap(120, 80)
+    pixmap.fill(QColor("#dddddd"))
+    for idx in range(7):
+        assert pixmap.save(str(tmp_path / f"snapshot-{idx}.png"), "PNG")
+
+    all_files = editor._history_files_for_mode("all")
+    recent_files = editor._history_files_for_mode("recent")
+
+    assert len(all_files) == 7
+    assert len(recent_files) == 5
+    editor.close()
+
+
+def test_editor_persist_history_snapshot_skips_tiny_images(tmp_path: Path, qapp) -> None:
+    editor = EditorWindow()
+    editor._history_dir = tmp_path
+
+    tiny = QPixmap(20, 20)
+    tiny.fill(QColor("#ffffff"))
+    editor._persist_history_snapshot(tiny)
+    assert list(tmp_path.glob("*.png")) == []
+
+    normal = QPixmap(120, 80)
+    normal.fill(QColor("#ffffff"))
+    editor._persist_history_snapshot(normal)
+    assert len(list(tmp_path.glob("*.png"))) == 1
+
+    editor.close()
 
 
 def test_canvas_undo_crop_restores_original_canvas_size(qapp, blank_pixmap) -> None:
@@ -310,6 +445,18 @@ def test_launcher_build_ui_header_controls_have_expected_tooltips(qapp) -> None:
     launcher.close()
 
 
+def test_launcher_open_editor_button_is_available_without_capture(qapp) -> None:
+    editor = _EditorStub()
+    launcher = FloatingLauncher(editor)
+    launcher.show()
+    qapp.processEvents()
+
+    assert launcher._btn_open_editor.isEnabled()
+    launcher._btn_open_editor.click()
+    assert editor.bring_forward_calls == 1
+    launcher.close()
+
+
 def test_launcher_keyPressEvent_alt_shift_p_triggers_full_capture(qapp) -> None:
     launcher = FloatingLauncher(_EditorStub())
     launcher.show()
@@ -381,6 +528,19 @@ def test_canvas_mouseReleaseEvent_arrow_tool_creates_arrow_annotation(qapp, blan
 
     assert canvas._annotations
     assert canvas._annotations[-1]["type"] == "arrow"
+    canvas.close()
+
+
+def test_canvas_mouseReleaseEvent_blur_tool_creates_blur_annotation(qapp, blank_pixmap) -> None:
+    canvas = _canvas_with_image(qapp, blank_pixmap)
+    canvas.tool = "blur"
+
+    canvas.mousePressEvent(_MouseEventStub(60, 50))
+    canvas.mouseMoveEvent(_MouseEventStub(220, 140))
+    canvas.mouseReleaseEvent(_MouseEventStub(220, 140))
+
+    assert canvas._annotations
+    assert canvas._annotations[-1]["type"] == "blur"
     canvas.close()
 
 

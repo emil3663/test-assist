@@ -14,9 +14,11 @@ from PySide6.QtWidgets import (
     QButtonGroup,
     QComboBox,
     QColorDialog,
+    QDialog,
     QDockWidget,
     QFileDialog,
     QFrame,
+    QGridLayout,
     QHBoxLayout,
     QLabel,
     QMainWindow,
@@ -25,6 +27,7 @@ from PySide6.QtWidgets import (
     QScrollArea,
     QSizePolicy,
     QSlider,
+    QTabWidget,
     QVBoxLayout,
     QWidget,
 )
@@ -108,11 +111,11 @@ class EditorWindow(QMainWindow):
             f"QFrame#tools_bar {{ background-color: {BG_800};"
             f" border-bottom: 1px solid {LINE}; }}"
         )
-        bar.setFixedHeight(62)
+        bar.setFixedHeight(92)
 
         layout = QHBoxLayout(bar)
-        layout.setContentsMargins(12, 6, 12, 6)
-        layout.setSpacing(6)
+        layout.setContentsMargins(12, 8, 12, 8)
+        layout.setSpacing(4)
 
         self._tool_group = QButtonGroup(self)
         self._tool_group.setExclusive(True)
@@ -129,6 +132,7 @@ class EditorWindow(QMainWindow):
         _TOOLS = [
             ("select",    "🖱",  "Select (S)",       False),
             ("crop",      "✂",  "Crop (X)",          False),
+            ("blur",      "▒",  "Blur (B)",          False),
             ("text",      "T",   "Text (T)",          True),
             ("highlight", "🟡", "Highlight (H)",      True),
             ("circle",    "⭕", "Circle (C)",         True),
@@ -137,27 +141,43 @@ class EditorWindow(QMainWindow):
             ("pen",       "✏", "Pen (P)",             True),
         ]
 
+        layout.addStretch()
+
         for tool_id, icon, tip, has_color in _TOOLS:
+            short_name = tip.split(" (")[0]
             cell = QWidget()
-            cell.setFixedWidth(42)
+            cell.setFixedSize(64, 74)
             vl = QVBoxLayout(cell)
             vl.setContentsMargins(0, 0, 0, 0)
             vl.setSpacing(2)
-            vl.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignHCenter)
+
+            name_lbl = QLabel(short_name)
+            name_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            name_lbl.setFixedHeight(14)
+            name_lbl.setStyleSheet("font-size: 9px; color: #b0b0c8; background: transparent;")
+            vl.addWidget(name_lbl, 0, Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignHCenter)
+
+            vl.addStretch(1)
 
             btn = QPushButton(icon)
             btn.setCheckable(True)
-            btn.setFixedSize(38, 32)
+            btn.setFixedSize(44, 30)
             btn.setToolTip(tip)
             btn.setProperty("tool_id", tool_id)
             self._tool_group.addButton(btn)
-            vl.addWidget(btn)
+            vl.addWidget(btn, 0, Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignHCenter)
+
+            vl.addStretch(1)
 
             if has_color:
-                cbtn = _ColorButton(self._tool_colors[tool_id], size=(38, 10))
-                cbtn.setToolTip(f"Colour for {tip.split(' (')[0]}")
+                cbtn = _ColorButton(self._tool_colors[tool_id], size=(44, 10))
+                cbtn.setToolTip(f"Colour for {short_name}")
                 self._tool_color_btns[tool_id] = cbtn
-                vl.addWidget(cbtn)
+                vl.addWidget(cbtn, 0, Qt.AlignmentFlag.AlignBottom | Qt.AlignmentFlag.AlignHCenter)
+            else:
+                spacer = QWidget()
+                spacer.setFixedSize(44, 10)
+                vl.addWidget(spacer, 0, Qt.AlignmentFlag.AlignBottom | Qt.AlignmentFlag.AlignHCenter)
 
             if tool_id == "select":
                 btn.setChecked(True)
@@ -287,7 +307,8 @@ class EditorWindow(QMainWindow):
         layout.addWidget(self._separator())
 
         # ── History / Snapshots ───────────────────────────────────────────
-        self._add_section(layout, "History")
+        history_header = self._add_section(layout, "History", clickable=True)
+        history_header.clicked.connect(self._show_history_overlay)
 
         filter_row = QHBoxLayout()
         filter_row.addWidget(QLabel("Show"))
@@ -355,7 +376,7 @@ class EditorWindow(QMainWindow):
         for key, tool in [
             ("h", "highlight"), ("t", "text"), ("c", "circle"),
             ("a", "arrow"),     ("r", "rect"), ("p", "pen"),
-            ("s", "select"),    ("x", "crop"),
+            ("s", "select"),    ("x", "crop"), ("b", "blur"),
         ]:
             _tool = tool  # capture for lambda
             shortcut = QShortcut(
@@ -469,9 +490,16 @@ class EditorWindow(QMainWindow):
     def _load_history(self) -> None:
         self._history_dir = Path.home() / ".test-assist" / "history"
         self._history_dir.mkdir(parents=True, exist_ok=True)
+        # Remove blank/corrupt snapshots saved from blank canvas states (< 5 KB).
+        for stale in self._history_dir.glob("*.png"):
+            if stale.stat().st_size < 5000:
+                stale.unlink(missing_ok=True)
         self._refresh_history()
 
     def _persist_history_snapshot(self, pixmap: QPixmap) -> None:
+        # Skip saving if the image is too small to be a real capture (blank canvas states).
+        if pixmap.width() < 50 or pixmap.height() < 50:
+            return
         stamp = datetime.now().strftime("%Y%m%d-%H%M%S-%f")
         path = self._history_dir / f"snapshot-{stamp}.png"
         pixmap.save(str(path), "PNG")
@@ -484,20 +512,8 @@ class EditorWindow(QMainWindow):
             if widget is not None:
                 widget.deleteLater()
 
-        files = sorted(self._history_dir.glob("*.png"), key=lambda item: item.stat().st_mtime, reverse=True)
         mode = self._history_filter.currentData()
-        now = datetime.now()
-
-        if mode == "today":
-            files = [item for item in files if datetime.fromtimestamp(item.stat().st_mtime).date() == now.date()]
-        elif mode == "week":
-            cutoff = now - timedelta(days=7)
-            files = [item for item in files if datetime.fromtimestamp(item.stat().st_mtime) >= cutoff]
-        elif mode == "month":
-            cutoff = now - timedelta(days=30)
-            files = [item for item in files if datetime.fromtimestamp(item.stat().st_mtime) >= cutoff]
-        else:
-            files = files[:5]
+        files = self._history_files_for_mode(mode)
 
         if not files:
             empty = QLabel("No snapshots in this range")
@@ -508,8 +524,89 @@ class EditorWindow(QMainWindow):
 
         for index, path in enumerate(files, start=1):
             thumb = _SnapshotThumb(path, index)
-            thumb.load_requested.connect(self._canvas.set_pixmap)
+            thumb.load_requested.connect(self._load_history_snapshot)
             self._snap_layout.insertWidget(self._snap_layout.count() - 1, thumb)
+
+    def _history_files_for_mode(self, mode: str | None) -> list[Path]:
+        files = sorted(self._history_dir.glob("*.png"), key=lambda item: item.stat().st_mtime, reverse=True)
+        now = datetime.now()
+
+        if mode == "all":
+            return files
+        if mode == "today":
+            return [item for item in files if datetime.fromtimestamp(item.stat().st_mtime).date() == now.date()]
+        if mode == "week":
+            cutoff = now - timedelta(days=7)
+            return [item for item in files if datetime.fromtimestamp(item.stat().st_mtime) >= cutoff]
+        if mode == "month":
+            cutoff = now - timedelta(days=30)
+            return [item for item in files if datetime.fromtimestamp(item.stat().st_mtime) >= cutoff]
+        return files[:5]
+
+    def _load_history_snapshot(self, pixmap: QPixmap) -> None:
+        if pixmap.isNull():
+            return
+        self._canvas.set_pixmap(pixmap)
+        if self._fit_mode:
+            self._fit_image()
+
+    def _show_history_overlay(self) -> None:
+        dlg = QDialog(self)
+        dlg.setWindowTitle("History Gallery")
+        dlg.setModal(True)
+        dlg.resize(920, 620)
+
+        root = QVBoxLayout(dlg)
+        root.setContentsMargins(12, 12, 12, 12)
+        root.setSpacing(8)
+
+        subtitle = QLabel("Browse snapshots by category and click a thumbnail to load it in the editor.")
+        subtitle.setStyleSheet(f"color: {MUTED};")
+        root.addWidget(subtitle)
+
+        tabs = QTabWidget()
+        categories = [
+            ("Recent", "recent"),
+            ("Today", "today"),
+            ("This Week", "week"),
+            ("This Month", "month"),
+            ("All", "all"),
+        ]
+
+        for tab_name, mode in categories:
+            tab = QWidget()
+            tab_layout = QVBoxLayout(tab)
+            tab_layout.setContentsMargins(0, 0, 0, 0)
+
+            scroll = QScrollArea()
+            scroll.setWidgetResizable(True)
+            content = QWidget()
+            grid = QGridLayout(content)
+            grid.setContentsMargins(4, 4, 4, 4)
+            grid.setHorizontalSpacing(8)
+            grid.setVerticalSpacing(8)
+
+            files = self._history_files_for_mode(mode)
+            if not files:
+                empty = QLabel("No snapshots in this category")
+                empty.setAlignment(Qt.AlignmentFlag.AlignCenter)
+                empty.setStyleSheet(f"color: {MUTED}; padding: 20px;")
+                grid.addWidget(empty, 0, 0)
+            else:
+                for idx, path in enumerate(files, start=1):
+                    thumb = _SnapshotThumb(path, idx, thumb_width=250)
+                    thumb.load_requested.connect(self._load_history_snapshot)
+                    thumb.load_requested.connect(lambda _p, d=dlg: d.accept())
+                    row = (idx - 1) // 3
+                    col = (idx - 1) % 3
+                    grid.addWidget(thumb, row, col)
+
+            scroll.setWidget(content)
+            tab_layout.addWidget(scroll)
+            tabs.addTab(tab, tab_name)
+
+        root.addWidget(tabs)
+        dlg.exec()
 
     # ── Window events ─────────────────────────────────────────────────────────
 
@@ -540,10 +637,19 @@ class EditorWindow(QMainWindow):
         return line
 
     @staticmethod
-    def _add_section(layout: QVBoxLayout, text: str) -> None:
+    def _add_section(layout: QVBoxLayout, text: str, clickable: bool = False) -> QLabel | QPushButton:
+        if clickable:
+            btn = QPushButton(text.upper())
+            btn.setObjectName("section_title")
+            btn.setFlat(True)
+            btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            btn.setStyleSheet(f"text-align: left; color: {TEXT};")
+            layout.addWidget(btn)
+            return btn
         lbl = QLabel(text.upper())
         lbl.setObjectName("section_title")
         layout.addWidget(lbl)
+        return lbl
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -597,7 +703,11 @@ class _SnapshotThumb(QFrame):
     load_requested = Signal(object)  # QPixmap
 
     def __init__(
-        self, image_path: Path, index: int, parent: QWidget | None = None
+        self,
+        image_path: Path,
+        index: int,
+        parent: QWidget | None = None,
+        thumb_width: int = 168,
     ) -> None:
         super().__init__(parent)
         self._image_path = image_path
@@ -616,9 +726,12 @@ class _SnapshotThumb(QFrame):
         layout.setContentsMargins(4, 4, 4, 4)
         layout.setSpacing(2)
 
-        thumb = self._pixmap.scaledToWidth(168, Qt.TransformationMode.SmoothTransformation)
         img   = QLabel()
-        img.setPixmap(thumb)
+        if self._pixmap.isNull():
+            img.setText("Preview unavailable")
+        else:
+            thumb = self._pixmap.scaledToWidth(thumb_width, Qt.TransformationMode.SmoothTransformation)
+            img.setPixmap(thumb)
         img.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(img)
 

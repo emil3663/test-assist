@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from PySide6.QtCore import QPoint, QSize, Qt, QTimer
-from PySide6.QtGui import QBrush, QColor, QIcon, QPainter, QPen, QPixmap, QPolygonF
+from PySide6.QtGui import QBrush, QColor, QFont, QIcon, QPainter, QPen, QPixmap, QPolygonF
 from PySide6.QtWidgets import (
     QApplication,
     QHBoxLayout,
@@ -101,11 +101,11 @@ class FloatingLauncher(QWidget):
 
         self._btn_open_editor = QPushButton()
         self._btn_open_editor.setFixedSize(26, 26)
-        self._btn_open_editor.setIcon(self._make_pencil_icon())
+        self._btn_open_editor.setIcon(self._make_ta_icon())
         self._btn_open_editor.setIconSize(QSize(14, 14))
         self._btn_open_editor.setToolTip("Open Editor")
         self._btn_open_editor.setStyleSheet(self._style_icon_btn())
-        self._btn_open_editor.setEnabled(False)
+        self._btn_open_editor.setEnabled(True)
 
         self._btn_close = QPushButton()
         self._btn_close.setFixedSize(26, 26)
@@ -507,6 +507,22 @@ class FloatingLauncher(QWidget):
         p.drawLine(3, 11, 10, 4)
         p.drawLine(9, 3, 11, 5)
         p.drawLine(2, 12, 4, 10)
+        p.end()
+        return QIcon(pix)
+
+    @staticmethod
+    def _make_ta_icon() -> QIcon:
+        """Mini TA badge used for the editor-open toolbar button."""
+        pix = QPixmap(14, 14)
+        pix.fill(Qt.GlobalColor.transparent)
+        p = QPainter(pix)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        p.setPen(QPen(QColor("#d7873d"), 1))
+        p.setBrush(QColor("#d7873d"))
+        p.drawRoundedRect(1, 1, 12, 12, 3, 3)
+        p.setPen(QColor("#1f1208"))
+        p.setFont(QFont("Segoe UI", 6, QFont.Weight.Bold))
+        p.drawText(pix.rect(), Qt.AlignmentFlag.AlignCenter, "TA")
         p.end()
         return QIcon(pix)
 

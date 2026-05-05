@@ -36,6 +36,7 @@ class AnnotationCanvas(QWidget):
     circle    – ellipse
     arrow     – line with arrowhead
     rect      – outline rectangle
+    blur      – blur (pixelate) a rectangular region
     crop      – crop the canvas to a dragged rectangle
     pen       – freehand stroke
 
@@ -242,7 +243,7 @@ class AnnotationCanvas(QWidget):
             changed = True
 
         if size is not None and anno.get("type") in {
-            "highlight", "text", "circle", "arrow", "rect", "pen"
+            "highlight", "text", "circle", "arrow", "rect", "pen", "blur"
         }:
             anno["size"] = max(1, int(size))
             changed = True
@@ -312,19 +313,6 @@ class AnnotationCanvas(QWidget):
             self.update()
             return
 
-        # You can interact with already-added annotations from any tool.
-        hit = self._find_annotation(pos)
-        if hit is not None:
-            self._selected = hit
-            self._resize_handle = self._get_resize_handle(hit, pos)
-            self._dragging = True
-            self._drag_moved = False
-            self._drag_started = False
-            self._start = pos
-            self._drag_last_pos = pos
-            self.update()
-            return
-
         self._selected = None
         self._resize_handle = None
         self.update()
@@ -336,7 +324,6 @@ class AnnotationCanvas(QWidget):
             return
 
         if self.tool == "select":
-            self._selected = None
             self._dragging = False
             self.update()
             return
@@ -558,11 +545,23 @@ class AnnotationCanvas(QWidget):
         })
 
     def mouseDoubleClickEvent(self, event) -> None:
-        """Double-click text to edit it in a multiline editor dialog."""
+        """Double-click to select an annotation, or edit text annotations."""
         if not self._pixmap:
             return
         pos = self._to_canvas_pos(event.position())
         hit = self._find_annotation(pos)
+
+        # Select the hit annotation (works with any tool)
+        if hit is not None:
+            self._selected = hit
+            self._resize_handle = self._get_resize_handle(hit, pos)
+            self._dragging = True
+            self._drag_moved = False
+            self._drag_started = False
+            self._start = pos
+            self._drag_last_pos = pos
+            self.update()
+
         if hit and hit.get("type") == "text":
             current = hit.get("text", "")
             text, ok = QInputDialog.getMultiLineText(
@@ -740,7 +739,7 @@ class AnnotationCanvas(QWidget):
                 p.drawEllipse(QPointF(x0 - 4, y0 + h + 4), handle_size, handle_size)
                 p.drawEllipse(QPointF(x0 + w + 4, y0 + h + 4), handle_size, handle_size)
 
-        elif t in ("highlight", "rect"):
+        elif t in ("highlight", "rect", "blur"):
             rect = QRectF(
                 a["x1"], a["y1"],
                 a["x2"] - a["x1"], a["y2"] - a["y1"],
@@ -749,7 +748,11 @@ class AnnotationCanvas(QWidget):
                 fill = QColor(a["color"])
                 fill.setAlphaF(a.get("opacity", 0.30))
                 p.fillRect(rect, QBrush(fill))
-            p.drawRect(rect)
+                p.drawRect(rect)
+            elif t == "rect":
+                p.drawRect(rect)
+            else:
+                self._draw_blur_rect(p, rect, a.get("size", 3), selected)
             if selected:
                 self._draw_selection_rect(p, rect.adjusted(-4, -4, 4, 4))
                 # Draw corner resize handles
@@ -835,6 +838,17 @@ class AnnotationCanvas(QWidget):
         p.save()
         p.setBrush(Qt.BrushStyle.NoBrush)
         p.setPen(QPen(QColor(255, 210, 170, 220), 1.6, Qt.PenStyle.DashLine))
+        p.drawRect(rect)
+        p.restore()
+
+    def _draw_blur_rect(self, p: QPainter, rect: QRectF, strength: int, selected: bool) -> None:
+        """Draw a semi-opaque redaction overlay over the rectangle region."""
+        # strength 1-10 maps to alpha 160-255
+        alpha = min(255, 160 + (strength - 1) * 10)
+        fill = QColor(0, 0, 0, alpha)
+        p.save()
+        p.setPen(Qt.PenStyle.NoPen)
+        p.setBrush(QBrush(fill))
         p.drawRect(rect)
         p.restore()
 
@@ -1099,7 +1113,7 @@ class AnnotationCanvas(QWidget):
                 return "start"
             if math.hypot(pos.x() - x2, pos.y() - y2) < handle_radius:
                 return "end"
-        elif anno_type in ("rect", "highlight", "circle", "text"):
+        elif anno_type in ("rect", "highlight", "circle", "text", "blur"):
             # Check corner handles for rectangular shapes
             x1 = anno["x1"]
             y1 = anno["y1"]

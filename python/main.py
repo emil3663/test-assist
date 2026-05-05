@@ -72,6 +72,7 @@ def main() -> None:
     app.setOrganizationName("TestAssist")
     app.setStyle("Fusion")
     app.setStyleSheet(EDITOR_STYLE)
+    app.setWindowIcon(_make_tray_icon())
 
     # Keep the process alive even when all windows are hidden
     # (launcher is the "last" visible window and must not trigger quit).
