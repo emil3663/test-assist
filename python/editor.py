@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+from datetime import datetime, timedelta
 import json
+from pathlib import Path
 import time
 
 from PySide6.QtCore import Qt, QSize, Signal
 from PySide6.QtGui import QColor, QIcon, QKeySequence, QPixmap, QShortcut
 from PySide6.QtWidgets import (
+    QApplication,
     QButtonGroup,
     QComboBox,
     QColorDialog,
@@ -49,11 +52,13 @@ class EditorWindow(QMainWindow):
         self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating)
 
         self._canvas = AnnotationCanvas()
+        self._fit_mode = True
 
         scroll = QScrollArea()
         scroll.setWidget(self._canvas)
         scroll.setAlignment(Qt.AlignmentFlag.AlignCenter)
         scroll.setWidgetResizable(False)
+        self._scroll = scroll
 
         # Central widget: tools bar at top + canvas below
         central = QWidget()
@@ -67,6 +72,7 @@ class EditorWindow(QMainWindow):
         self._build_right_dock()
         self._connect_signals()
         self._register_shortcuts()
+        self._load_history()
 
     # ── Public API ───────────────────────────────────────────────────────────
 
@@ -78,6 +84,8 @@ class EditorWindow(QMainWindow):
         background=False → show and activate (editor comes to the front).
         """
         self._canvas.set_pixmap(pixmap)
+        if self._fit_mode:
+            self._fit_image()
         self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating, background)
         self.show()
         if not background:
@@ -120,6 +128,7 @@ class EditorWindow(QMainWindow):
 
         _TOOLS = [
             ("select",    "🖱",  "Select (S)",       False),
+            ("crop",      "✂",  "Crop (X)",          False),
             ("text",      "T",   "Text (T)",          True),
             ("highlight", "🟡", "Highlight (H)",      True),
             ("circle",    "⭕", "Circle (C)",         True),
@@ -199,6 +208,28 @@ class EditorWindow(QMainWindow):
 
         layout.addWidget(self._separator())
 
+        zoom_row = QHBoxLayout()
+        zoom_row.addWidget(QLabel("Zoom"))
+        self._btn_zoom_out = QPushButton("-")
+        self._btn_zoom_out.setFixedSize(24, 24)
+        self._btn_zoom_in = QPushButton("+")
+        self._btn_zoom_in.setFixedSize(24, 24)
+        self._zoom_slider = QSlider(Qt.Orientation.Horizontal)
+        self._zoom_slider.setRange(25, 300)
+        self._zoom_slider.setValue(100)
+        self._zoom_pct = QLabel("100 %")
+        self._zoom_pct.setFixedWidth(48)
+        self._btn_fit = QPushButton("Fit")
+        self._btn_fit.setFixedHeight(24)
+        zoom_row.addWidget(self._btn_zoom_out)
+        zoom_row.addWidget(self._zoom_slider, 1)
+        zoom_row.addWidget(self._btn_zoom_in)
+        zoom_row.addWidget(self._zoom_pct)
+        zoom_row.addWidget(self._btn_fit)
+        layout.addLayout(zoom_row)
+
+        layout.addWidget(self._separator())
+
         # ── Stroke size ───────────────────────────────────────────────────
         size_row = QHBoxLayout()
         size_row.addWidget(QLabel("Stroke"))
@@ -244,6 +275,11 @@ class EditorWindow(QMainWindow):
         self._btn_save_png.setFixedHeight(34)
         layout.addWidget(self._btn_save_png)
 
+        self._btn_copy = QPushButton("⧉  Copy")
+        self._btn_copy.setFixedHeight(30)
+        self._btn_copy.setToolTip("Copy annotated image to clipboard")
+        layout.addWidget(self._btn_copy)
+
         self._btn_export_json = QPushButton("📋  Export JSON")
         self._btn_export_json.setFixedHeight(30)
         layout.addWidget(self._btn_export_json)
@@ -252,6 +288,16 @@ class EditorWindow(QMainWindow):
 
         # ── History / Snapshots ───────────────────────────────────────────
         self._add_section(layout, "History")
+
+        filter_row = QHBoxLayout()
+        filter_row.addWidget(QLabel("Show"))
+        self._history_filter = QComboBox()
+        self._history_filter.addItem("Recent 5", "recent")
+        self._history_filter.addItem("Today", "today")
+        self._history_filter.addItem("This Week", "week")
+        self._history_filter.addItem("This Month", "month")
+        filter_row.addWidget(self._history_filter, 1)
+        layout.addLayout(filter_row)
 
         snap_scroll = QScrollArea()
         snap_scroll.setWidgetResizable(True)
@@ -280,6 +326,11 @@ class EditorWindow(QMainWindow):
                 lambda c, t=tool_id: self._on_tool_color_changed(t, c)
             )
 
+        self._history_filter.currentIndexChanged.connect(self._refresh_history)
+        self._btn_zoom_out.clicked.connect(lambda: self._set_zoom_percent(self._zoom_slider.value() - 10))
+        self._btn_zoom_in.clicked.connect(lambda: self._set_zoom_percent(self._zoom_slider.value() + 10))
+        self._zoom_slider.valueChanged.connect(self._on_zoom_slider_changed)
+        self._btn_fit.clicked.connect(self._fit_image)
         self._size_slider.valueChanged.connect(self._on_size_changed)
         self._arrow_style_combo.currentIndexChanged.connect(self._on_arrow_style_changed)
         self._opacity_slider.valueChanged.connect(self._on_opacity_changed)
@@ -291,6 +342,7 @@ class EditorWindow(QMainWindow):
         self._btn_back.clicked.connect(self._canvas.send_selected_backward)
         self._btn_backmost.clicked.connect(self._canvas.send_selected_to_back)
         self._btn_save_png.clicked.connect(self._save_png)
+        self._btn_copy.clicked.connect(self._copy_to_clipboard)
         self._btn_export_json.clicked.connect(self._export_json)
 
     def _register_shortcuts(self) -> None:
@@ -302,7 +354,8 @@ class EditorWindow(QMainWindow):
         self._tool_shortcuts = []
         for key, tool in [
             ("h", "highlight"), ("t", "text"), ("c", "circle"),
-            ("a", "arrow"),     ("r", "rect"), ("p", "pen"), ("s", "select"),
+            ("a", "arrow"),     ("r", "rect"), ("p", "pen"),
+            ("s", "select"),    ("x", "crop"),
         ]:
             _tool = tool  # capture for lambda
             shortcut = QShortcut(
@@ -344,6 +397,23 @@ class EditorWindow(QMainWindow):
         self._size_lbl.setText(f"{value} px")
         self._canvas.update_selected_style(size=value)
 
+    def _on_zoom_slider_changed(self, value: int) -> None:
+        self._fit_mode = False
+        self._canvas.set_zoom(value / 100.0)
+        self._zoom_pct.setText(f"{value} %")
+
+    def _set_zoom_percent(self, value: int) -> None:
+        self._zoom_slider.setValue(max(25, min(300, value)))
+
+    def _fit_image(self) -> None:
+        self._fit_mode = True
+        self._canvas.fit_to_size(self._scroll.viewport().size())
+        pct = int(round(self._canvas.zoom() * 100))
+        self._zoom_slider.blockSignals(True)
+        self._zoom_slider.setValue(max(25, min(300, pct)))
+        self._zoom_slider.blockSignals(False)
+        self._zoom_pct.setText(f"{self._zoom_slider.value()} %")
+
     def _on_arrow_style_changed(self, _index: int) -> None:
         style = self._arrow_style_combo.currentData()
         if not style:
@@ -376,7 +446,14 @@ class EditorWindow(QMainWindow):
         path, _ = QFileDialog.getSaveFileName(self, "Save PNG", default, "PNG (*.png)")
         if path:
             pixmap.save(path, "PNG")
-            self._add_snapshot(pixmap)
+            self._persist_history_snapshot(pixmap)
+
+    def _copy_to_clipboard(self) -> None:
+        pixmap = self._canvas.export_pixmap()
+        if not pixmap:
+            return
+        QApplication.clipboard().setPixmap(pixmap)
+        self._persist_history_snapshot(pixmap)
 
     def _export_json(self) -> None:
         data = {
@@ -389,11 +466,50 @@ class EditorWindow(QMainWindow):
             with open(path, "w", encoding="utf-8") as fh:
                 json.dump(data, fh, indent=2)
 
-    def _add_snapshot(self, pixmap: QPixmap) -> None:
-        index = self._snap_layout.count()  # stretch counts as 1
-        thumb = _SnapshotThumb(pixmap, index)
-        thumb.load_requested.connect(self._canvas.set_pixmap)
-        self._snap_layout.insertWidget(0, thumb)
+    def _load_history(self) -> None:
+        self._history_dir = Path.home() / ".test-assist" / "history"
+        self._history_dir.mkdir(parents=True, exist_ok=True)
+        self._refresh_history()
+
+    def _persist_history_snapshot(self, pixmap: QPixmap) -> None:
+        stamp = datetime.now().strftime("%Y%m%d-%H%M%S-%f")
+        path = self._history_dir / f"snapshot-{stamp}.png"
+        pixmap.save(str(path), "PNG")
+        self._refresh_history()
+
+    def _refresh_history(self, _index: int | None = None) -> None:
+        while self._snap_layout.count() > 1:
+            item = self._snap_layout.takeAt(0)
+            widget = item.widget()
+            if widget is not None:
+                widget.deleteLater()
+
+        files = sorted(self._history_dir.glob("*.png"), key=lambda item: item.stat().st_mtime, reverse=True)
+        mode = self._history_filter.currentData()
+        now = datetime.now()
+
+        if mode == "today":
+            files = [item for item in files if datetime.fromtimestamp(item.stat().st_mtime).date() == now.date()]
+        elif mode == "week":
+            cutoff = now - timedelta(days=7)
+            files = [item for item in files if datetime.fromtimestamp(item.stat().st_mtime) >= cutoff]
+        elif mode == "month":
+            cutoff = now - timedelta(days=30)
+            files = [item for item in files if datetime.fromtimestamp(item.stat().st_mtime) >= cutoff]
+        else:
+            files = files[:5]
+
+        if not files:
+            empty = QLabel("No snapshots in this range")
+            empty.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            empty.setStyleSheet(f"color: {MUTED}; padding: 8px;")
+            self._snap_layout.insertWidget(0, empty)
+            return
+
+        for index, path in enumerate(files, start=1):
+            thumb = _SnapshotThumb(path, index)
+            thumb.load_requested.connect(self._canvas.set_pixmap)
+            self._snap_layout.insertWidget(self._snap_layout.count() - 1, thumb)
 
     # ── Window events ─────────────────────────────────────────────────────────
 
@@ -408,6 +524,11 @@ class EditorWindow(QMainWindow):
             self._canvas.keyPressEvent(event)
             return
         super().keyPressEvent(event)
+
+    def resizeEvent(self, event) -> None:
+        super().resizeEvent(event)
+        if self._fit_mode:
+            self._fit_image()
 
     # ── Helpers ───────────────────────────────────────────────────────────────
 
@@ -476,12 +597,13 @@ class _SnapshotThumb(QFrame):
     load_requested = Signal(object)  # QPixmap
 
     def __init__(
-        self, pixmap: QPixmap, index: int, parent: QWidget | None = None
+        self, image_path: Path, index: int, parent: QWidget | None = None
     ) -> None:
         super().__init__(parent)
-        self._pixmap = pixmap
+        self._image_path = image_path
+        self._pixmap = QPixmap(str(image_path))
         self.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.setToolTip("Click to reload this snapshot")
+        self.setToolTip(f"Click to reload this snapshot\n{image_path.name}")
         self.setStyleSheet("""
             QFrame {
                 border: 1px solid #2a2a4e;
@@ -494,13 +616,14 @@ class _SnapshotThumb(QFrame):
         layout.setContentsMargins(4, 4, 4, 4)
         layout.setSpacing(2)
 
-        thumb = pixmap.scaledToWidth(168, Qt.TransformationMode.SmoothTransformation)
+        thumb = self._pixmap.scaledToWidth(168, Qt.TransformationMode.SmoothTransformation)
         img   = QLabel()
         img.setPixmap(thumb)
         img.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(img)
 
-        lbl = QLabel(f"Snap {index}")
+        stamp = datetime.fromtimestamp(image_path.stat().st_mtime).strftime("%d %b %H:%M")
+        lbl = QLabel(f"Snap {index} · {stamp}")
         lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(lbl)
 

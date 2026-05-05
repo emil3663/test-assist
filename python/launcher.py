@@ -140,9 +140,19 @@ class FloatingLauncher(QWidget):
         self._btn_video.setToolTip("Video mode — record screen (Alt+V)")
         self._btn_video.setStyleSheet(self._style_mode_icon(active=False))
 
+        self._btn_full_capture = QPushButton()
+        self._btn_full_capture.setFixedSize(36, 36)
+        self._btn_full_capture.setIcon(self._make_screen_icon("#b88d6f"))
+        self._btn_full_capture.setIconSize(QSize(18, 18))
+        self._btn_full_capture.setToolTip(
+            "Capture full primary screen including taskbar/time (Alt+Shift+P)"
+        )
+        self._btn_full_capture.setStyleSheet(self._style_mode_icon(active=False))
+
         self._refresh_mode_icons()
 
         action_row.addWidget(self._btn_capture, 1)
+        action_row.addWidget(self._btn_full_capture)
         action_row.addWidget(self._btn_photo)
         action_row.addWidget(self._btn_video)
         outer.addLayout(action_row)
@@ -171,6 +181,7 @@ class FloatingLauncher(QWidget):
         self._btn_photo.clicked.connect(lambda: self._set_mode("photo"))
         self._btn_video.clicked.connect(lambda: self._set_mode("video"))
         self._btn_capture.clicked.connect(self._on_action_click)
+        self._btn_full_capture.clicked.connect(self._start_full_capture)
         self._btn_open_editor.clicked.connect(self._editor.bring_forward)
         self._btn_dock_right.clicked.connect(self._dock_right)
         self._btn_close.clicked.connect(self._close_launcher)
@@ -217,6 +228,15 @@ class FloatingLauncher(QWidget):
         self.hide()
         # Give the OS time to repaint the screen without this window.
         QTimer.singleShot(220, self._overlay.activate)
+
+    def _start_full_capture(self) -> None:
+        """Capture the full primary desktop, including taskbar and clock."""
+        self.hide()
+        QTimer.singleShot(220, self._grab_full_capture)
+
+    def _grab_full_capture(self) -> None:
+        pixmap = QApplication.primaryScreen().grabWindow(0)
+        self._on_capture_ready(pixmap)
 
     def _on_capture_ready(self, pixmap: QPixmap) -> None:
         self.show()
@@ -322,6 +342,13 @@ class FloatingLauncher(QWidget):
         if mods == Qt.KeyboardModifier.AltModifier and key == Qt.Key.Key_P:
             self._set_mode("photo")
             self._start_capture()
+            return
+        if (
+            mods
+            == (Qt.KeyboardModifier.AltModifier | Qt.KeyboardModifier.ShiftModifier)
+            and key == Qt.Key.Key_P
+        ):
+            self._start_full_capture()
             return
         if mods == Qt.KeyboardModifier.AltModifier and key == Qt.Key.Key_V:
             self._set_mode("video")
@@ -512,5 +539,20 @@ class FloatingLauncher(QWidget):
         p.drawRoundedRect(2, 6, 9, 8, 1.5, 1.5)
         tri = QPolygonF([QPoint(11, 8), QPoint(16, 6), QPoint(16, 14), QPoint(11, 12)])
         p.drawPolygon(tri)
+        p.end()
+        return QIcon(pix)
+
+    @staticmethod
+    def _make_screen_icon(color: str) -> QIcon:
+        pix = QPixmap(18, 18)
+        pix.fill(Qt.GlobalColor.transparent)
+        p = QPainter(pix)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        pen = QPen(QColor(color), 1.6)
+        p.setPen(pen)
+        p.setBrush(Qt.BrushStyle.NoBrush)
+        p.drawRoundedRect(2, 3, 14, 10, 1.5, 1.5)
+        p.drawLine(7, 14, 11, 14)
+        p.drawLine(9, 13, 9, 11)
         p.end()
         return QIcon(pix)

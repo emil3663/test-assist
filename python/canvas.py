@@ -6,7 +6,7 @@ from copy import deepcopy
 import math
 from typing import Any
 
-from PySide6.QtCore import QPointF, QRectF, Qt, Signal, QTimer
+from PySide6.QtCore import QPointF, QRectF, QSize, Qt, Signal, QTimer
 from PySide6.QtGui import (
     QBrush,
     QColor,
@@ -36,6 +36,7 @@ class AnnotationCanvas(QWidget):
     circle    – ellipse
     arrow     – line with arrowhead
     rect      – outline rectangle
+    crop      – crop the canvas to a dragged rectangle
     pen       – freehand stroke
 
     Signals
@@ -54,6 +55,8 @@ class AnnotationCanvas(QWidget):
         self._undo_stack:  list[list]            = []
         self._redo_stack:  list[list]            = []
         self._next_z:      int                   = 0
+        self._next_text_id: int                  = 1
+        self._zoom:        float                 = 1.0
 
         # Active tool settings
         self.tool:         str   = "select"
@@ -99,9 +102,25 @@ class AnnotationCanvas(QWidget):
     def set_pixmap(self, pixmap: QPixmap) -> None:
         """Load a new base image and discard any existing annotations."""
         self._pixmap = pixmap
-        self.setFixedSize(pixmap.size())
+        self._sync_widget_size()
         self.clear_annotations(push_undo=False)
         self.update()
+
+    def zoom(self) -> float:
+        return self._zoom
+
+    def set_zoom(self, zoom: float) -> None:
+        self._zoom = max(0.25, min(4.0, float(zoom)))
+        self._sync_widget_size()
+        self.update()
+
+    def fit_to_size(self, viewport_size: QSize) -> None:
+        """Set zoom so the image fits inside the provided viewport size."""
+        if not self._pixmap or viewport_size.width() <= 0 or viewport_size.height() <= 0:
+            return
+        scale_x = viewport_size.width() / max(1, self._pixmap.width())
+        scale_y = viewport_size.height() / max(1, self._pixmap.height())
+        self.set_zoom(min(scale_x, scale_y))
 
     def has_image(self) -> bool:
         return self._pixmap is not None
@@ -113,6 +132,7 @@ class AnnotationCanvas(QWidget):
         self._redo_stack  = []
         self._selected    = None
         self._next_z      = 0
+        self._next_text_id = 1
         self._cancel_text()
         self.update()
         self.annotation_changed.emit()
@@ -120,20 +140,30 @@ class AnnotationCanvas(QWidget):
     def undo(self) -> None:
         self._commit_text()
         if self._undo_stack:
-            self._redo_stack.append(self._clone_annotations())
-            self._annotations = self._undo_stack.pop()
-            self._selected    = None
-            self._recalculate_next_z()
+            self._redo_stack.append(self._capture_document_state())
+            state = self._undo_stack.pop()
+            if self._is_document_state(state):
+                self._restore_document_state(state)
+            else:
+                self._annotations = state
+                self._selected = None
+                self._recalculate_next_z()
+                self._recalculate_next_text_id()
             self.update()
             self.annotation_changed.emit()
 
     def redo(self) -> None:
         self._commit_text()
         if self._redo_stack:
-            self._undo_stack.append(self._clone_annotations())
-            self._annotations = self._redo_stack.pop()
-            self._selected    = None
-            self._recalculate_next_z()
+            self._undo_stack.append(self._capture_document_state())
+            state = self._redo_stack.pop()
+            if self._is_document_state(state):
+                self._restore_document_state(state)
+            else:
+                self._annotations = state
+                self._selected = None
+                self._recalculate_next_z()
+                self._recalculate_next_text_id()
             self.update()
             self.annotation_changed.emit()
 
@@ -256,7 +286,7 @@ class AnnotationCanvas(QWidget):
     def mousePressEvent(self, event) -> None:
         if not self._pixmap:
             return
-        pos = QPointF(event.position())
+        pos = self._to_canvas_pos(event.position())
         self.setFocus()
 
         if self._text_editing:
@@ -272,6 +302,15 @@ class AnnotationCanvas(QWidget):
                 )
                 return
             self._commit_text()
+
+        if self.tool == "crop":
+            self._selected = None
+            self._resize_handle = None
+            self._drawing = True
+            self._start = pos
+            self._current = pos
+            self.update()
+            return
 
         # You can interact with already-added annotations from any tool.
         hit = self._find_annotation(pos)
@@ -309,7 +348,7 @@ class AnnotationCanvas(QWidget):
             self._pen_path = [pos]
 
     def mouseMoveEvent(self, event) -> None:
-        pos = QPointF(event.position())
+        pos = self._to_canvas_pos(event.position())
 
         if self._text_editing and self._text_resize_handle:
             dx = pos.x() - self._text_resize_start.x()
@@ -483,7 +522,7 @@ class AnnotationCanvas(QWidget):
         if not self._drawing:
             return
         self._drawing = False
-        pos = QPointF(event.position())
+        pos = self._to_canvas_pos(event.position())
 
         if self.tool == "pen":
             if len(self._pen_path) > 1:
@@ -493,6 +532,12 @@ class AnnotationCanvas(QWidget):
                     "color": self.color,
                     "size":  self.stroke_size,
                 })
+            return
+
+        if self.tool == "crop":
+            rect = QRectF(self._start, pos).normalized()
+            if rect.width() > 5 and rect.height() > 5:
+                self._apply_crop(rect)
             return
 
         dx = pos.x() - self._start.x()
@@ -516,7 +561,7 @@ class AnnotationCanvas(QWidget):
         """Double-click text to edit it in a multiline editor dialog."""
         if not self._pixmap:
             return
-        pos = QPointF(event.position())
+        pos = self._to_canvas_pos(event.position())
         hit = self._find_annotation(pos)
         if hit and hit.get("type") == "text":
             current = hit.get("text", "")
@@ -568,6 +613,9 @@ class AnnotationCanvas(QWidget):
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
 
+        p.save()
+        p.scale(self._zoom, self._zoom)
+
         if self._pixmap:
             p.drawPixmap(0, 0, self._pixmap)
         else:
@@ -577,16 +625,19 @@ class AnnotationCanvas(QWidget):
 
         # Live preview while dragging a new shape
         if self._drawing and self.tool not in ("select", "text", "pen"):
-            self._draw_one(p, {
-                "type":    self.tool,
-                "x1":      self._start.x(),
-                "y1":      self._start.y(),
-                "x2":      self._current.x(),
-                "y2":      self._current.y(),
-                "color":   self.color,
-                "size":    self.stroke_size,
-                "opacity": self.fill_opacity,
-            }, preview=True)
+            if self.tool == "crop":
+                self._draw_crop_preview(p)
+            else:
+                self._draw_one(p, {
+                    "type":    self.tool,
+                    "x1":      self._start.x(),
+                    "y1":      self._start.y(),
+                    "x2":      self._current.x(),
+                    "y2":      self._current.y(),
+                    "color":   self.color,
+                    "size":    self.stroke_size,
+                    "opacity": self.fill_opacity,
+                }, preview=True)
         elif self._drawing and self.tool == "pen" and len(self._pen_path) > 1:
             self._draw_one(p, {
                 "type":  "pen",
@@ -598,6 +649,8 @@ class AnnotationCanvas(QWidget):
         # Inline text input preview
         if self._text_editing:
             self._draw_inline_text(p)
+
+        p.restore()
 
         p.end()
 
@@ -662,6 +715,18 @@ class AnnotationCanvas(QWidget):
             # Draw wrapped text
             for i, line in enumerate(lines):
                 p.drawText(QPointF(x0 + 2, y0 + line_h * (i + 1)), line)
+
+            # Superscript-like text id marker in the top-right corner.
+            text_id = a.get("text_id")
+            if text_id is not None:
+                badge_font = QFont("Segoe UI", max(9, int(font_size * 0.55)), QFont.Weight.DemiBold)
+                p.setFont(badge_font)
+                p.setPen(QPen(QColor(215, 215, 215, 220)))
+                p.drawText(QPointF(x0 + w - 10, y0 - 6), str(text_id))
+
+                # Restore drawing font/pen for any subsequent text operations.
+                p.setFont(f)
+                p.setPen(QPen(color))
             
             if selected:
                 rect = QRectF(x0 - 4, y0 - 4, w + 8, h + 8)
@@ -761,6 +826,42 @@ class AnnotationCanvas(QWidget):
         p.setPen(QPen(QColor(255, 255, 255, 220), 1.5, Qt.PenStyle.DashLine))
         p.drawRect(rect)
         p.restore()
+
+    def _draw_crop_preview(self, p: QPainter) -> None:
+        """Visual guide for crop selection rectangle while dragging."""
+        rect = QRectF(self._start, self._current).normalized()
+        if rect.width() <= 0 or rect.height() <= 0:
+            return
+        p.save()
+        p.setBrush(Qt.BrushStyle.NoBrush)
+        p.setPen(QPen(QColor(255, 210, 170, 220), 1.6, Qt.PenStyle.DashLine))
+        p.drawRect(rect)
+        p.restore()
+
+    def _apply_crop(self, rect: QRectF) -> None:
+        """Crop current canvas content (base image + annotations) to rect."""
+        if not self._pixmap:
+            return
+        composed = self.export_pixmap()
+        if composed is None:
+            return
+
+        self._undo_stack.append(self._capture_document_state())
+        self._redo_stack = []
+
+        x = max(0, int(rect.x()))
+        y = max(0, int(rect.y()))
+        w = int(rect.width())
+        h = int(rect.height())
+
+        max_w = composed.width() - x
+        max_h = composed.height() - y
+        w = max(1, min(w, max_w))
+        h = max(1, min(h, max_h))
+
+        cropped = composed.copy(x, y, w, h)
+        self.set_pixmap(cropped)
+        self.annotation_changed.emit()
 
     def _draw_pen_selection(self, p: QPainter, pts: list[QPointF]) -> None:
         if not pts:
@@ -899,6 +1000,8 @@ class AnnotationCanvas(QWidget):
         self.text_editing_changed.emit(False)
         self._text_buffer  = ""
         if text:
+            text_id = self._next_text_id
+            self._next_text_id += 1
             self._push({
                 "type":  "text",
                 "x1":    self._text_pos.x(),
@@ -908,6 +1011,7 @@ class AnnotationCanvas(QWidget):
                 "text":  text,
                 "width": self._text_width,
                 "height": self._text_height,
+                "text_id": text_id,
             })
         else:
             self.update()
@@ -937,6 +1041,38 @@ class AnnotationCanvas(QWidget):
     def _clone_annotations(self) -> list[dict[str, Any]]:
         return deepcopy(self._annotations)
 
+    def _capture_document_state(self) -> dict[str, Any]:
+        return {
+            "pixmap": self._pixmap.copy() if self._pixmap is not None else None,
+            "annotations": self._clone_annotations(),
+            "next_z": self._next_z,
+            "next_text_id": self._next_text_id,
+        }
+
+    @staticmethod
+    def _is_document_state(state: Any) -> bool:
+        return isinstance(state, dict) and "pixmap" in state and "annotations" in state
+
+    def _restore_document_state(self, state: dict[str, Any]) -> None:
+        pixmap = state.get("pixmap")
+        self._pixmap = pixmap.copy() if pixmap is not None else None
+        self._sync_widget_size()
+        self._annotations = deepcopy(state.get("annotations", []))
+        self._selected = None
+        self._next_z = state.get("next_z", 0)
+        self._next_text_id = state.get("next_text_id", 1)
+        self._cancel_text()
+
+    def _sync_widget_size(self) -> None:
+        if self._pixmap is None:
+            return
+        w = max(1, int(round(self._pixmap.width() * self._zoom)))
+        h = max(1, int(round(self._pixmap.height() * self._zoom)))
+        self.setFixedSize(w, h)
+
+    def _to_canvas_pos(self, pos: QPointF) -> QPointF:
+        return QPointF(pos.x() / self._zoom, pos.y() / self._zoom)
+
     def _normalise_z_order(self) -> None:
         for index, anno in enumerate(sorted(self._annotations, key=lambda item: item.get("z", 0))):
             anno["z"] = index
@@ -944,6 +1080,12 @@ class AnnotationCanvas(QWidget):
 
     def _recalculate_next_z(self) -> None:
         self._next_z = max((anno.get("z", 0) for anno in self._annotations), default=-1) + 1
+
+    def _recalculate_next_text_id(self) -> None:
+        self._next_text_id = max(
+            (anno.get("text_id", 0) for anno in self._annotations if anno.get("type") == "text"),
+            default=0,
+        ) + 1
 
     def _get_resize_handle(self, anno: dict[str, Any], pos: QPointF) -> str | None:
         """Detect which resize handle is being clicked, if any. Returns 'tl', 'tr', 'bl', 'br', 'start', 'end', or None."""
