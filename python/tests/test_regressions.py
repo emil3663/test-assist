@@ -397,7 +397,7 @@ def test_launcher_dock_right_moves_to_expected_x_position(qapp) -> None:
     qapp.processEvents()
 
     geom = qapp.primaryScreen().availableGeometry()
-    expected_x = geom.right() - launcher.width() - 20
+    expected_x = geom.right() - launcher.width()
     assert launcher.x() == expected_x
     launcher.close()
 

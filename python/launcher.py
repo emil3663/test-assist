@@ -68,8 +68,14 @@ class FloatingLauncher(QWidget):
 
     def _build_ui(self) -> None:
         outer = QVBoxLayout(self)
-        outer.setContentsMargins(14, 14, 14, 14)
-        outer.setSpacing(8)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.setSpacing(0)
+
+        # ── Floating panel (full UI) ──────────────────────────────────────────
+        self._float_panel = QWidget(self)
+        float_layout = QVBoxLayout(self._float_panel)
+        float_layout.setContentsMargins(14, 14, 14, 14)
+        float_layout.setSpacing(8)
 
         # Grip handle
         grip = QLabel()
@@ -78,7 +84,7 @@ class FloatingLauncher(QWidget):
             "QLabel { background-color: rgba(200,120,60,0.25); border-radius: 2px;"
             " margin: 0px 70px; }"
         )
-        outer.addWidget(grip, alignment=Qt.AlignmentFlag.AlignHCenter)
+        float_layout.addWidget(grip, alignment=Qt.AlignmentFlag.AlignHCenter)
 
         # Header row: title + dock + close
         header_row = QHBoxLayout()
@@ -117,7 +123,7 @@ class FloatingLauncher(QWidget):
         header_row.addWidget(self._btn_open_editor)
         header_row.addWidget(self._btn_dock_right)
         header_row.addWidget(self._btn_close)
-        outer.addLayout(header_row)
+        float_layout.addLayout(header_row)
 
         # Action row: [Quick Capture] [📷] [🎥]
         action_row = QHBoxLayout()
@@ -155,13 +161,13 @@ class FloatingLauncher(QWidget):
         action_row.addWidget(self._btn_full_capture)
         action_row.addWidget(self._btn_photo)
         action_row.addWidget(self._btn_video)
-        outer.addLayout(action_row)
+        float_layout.addLayout(action_row)
 
         # Shortcut hint line below action row
         hint = QLabel("Alt+P · capture   ·   Alt+V · record")
         hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
         hint.setStyleSheet("color:#7a6050; font-size:10px; background:transparent;")
-        outer.addWidget(hint)
+        float_layout.addWidget(hint)
 
         # Recording timer (hidden until recording starts)
         self._rec_label = QLabel()
@@ -170,7 +176,7 @@ class FloatingLauncher(QWidget):
             "color:#c04040; font-size:12px; font-weight:700; background:transparent;"
         )
         self._rec_label.hide()
-        outer.addWidget(self._rec_label)
+        float_layout.addWidget(self._rec_label)
 
         # Status text
         self._status_lbl = QLabel()
@@ -185,6 +191,45 @@ class FloatingLauncher(QWidget):
         self._btn_open_editor.clicked.connect(self._editor.bring_forward)
         self._btn_dock_right.clicked.connect(self._dock_right)
         self._btn_close.clicked.connect(self._close_launcher)
+
+        outer.addWidget(self._float_panel)
+
+        # ── Docked panel (compact vertical icon strip) ────────────────────────
+        self._dock_panel = QWidget(self)
+        dock_layout = QVBoxLayout(self._dock_panel)
+        dock_layout.setContentsMargins(7, 14, 7, 14)
+        dock_layout.setSpacing(10)
+        dock_layout.setAlignment(Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignTop)
+
+        _btn_dock_editor = QPushButton()
+        _btn_dock_editor.setFixedSize(36, 36)
+        _btn_dock_editor.setIcon(self._make_ta_icon())
+        _btn_dock_editor.setIconSize(QSize(18, 18))
+        _btn_dock_editor.setToolTip("Open Editor")
+        _btn_dock_editor.setStyleSheet(self._style_icon_btn())
+        _btn_dock_editor.clicked.connect(self._editor.bring_forward)
+        dock_layout.addWidget(_btn_dock_editor)
+
+        _btn_dock_capture = QPushButton()
+        _btn_dock_capture.setFixedSize(36, 36)
+        _btn_dock_capture.setIcon(self._make_camera_icon("#f0d0a0"))
+        _btn_dock_capture.setIconSize(QSize(20, 20))
+        _btn_dock_capture.setToolTip("Quick Capture")
+        _btn_dock_capture.setStyleSheet(self._style_icon_btn())
+        _btn_dock_capture.clicked.connect(self._on_action_click)
+        dock_layout.addWidget(_btn_dock_capture)
+
+        _btn_undock = QPushButton()
+        _btn_undock.setFixedSize(36, 36)
+        _btn_undock.setIcon(self._make_undock_icon())
+        _btn_undock.setIconSize(QSize(14, 14))
+        _btn_undock.setToolTip("Restore floating launcher")
+        _btn_undock.setStyleSheet(self._style_icon_btn())
+        _btn_undock.clicked.connect(self._undock)
+        dock_layout.addWidget(_btn_undock)
+
+        self._dock_panel.hide()
+        outer.addWidget(self._dock_panel)
 
     # ── Action dispatch ───────────────────────────────────────────────────────
 
@@ -374,10 +419,19 @@ class FloatingLauncher(QWidget):
         self.move(geom.right() - self.width() - 20, geom.top() + 20)
 
     def _dock_right(self) -> None:
-        geom = QApplication.primaryScreen().availableGeometry()
+        self._float_panel.hide()
+        self._dock_panel.show()
+        self.setFixedWidth(50)
         self.adjustSize()
+        geom = QApplication.primaryScreen().availableGeometry()
         y = geom.top() + max(20, (geom.height() - self.height()) // 2)
-        self.move(geom.right() - self.width() - 20, y)
+        self.move(geom.right() - self.width(), y)
+
+    def _undock(self) -> None:
+        self._dock_panel.hide()
+        self._float_panel.show()
+        self.setFixedWidth(280)
+        self._position_top_right()
 
     # ── Button stylesheets ────────────────────────────────────────────────────
 
@@ -478,6 +532,23 @@ class FloatingLauncher(QWidget):
         p.setPen(pen)
         p.drawLine(3, 3, 11, 11)
         p.drawLine(11, 3, 3, 11)
+        p.end()
+        return QIcon(pix)
+
+    @staticmethod
+    def _make_undock_icon(color: str = "#f8d3ad") -> QIcon:
+        pix = QPixmap(14, 14)
+        pix.fill(Qt.GlobalColor.transparent)
+        p = QPainter(pix)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        pen = QPen(QColor(color), 1.6)
+        p.setPen(pen)
+        # Left-pointing arrow (restore/float)
+        p.drawLine(11, 7, 4, 7)
+        p.drawLine(4, 7, 7, 4)
+        p.drawLine(4, 7, 7, 10)
+        # Vertical bar on right (representing the docked edge)
+        p.drawLine(12, 2, 12, 12)
         p.end()
         return QIcon(pix)
 
