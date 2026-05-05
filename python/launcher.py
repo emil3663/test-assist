@@ -358,12 +358,15 @@ class FloatingLauncher(QWidget):
 
     def mouseMoveEvent(self, event) -> None:
         if event.buttons() == Qt.MouseButton.LeftButton and self._drag_pos is not None:
+            # Docked strip is anchored — never allow dragging while docked
+            if self._dock_panel.isVisible():
+                super().mouseMoveEvent(event)
+                return
             self.move(event.globalPosition().toPoint() - self._drag_pos)
             # Auto-dock only when the window is dragged flush to the right screen edge
-            if self._float_panel.isVisible():
-                geom = QApplication.primaryScreen().availableGeometry()
-                if self.x() + self.width() >= geom.right():
-                    self._dock_right()
+            geom = QApplication.primaryScreen().availableGeometry()
+            if self.x() + self.width() >= geom.right():
+                self._dock_right()
         super().mouseMoveEvent(event)
 
     def mouseReleaseEvent(self, event) -> None:

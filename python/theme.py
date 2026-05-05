@@ -81,6 +81,20 @@ QPushButton#btn_danger:hover {{
     border-color: #ef6070;
     color: #ffffff;
 }}
+QPushButton#btn_help {{
+    background-color: #1a6fc4;
+    color: #ffffff;
+    border: none;
+    border-radius: 14px;
+    padding: 0;
+    font-size: 15px;
+    font-weight: 700;
+}}
+QPushButton#btn_help:hover {{
+    background-color: #2585e0;
+    color: #ffffff;
+    border: none;
+}}
 QSlider::groove:horizontal {{
     background: {LINE};
     height: 4px;
