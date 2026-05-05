@@ -189,13 +189,14 @@ class EditorWindow(QMainWindow):
 
         # Help button — far right of toolbar
         help_btn = QPushButton("?")
+        help_btn.setObjectName("btn_help")
         help_btn.setFixedSize(28, 28)
         help_btn.setToolTip("Open Help")
         help_btn.setStyleSheet(
-            "QPushButton { background: rgba(200,120,60,0.10); color: #c8906a;"
-            " border: 1px solid rgba(200,120,60,0.30); border-radius: 14px;"
-            " font-size: 13px; font-weight: 700; }"
-            " QPushButton:hover { background: rgba(200,120,60,0.22); color: #f0b880; }"
+            "QPushButton#btn_help { background: #1a6fc4 !important; color: #ffffff !important;"
+            " border: none; border-radius: 14px;"
+            " font-size: 15px; font-weight: 700; }"
+            " QPushButton#btn_help:hover { background: #2585e0 !important; color: #ffffff !important; }"
         )
         help_btn.clicked.connect(self._open_help)
         layout.addWidget(help_btn, 0, Qt.AlignmentFlag.AlignVCenter)
