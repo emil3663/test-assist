@@ -47,7 +47,7 @@ are in the left rail.*
 | | Browser | Desktop |
 |---|---|---|
 | **Stack** | Vanilla JavaScript, Canvas API | Python, PySide6 (Qt) |
-| **Install** | None — open `index.html` | `pip install -r python/requirements.txt` |
+| **Install** | None — open the live URL | Download the release zip and run `TestAssist.exe`, or run from source |
 | **Capture** | `getDisplayMedia`, `MediaRecorder` | Native screenshot overlay, frame recorder |
 | **Best for** | Trying the full capture → annotate → export loop in ten seconds, with nothing to install | Long test sessions — a tray launcher that stays above the application under test |
 | **Tests** | 49 Playwright tests — smoke suite in CI, regression suite on demand | 29 pytest regression tests, 74 assertions, in CI |
@@ -57,13 +57,20 @@ and a structured JSON annotation layer.
 
 ### Only in the desktop build
 
-The browser is sandboxed, so these exist only in the PySide6 version:
+The desktop build is the fuller of the two. Some of that is the browser being
+sandboxed; some of it is simply where the work went.
 
+- **Crop** and **blur**, the latter for redacting anything sensitive before a
+  screenshot goes into a ticket
+- Three arrow styles — classic, double-headed and dashed
+- **Copy to clipboard**, so evidence goes straight into a ticket without a file
+- Zoom, fit-to-window, and a capture history that persists across restarts with
+  Today / This Week / This Month filters
 - A tray launcher that stays above the application under test, and docks to a
   screen edge as a compact vertical strip
-- Zoom, and a capture history that persists across restarts
 - Single-instance enforcement — a second launch focuses the running window
-- MP4 recording where `opencv-python` is installed; the browser writes `.webm`
+- Send-to-back layering for overlapping annotations
+- MP4 recording when run from source with `opencv-python` installed
 
 Everything under **What it does** below is the browser build.
 
@@ -146,7 +153,17 @@ Screen capture and recording require a secure context, so if you are serving it
 rather than opening the file directly, use `localhost` or HTTPS. Declining the
 screen-capture permission is handled — you can still upload an image and annotate.
 
-**Desktop**:
+**Desktop — installed** (Windows, no Python needed):
+
+1. Download `TestAssist-<version>-win64.zip` from
+   [Releases](https://github.com/emil3663/test-assist/releases)
+2. Unzip it anywhere you like
+3. Run `TestAssist.exe` — then right-click it and **Pin to taskbar**
+
+The app sits in the system tray with a floating capture launcher. Captures are
+kept in `~/.test-assist/history`, recordings in `~/.test-assist/recordings`.
+
+**Desktop — from source**:
 
 ```bash
 cd python
@@ -154,8 +171,22 @@ pip install -r requirements.txt
 python main.py          # or: ./run.ps1 on Windows
 ```
 
-`opencv-python` and `numpy` are optional. With them, recordings export as MP4;
-without, they are saved as a PNG frame sequence.
+**Desktop — building it yourself**:
+
+```powershell
+cd python
+.\build.ps1 -Zip -Shortcut
+```
+
+That produces `dist/TestAssist/TestAssist.exe`, verifies it actually runs, zips
+it, and drops a Desktop shortcut you can pin. The tagged-release workflow runs
+the same spec on a clean Windows runner, so a local build and a released build
+are produced the same way.
+
+`opencv-python` and `numpy` are optional and are **not** included in the
+packaged build — they would add around 250 MB for MP4 export alone. Run from
+source with them installed for MP4; otherwise recordings are saved as a PNG
+frame sequence.
 
 ---
 

@@ -557,3 +557,45 @@ def test_canvas_mouseReleaseEvent_pen_tool_creates_pen_annotation(qapp, blank_pi
     assert canvas._annotations[-1]["type"] == "pen"
     assert len(canvas._annotations[-1]["path"]) >= 2
     canvas.close()
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Packaging / file locations
+# ─────────────────────────────────────────────────────────────────────────────
+
+def test_recordings_are_written_beside_the_history_not_loose_in_home(monkeypatch, tmp_path):
+    """Recordings used to land directly in the user's home folder."""
+    import capture
+
+    monkeypatch.setattr(capture.Path, "home", staticmethod(lambda: tmp_path))
+    target = capture._recordings_dir()
+
+    assert target == tmp_path / ".test-assist" / "recordings"
+    assert target.is_dir()
+    assert not list(tmp_path.glob("test-recording-*"))
+
+
+def test_version_flag_reports_a_semantic_version(capsys):
+    """The release pipeline asserts on this output to prove the build runs."""
+    import re
+    import sys as _sys
+
+    import main
+
+    monkey = list(_sys.argv)
+    try:
+        _sys.argv = ["TestAssist.exe", "--version"]
+        main.main()
+    finally:
+        _sys.argv = monkey
+
+    out = capsys.readouterr().out.strip()
+    assert re.fullmatch(r"Test Assist \d+\.\d+\.\d+", out), out
+    assert out.endswith(main.__version__)
+
+
+def test_packaged_icon_exists_and_is_a_real_ico():
+    """The taskbar icon ships with the build; a missing file falls back silently."""
+    icon = Path(__file__).resolve().parents[2] / "assets" / "icon.ico"
+    assert icon.is_file(), "assets/icon.ico is missing"
+    assert icon.read_bytes()[:4] == b"\x00\x00\x01\x00", "not an ICO file"

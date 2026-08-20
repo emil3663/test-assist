@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta
+import sys
 import json
 from pathlib import Path
 import time
@@ -470,7 +471,9 @@ class EditorWindow(QMainWindow):
             self._canvas.clear_annotations()
 
     def _open_help(self) -> None:
-        help_file = Path(__file__).parent / "help.html"
+        # resolves both from a source checkout and from a PyInstaller bundle
+        base = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent))
+        help_file = base / "help.html"
         webbrowser.open(help_file.as_uri())
 
     def _save_png(self) -> None:

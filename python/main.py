@@ -4,6 +4,9 @@ from __future__ import annotations
 
 import ctypes
 import sys
+from pathlib import Path
+
+__version__ = "1.0.0"
 
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QAction, QColor, QFont, QIcon, QPainter, QPen, QPixmap
@@ -15,7 +18,19 @@ from single_instance import SingleInstanceManager
 from theme import EDITOR_STYLE
 
 
+def _asset_path(name: str) -> Path:
+    """Locate a bundled asset, whether running from source or from a build."""
+    base = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent.parent))
+    return base / "assets" / name
+
+
 def _make_tray_icon() -> QIcon:
+    # Prefer the real icon file, which is what Windows shows on the taskbar;
+    # fall back to the drawn one when running from a source checkout without it.
+    icon_file = _asset_path("icon.ico")
+    if icon_file.exists():
+        return QIcon(str(icon_file))
+
     pix = QPixmap(64, 64)
     pix.fill(QColor(0, 0, 0, 0))
     p = QPainter(pix)
@@ -62,6 +77,12 @@ def _setup_tray(app: QApplication, launcher: FloatingLauncher, editor: EditorWin
 
 
 def main() -> None:
+    if "--version" in sys.argv:
+        # Headless: lets a build pipeline prove the executable actually runs
+        # without needing a display.
+        print(f"Test Assist {__version__}")
+        return
+
     try:
         ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("TestAssist.App")
     except Exception:

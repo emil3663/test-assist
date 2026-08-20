@@ -14,6 +14,13 @@ from PySide6.QtWidgets import QApplication, QRubberBand, QWidget
 # Screenshot overlay
 # ─────────────────────────────────────────────────────────────────────────────
 
+def _recordings_dir() -> Path:
+    """Recordings live beside the capture history, not loose in the home folder."""
+    path = Path.home() / ".test-assist" / "recordings"
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
 class ScreenshotOverlay(QWidget):
     """
     Fullscreen semi-transparent overlay.
@@ -147,7 +154,7 @@ class FrameRecorder(QObject):
             return
 
         ts = int(time.time())
-        output = str(Path.home() / f"test-recording-{ts}.mp4")
+        output = str(_recordings_dir() / f"test-recording-{ts}.mp4")
 
         try:
             import cv2      # type: ignore[import]
@@ -169,7 +176,7 @@ class FrameRecorder(QObject):
 
         except ImportError:
             # No cv2 – fall back to a PNG frame sequence.
-            frames_dir = Path.home() / f"test-recording-{ts}_frames"
+            frames_dir = _recordings_dir() / f"test-recording-{ts}_frames"
             frames_dir.mkdir(exist_ok=True)
             for i, pixmap in enumerate(self._frames):
                 pixmap.save(str(frames_dir / f"frame_{i:04d}.png"))
