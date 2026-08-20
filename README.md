@@ -21,6 +21,25 @@ is the set of things a browser is not permitted to do.
 
 **Try it in your browser, nothing to install:** https://emil3663.github.io/test-assist/
 
+![Test Assist marking up a captured screen](docs/screenshot-annotated.png)
+
+*A capture being marked up: highlight over the validation error, circle on the
+field it refers to, a boxed defect with an arrow, and a typed note. Both exports
+are in the left rail.*
+
+<details>
+<summary>More screenshots</summary>
+
+**The editor on load**
+
+![The Test Assist editor](docs/screenshot-ui.png)
+
+**Narrow screens** — the launcher and toolbar stack rather than overlapping.
+
+![Test Assist on a narrow screen](docs/screenshot-mobile.png)
+
+</details>
+
 ---
 
 ## The two builds
@@ -31,7 +50,7 @@ is the set of things a browser is not permitted to do.
 | **Install** | None — open `index.html` | `pip install -r python/requirements.txt` |
 | **Capture** | `getDisplayMedia`, `MediaRecorder` | Native screenshot overlay, frame recorder |
 | **Best for** | Trying the full capture → annotate → export loop in ten seconds, with nothing to install | Long test sessions — a tray launcher that stays above the application under test |
-| **Tests** | Manual only — ID-coded cases in `TEST_PLAN.md`, no automated coverage | 29 pytest regression tests, 74 assertions, in CI |
+| **Tests** | 45 Playwright tests — smoke suite in CI, regression suite on demand | 29 pytest regression tests, 74 assertions, in CI |
 
 Both produce the same two outputs: a composited PNG for attaching to a defect,
 and a structured JSON annotation layer.
@@ -142,15 +161,36 @@ without, they are saved as a PNG frame sequence.
 
 ## Testing
 
-The desktop build carries the automated coverage:
+Both builds carry automated coverage, and both are honest about what is not
+covered.
 
-- **29 pytest regression tests, 74 assertions**, in `python/tests/test_regressions.py`
-- Run with `pytest` from the `python/` directory
+**Browser build — 45 Playwright tests**
+
+```bash
+npm ci
+npx playwright install chromium
+npm run test:smoke        # 8 tests, ~10s — runs in CI on every push
+npm run test:regression   # 37 tests, ~45s — on demand
+```
+
+The split is deliberate. The smoke suite guards the critical path a reviewer
+walks in their first ten seconds. The regression suite covers the rest of
+`TEST_PLAN.md` and runs single-worker with **no retries**, so a flaky result
+shows up as a flaky result instead of being masked by a rerun. Both start their
+own static server on their own port rather than running against `file://` or a
+dev server, because `file://` is not a secure context and the capture APIs
+behave differently there.
+
+`STABILITY_MATRIX.md` triages all 54 test-plan cases — 53 automated, 1 blocked —
+and records the caveats. The most important one: the native screen-share picker
+is browser chrome that no automation can drive, so capture and recording tests
+substitute a canvas-backed `MediaStream`. They prove what the app does with a
+stream, not that the picker appears.
+
+**Desktop build — 29 pytest regression tests, 74 assertions**
+
+- In `python/tests/test_regressions.py`; run `pytest` from `python/`
 - Executed on every push by `.github/workflows/python-tests.yml`
-
-The browser build is covered by `TEST_PLAN.md` — a per-feature status matrix and
-ID-coded manual test cases. Not-yet-implemented features are listed there as such
-rather than omitted.
 
 ---
 
@@ -158,7 +198,8 @@ rather than omitted.
 
 Active development. The full annotation and capture feature set is delivered and
 in use. Known gaps, all listed in `TEST_PLAN.md`: annotation numbering, PDF
-export, cloud save and share, and frame-by-frame video annotation.
+export, cloud save and share, frame-by-frame video annotation, and the fact that
+a select-tool move cannot be undone.
 
 ---
 

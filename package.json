@@ -1,0 +1,18 @@
+{
+  "name": "test-assist",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Automated coverage for the Test Assist browser build. The desktop build is tested separately by pytest under python/.",
+  "scripts": {
+    "serve": "node scripts/serve.mjs 4321",
+    "test": "npm run test:smoke",
+    "test:smoke": "playwright test --config playwright.smoke.config.ts",
+    "test:regression": "playwright test --config playwright.regression.config.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.62.1",
+    "@types/node": "^24.0.0",
+    "typescript": "^5.9.0"
+  }
+}

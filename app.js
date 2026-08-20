@@ -249,8 +249,10 @@ function onMouseDown(e) {
     selectedAnnotation = findAnnotation(x, y);
     if (selectedAnnotation) {
       dragging = true;
-      dragOffX = x - selectedAnnotation.x;
-      dragOffY = y - selectedAnnotation.y;
+      // remember the grab point; the move is applied as a delta so that every
+      // kind of annotation (including pen strokes, which have no x/y) moves
+      dragOffX = x;
+      dragOffY = y;
     }
     return;
   }
@@ -265,8 +267,9 @@ function onMouseMove(e) {
   const { x, y } = getPos(e);
 
   if (currentTool === 'select' && dragging && selectedAnnotation) {
-    selectedAnnotation.x = x - dragOffX;
-    selectedAnnotation.y = y - dragOffY;
+    moveAnnotation(selectedAnnotation, x - dragOffX, y - dragOffY);
+    dragOffX = x;
+    dragOffY = y;
     redrawAnnotations();
     return;
   }
@@ -405,6 +408,17 @@ function drawText(ctx, a) {
   const lines = a.text.split('\n');
   lines.forEach((line, i) => ctx.fillText(line, a.x, a.y + fontSize * i));
   ctx.restore();
+}
+
+function moveAnnotation(a, dx, dy) {
+  if (a.type === 'pen') {
+    a.path.forEach(p => { p.x += dx; p.y += dy; });
+    return;
+  }
+  a.x += dx;
+  a.y += dy;
+  // shapes are defined by two corners; moving only the first one stretches them
+  if (a.x2 !== undefined) { a.x2 += dx; a.y2 += dy; }
 }
 
 function findAnnotation(x, y) {
@@ -576,3 +590,8 @@ function hexToRgb(hex) {
 function escHtml(str) {
   return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
+
+/* Test hook: set once initialisation has finished, so the Playwright suites
+   can wait on a real signal instead of an arbitrary timeout after load.
+   Inert in normal use. */
+window.__APP_READY__ = true;
