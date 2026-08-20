@@ -9,9 +9,13 @@ a starting point for an argument. A good defect report makes the finding
 reproducible from the record alone, and the tooling for that is usually either
 heavyweight, cloud-bound, or not built for testers.
 
-Built twice, deliberately: once as a browser app that needs no installation, and
-once as a native desktop application for the case where you are testing a browser
-and cannot use one to record it.
+Built twice. The browser version came first and doubled as the design prototype
+for the desktop overlay — it still labels itself an overlay mock, because that is
+what it was for. The annotation and capture engine in it is real and working; the
+launcher framing around it is the prototype. The desktop version is the one built
+to be lived in.
+
+**Try the browser version:** https://emil3663.github.io/test-assist/
 
 ---
 
@@ -22,7 +26,7 @@ and cannot use one to record it.
 | **Stack** | Vanilla JavaScript, Canvas API | Python, PySide6 (Qt) |
 | **Install** | None — open `index.html` | `pip install -r python/requirements.txt` |
 | **Capture** | `getDisplayMedia`, `MediaRecorder` | Native screenshot overlay, frame recorder |
-| **Best for** | Quick capture, any machine, nothing to set up | Long sessions, a persistent tray launcher, capturing browser-based tests |
+| **Best for** | Trying it in ten seconds; prototyping the overlay UX | Real use — long sessions, a persistent tray launcher, capturing browser-based tests |
 | **Tests** | Manual test plan | 29 pytest regression tests, 74 assertions, in CI |
 
 Both produce the same two outputs: a composited PNG for attaching to a defect,
@@ -96,7 +100,7 @@ a later build of the same screen — which is the direction the tool is heading.
 
 ## Running it
 
-**Browser** — no build step, no dependencies:
+**Browser** — nothing to install; open the live version above, or:
 
 ```
 Open index.html in Chrome, Edge or Firefox.
