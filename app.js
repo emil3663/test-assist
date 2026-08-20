@@ -36,14 +36,8 @@ const container  = document.getElementById('canvasContainer');
 const placeholder= document.getElementById('placeholder');
 const body       = document.body;
 const launcherStatus = document.getElementById('launcherStatus');
-const editorStage = document.getElementById('editorStage');
-const editorStageTitle = document.getElementById('editorStageTitle');
-const editorStageText = document.getElementById('editorStageText');
-const editorStageAction = document.getElementById('editorStageAction');
-const editorStatePill = document.getElementById('editorStatePill');
 const modePhotoBtn = document.getElementById('modePhoto');
 const modeVideoBtn = document.getElementById('modeVideo');
-const openEditorWindowBtn = document.getElementById('openEditorWindow');
 const screenshotBtn = document.getElementById('btnScreenshot');
 const recordBtn = document.getElementById('btnRecord');
 
@@ -88,20 +82,18 @@ screenshotBtn.addEventListener('click', captureScreen);
 document.getElementById('btnCaptureTab').addEventListener('click', captureScreen);
 modePhotoBtn.addEventListener('click', () => setCaptureMode('photo'));
 modeVideoBtn.addEventListener('click', () => setCaptureMode('video'));
-openEditorWindowBtn.addEventListener('click', () => setEditorState('active'));
-editorStageAction.addEventListener('click', () => setEditorState('active'));
 
 async function captureScreen() {
   try {
-    if (navigator.mediaDevices && navigator.mediaDevices.getDisplayMedia) {
+    if (navigator.mediaDevices && navigator.mediaDevices.getDisplayMedia && typeof ImageCapture !== 'undefined') {
       const stream = await navigator.mediaDevices.getDisplayMedia({ video: { cursor: 'always' }, audio: false });
       const track  = stream.getVideoTracks()[0];
       const capture= new ImageCapture(track);
       const bitmap = await capture.grabFrame();
       track.stop();
-      loadImageBitmap(bitmap, 'background');
+      loadImageBitmap(bitmap);
     } else {
-      alert('Screen capture is not supported in this browser. Upload an image instead.');
+      alert('Screen capture needs Chrome, Edge or Safari 26+. Use Upload Image to annotate a screenshot you already have.');
     }
   } catch (err) {
     if (err.name !== 'NotAllowedError') {
@@ -110,22 +102,22 @@ async function captureScreen() {
   }
 }
 
-function loadImageBitmap(bitmap, nextState = 'active') {
+function loadImageBitmap(bitmap) {
   resizeCanvases(bitmap.width, bitmap.height);
   baseCtx.drawImage(bitmap, 0, 0);
   placeholder.style.display = 'none';
   clearAnnotations(false);
-  setEditorState(nextState);
+  launcherStatus.textContent = 'Screenshot loaded. Pick a tool on the left, then export a PNG or the JSON annotation layer.';
 }
 
-function loadImageSrc(src, nextState = 'active') {
+function loadImageSrc(src) {
   const img = new Image();
   img.onload = () => {
     resizeCanvases(img.naturalWidth, img.naturalHeight);
     baseCtx.drawImage(img, 0, 0);
     placeholder.style.display = 'none';
     clearAnnotations(false);
-    setEditorState(nextState);
+    launcherStatus.textContent = 'Image loaded. Pick a tool on the left, then export a PNG or the JSON annotation layer.';
   };
   img.src = src;
 }
@@ -192,7 +184,7 @@ function stopRecording() {
   recordBtn.textContent = '⏺ Start Recording';
   recordBtn.disabled = false;
   if (captureMode === 'video') {
-    launcherStatus.textContent = 'Record short clips from the launcher. Image capture is what stages the editor window in this mock.';
+    launcherStatus.textContent = 'Recording saved. Switch to Photo mode to capture a still and annotate it.';
   }
 }
 
@@ -538,7 +530,7 @@ window.deleteSnapshot = id => {
   renderSnapshots();
 };
 
-/* ─── Launcher / Editor window mock ─── */
+/* ─── Capture launcher ─── */
 function setCaptureMode(mode) {
   captureMode = mode;
   body.dataset.captureMode = mode;
@@ -552,48 +544,13 @@ function setCaptureMode(mode) {
   recordBtn.hidden = isPhoto;
 
   if (isPhoto) {
-    launcherStatus.textContent = body.dataset.editorState === 'background'
-      ? 'Another still capture will refresh the background editor window.'
-      : 'Capture a still image to open the editor in the background. The launcher stays on top in this mock.';
+    launcherStatus.textContent = 'Capture the screen, or upload an image, then mark it up and export.';
   } else {
-    launcherStatus.textContent = 'Record short clips from the launcher. Image capture is what stages the editor window in this mock.';
+    launcherStatus.textContent = 'Record the screen to a .webm clip. Switch to Photo mode to capture a still and annotate it.';
   }
-}
-
-function setEditorState(state) {
-  body.dataset.editorState = state;
-
-  if (state === 'idle') {
-    editorStatePill.dataset.state = 'idle';
-    editorStatePill.textContent = 'Editor parked';
-    editorStageTitle.textContent = 'Editor is parked behind the launcher';
-    editorStageText.textContent = 'Use the floating capture control to grab a screenshot. In this browser mock, the editor stays visually recessed until you choose to bring it forward.';
-    editorStageAction.textContent = 'Bring Editor Forward';
-    openEditorWindowBtn.disabled = true;
-    return;
-  }
-
-  openEditorWindowBtn.disabled = false;
-
-  if (state === 'background') {
-    editorStatePill.dataset.state = 'background';
-    editorStatePill.textContent = 'Editor opened in background';
-    editorStageTitle.textContent = 'Capture loaded into the background editor';
-    editorStageText.textContent = 'The screenshot is staged and ready for markup. Stay in the launcher workflow or bring the editor forward when you want to annotate.';
-    editorStageAction.textContent = 'Bring Editor Forward';
-    launcherStatus.textContent = 'Screenshot captured. The editor mock has opened in the background.';
-    return;
-  }
-
-  editorStatePill.dataset.state = 'active';
-  editorStatePill.textContent = 'Editor in front';
-  launcherStatus.textContent = captureMode === 'photo'
-    ? 'The editor is active. Capture again from the launcher whenever you want a new still.'
-    : 'The editor is active. Switch back to Photo mode when you want to stage a new image.';
 }
 
 setCaptureMode('photo');
-setEditorState('idle');
 
 /* ─── Keyboard shortcuts ─── */
 document.addEventListener('keydown', e => {

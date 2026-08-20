@@ -113,7 +113,7 @@ body {
 
 .launcher-actions {
   display: grid;
-  grid-template-columns: minmax(0, 1.2fr) minmax(0, 0.8fr);
+  grid-template-columns: minmax(0, 1fr);
   gap: 8px;
 }
 
@@ -169,6 +169,13 @@ body {
   justify-content: flex-end;
 }
 
+@media (min-width: 961px) {
+  /* the launcher is fixed to the top-right; keep topbar content clear of it */
+  .topbar {
+    padding-right: 356px;
+  }
+}
+
 .surface-pill {
   padding: 7px 12px;
   border-radius: 999px;
@@ -181,17 +188,19 @@ body {
   text-transform: uppercase;
 }
 
-.state-pill[data-state="background"] {
-  border-color: rgba(80, 200, 180, 0.25);
-  color: #9ee9d7;
+.desktop-pill {
+  text-decoration: none;
+  transition: border-color 0.15s ease, color 0.15s ease;
 }
 
-.state-pill[data-state="active"] {
-  border-color: rgba(124, 131, 253, 0.38);
+.desktop-pill:hover {
+  border-color: rgba(124, 131, 253, 0.45);
   color: #eef0ff;
 }
 
 /* ── Buttons ── */
+[hidden] { display: none !important; }
+
 button, .upload-label {
   cursor: pointer;
   border: none;
@@ -365,61 +374,6 @@ button:disabled {
 .hidden-file-input { display: none; }
 .placeholder-capture-btn { margin-top: 10px; }
 
-.editor-stage {
-  position: sticky;
-  top: 18px;
-  margin: 20px 0 0 20px;
-  max-width: 360px;
-  padding: 18px 18px 16px;
-  border-radius: 18px;
-  border: 1px solid rgba(124, 131, 253, 0.22);
-  background: rgba(19, 19, 42, 0.9);
-  box-shadow: var(--shadow);
-  z-index: 5;
-}
-
-.editor-stage-chip {
-  display: inline-flex;
-  margin-bottom: 10px;
-  padding: 5px 9px;
-  border-radius: 999px;
-  background: rgba(124, 131, 253, 0.12);
-  color: #cfd4f8;
-  font-size: 0.72rem;
-  font-weight: 700;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-}
-
-.editor-stage h2 {
-  font-size: 1.2rem;
-  line-height: 1.2;
-  margin-bottom: 8px;
-}
-
-.editor-stage p {
-  color: #aab0c2;
-  font-size: 0.9rem;
-  line-height: 1.55;
-  margin-bottom: 14px;
-}
-
-body[data-editor-state="idle"] .main-layout {
-  opacity: 0.88;
-}
-
-body[data-editor-state="background"] .canvas-wrap {
-  filter: saturate(0.85) brightness(0.92);
-}
-
-body[data-editor-state="background"] .editor-stage {
-  border-color: rgba(80, 200, 180, 0.24);
-}
-
-body[data-editor-state="active"] .editor-stage {
-  display: none;
-}
-
 /* ── Recording badge ── */
 .recording-badge {
   position: fixed;
@@ -481,15 +435,21 @@ body[data-editor-state="active"] .editor-stage {
 .text-popup textarea:focus { border-color: var(--accent); }
 
 @media (max-width: 960px) {
+  /* no room to float anything: the launcher and topbar simply stack */
   .app-shell {
-    padding-top: 164px;
+    padding-top: 0;
+  }
+
+  .topbar {
+    position: static;
   }
 
   .capture-launcher {
-    top: 12px;
-    left: 12px;
-    right: 12px;
+    position: static;
     width: auto;
+    margin: 12px;
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
   }
 
   .main-layout {
@@ -501,12 +461,6 @@ body[data-editor-state="active"] .editor-stage {
     max-height: 240px;
     border-right: none;
     border-bottom: 1px solid var(--line);
-  }
-
-  .editor-stage {
-    position: static;
-    margin: 16px;
-    max-width: none;
   }
 }
 

@@ -6,12 +6,12 @@
   <title>Test Assist</title>
   <link rel="stylesheet" href="style.css" />
 </head>
-<body data-capture-mode="photo" data-editor-state="idle">
-  <aside class="capture-launcher" aria-label="Floating capture control mock">
+<body data-capture-mode="photo">
+  <aside class="capture-launcher" aria-label="Screen capture controls">
     <div class="launcher-grip" aria-hidden="true"></div>
     <div class="launcher-head">
       <div>
-        <p class="launcher-kicker">Overlay Mock</p>
+        <p class="launcher-kicker">Capture</p>
         <h1>Quick Capture</h1>
       </div>
       <span class="launcher-dot" aria-hidden="true"></span>
@@ -25,22 +25,20 @@
     <div class="launcher-actions">
       <button id="btnScreenshot" class="btn-primary launcher-primary" title="Capture Screenshot">📷 Quick Capture</button>
       <button id="btnRecord" class="btn-danger launcher-primary" title="Record Video" hidden>⏺ Start Recording</button>
-      <button id="openEditorWindow" class="btn-outline" type="button">Open Editor</button>
     </div>
 
-    <p id="launcherStatus" class="launcher-status">Capture a still image to open the editor in the background. The launcher stays on top in this mock.</p>
+    <p id="launcherStatus" class="launcher-status">Capture the screen, or upload an image, then mark it up and export a PNG and a JSON annotation layer.</p>
   </aside>
 
   <div class="app-shell">
     <nav class="topbar">
-      <a href="../index.html" class="back">← Hub</a>
+      <a href="https://github.com/emil3663/test-assist" class="back" target="_blank" rel="noopener">← Repo</a>
       <div class="title-wrap">
         <span class="title">🔍 Test Assist</span>
-        <span class="subtitle">Launcher-first mock for the future desktop overlay</span>
+        <span class="subtitle">Capture, annotate and export defect evidence — nothing to install</span>
       </div>
       <div class="toolbar-group surface-group">
-        <span class="surface-pill">Floating launcher</span>
-        <span id="editorStatePill" class="surface-pill state-pill">Editor parked</span>
+        <a class="surface-pill desktop-pill" href="https://github.com/emil3663/test-assist#the-two-builds" target="_blank" rel="noopener">Also ships as a desktop app →</a>
       </div>
     </nav>
 
@@ -91,13 +89,6 @@
 
     <!-- ── Right: Canvas area ── -->
     <main class="canvas-wrap">
-      <section id="editorStage" class="editor-stage" aria-live="polite">
-        <span class="editor-stage-chip">Background Editor Window</span>
-        <h2 id="editorStageTitle">Editor is parked behind the launcher</h2>
-        <p id="editorStageText">Use the floating capture control to grab a screenshot. In this browser mock, the editor stays visually recessed until you choose to bring it forward.</p>
-        <button id="editorStageAction" class="btn-primary sm" type="button">Bring Editor Forward</button>
-      </section>
-
       <div class="canvas-container" id="canvasContainer">
         <!-- Base image layer -->
         <canvas id="baseCanvas"></canvas>
