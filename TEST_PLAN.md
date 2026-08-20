@@ -1,6 +1,6 @@
 # 🔍 Test Assist — Test Plan
 
-**Version:** 1.1  
+**Version:** 1.2  
 **Last updated:** 2026-08-20  
 **Status:** In active development
 
@@ -19,7 +19,7 @@ images can be exported as PNG or as JSON (for replay / integration).
 
 | Feature | Status | Notes |
 |---------|--------|-------|
-| Screen capture (getDisplayMedia) | ✅ Done | Chrome / Edge / Safari 26+. Firefox has no `ImageCapture`, so still capture is unavailable there |
+| Screen capture (getDisplayMedia) | ✅ Done | Chrome / Edge / Safari 26+ via `ImageCapture`; Firefox via a video-frame fallback |
 | Image upload (file picker) | ✅ Done | Any image format |
 | Image drag-and-drop upload | ✅ Done | Drop image onto canvas area |
 | Video recording (MediaRecorder) | ✅ Done | WebM / MP4 depending on browser |
@@ -35,7 +35,7 @@ images can be exported as PNG or as JSON (for replay / integration).
 | Colour picker | ✅ Done | Full spectrum |
 | Stroke size slider | ✅ Done | 1–20px |
 | Highlight fill opacity slider | ✅ Done | 0–100% |
-| Undo | ✅ Done | Fixed: saves state before add |
+| Undo | ✅ Done | Covers annotation adds and select-tool moves |
 | Redo | ✅ Done | Restores redo stack |
 | Clear all annotations | ✅ Done | Confirm dialog |
 | Export PNG (base + annotations) | ✅ Done | Composited canvas download |
@@ -56,8 +56,8 @@ images can be exported as PNG or as JSON (for replay / integration).
 **Status key:** ✅ covered by an automated Playwright test that passes ·
 🚫 blocked from automation.
 
-53 of the 54 cases below are automated, across a smoke suite and a regression
-suite. Coverage is not the whole story: several cases substitute a canvas-backed
+60 of the 61 cases below are automated, across a smoke suite and a
+regression suite. Coverage is not the whole story: several cases substitute a canvas-backed
 `MediaStream` for `getDisplayMedia`, because the native screen-share picker is
 browser chrome that no automation can drive. `STABILITY_MATRIX.md` records the
 classification and the caveat for every case — read it before trusting a ✅.
@@ -75,7 +75,8 @@ classification and the caveat for every case — read it before trusting a ✅.
 | IC-06 | Very large image (> 4000px) | Canvas scales correctly; no crash | ✅ |
 | IC-07 | Drag-and-drop image onto canvas | Image loaded and displayed for annotation | ✅ |
 | IC-08 | Drag non-image file | Silently ignored | ✅ |
-| IC-09 | Browser without `ImageCapture` (Firefox) | Told to use Upload Image; no crash | ✅ |
+| IC-09 | Browser without `ImageCapture` (Firefox) | Captures via the video-frame fallback | ✅ |
+| IC-10 | Browser with no `getDisplayMedia` at all | Told to use Upload Image; no crash | ✅ |
 
 ### 3.2 Video Recording
 
@@ -108,6 +109,7 @@ classification and the caveat for every case — read it before trusting a ✅.
 | AT-13 | Tiny click (< 3px) | No annotation added | ✅ |
 | AT-14 | Touch draw on mobile | Works same as mouse draw | ✅ |
 | AT-15 | Select + drag a pen stroke | Whole path moves; no NaN in the export | ✅ |
+| AT-16 | Draw with the browser zoomed | Coordinates match the underlying image | ✅ |
 
 ### 3.4 Undo / Redo
 
@@ -120,6 +122,7 @@ classification and the caveat for every case — read it before trusting a ✅.
 | UR-05 | Redo stack cleared on new annotation | Can't redo after new draw | ✅ |
 | UR-06 | Ctrl+Z shortcut | Same as Undo button | ✅ |
 | UR-07 | Ctrl+Y shortcut | Same as Redo button | ✅ |
+| UR-08 | Undo after moving an annotation | Move reversed; a bare click adds no undo step | ✅ |
 
 ### 3.5 Export
 
@@ -139,6 +142,7 @@ classification and the caveat for every case — read it before trusting a ✅.
 | SG-01 | Click thumbnail | That snapshot loaded onto canvas | ✅ |
 | SG-02 | Delete snapshot | Removed from gallery | ✅ |
 | SG-03 | Multiple snapshots | Newest shown first | ✅ |
+| SG-04 | Two exports in the same millisecond | Both kept; deleting one leaves the other | ✅ |
 
 ### 3.7 Keyboard Shortcuts
 
@@ -160,28 +164,24 @@ classification and the caveat for every case — read it before trusting a ✅.
 
 ## 4. Known Limitations & Gaps
 
-1. **Screen capture is not available in every browser** — `getDisplayMedia`
-   works in Chrome, Edge and Safari 26+. Firefox implements `getDisplayMedia`
-   but not `ImageCapture`, so still capture fails there and the app directs the
-   user to Upload Image instead. Recording does work in Firefox.
-2. **Moves cannot be undone** — a select-tool move changes the annotation in
-   place without pushing onto the undo stack, so Ctrl+Z will not reverse it.
-3. **Annotations not persisted** — Refreshing the page loses all annotations
+1. **Annotations not persisted** — Refreshing the page loses all annotations
    (snapshots gallery is in-memory only).
-4. **No annotation labels** — Numbered callouts (① ② ③) are not yet supported.
-5. **No PDF export** — Only PNG export currently available.
-6. **Video annotation** — Recorded videos cannot be annotated frame-by-frame.
-7. **Screen capture API** — Not available in Safari on iOS; mobile users must
+2. **No annotation labels** — Numbered callouts (① ② ③) are not yet supported.
+3. **No PDF export** — Only PNG export currently available.
+4. **Video annotation** — Recorded videos cannot be annotated frame-by-frame.
+5. **Screen capture API** — Not available in Safari on iOS; mobile users must
    upload an image manually.
-8. **Canvas scales on zoom** — If the browser is zoomed in/out, the annotation
-   coordinates may be slightly misaligned with the underlying image.
+
+*Removed in v1.2, having been checked rather than assumed:* browser zoom
+misalignment (AT-16 shows `getPos()` already compensates via the bounding-rect
+ratio), Firefox capture (now works through the video-frame fallback, IC-09),
+and un-undoable moves (fixed, UR-08).
 
 ---
 
 ## 5. Roadmap / Next Steps
 
 ### Sprint 1 (Bug fixes & completeness)
-- [ ] Fix canvas coordinate scaling when browser is zoomed
 - [ ] Persist snapshots in localStorage (as data URLs)
 - [ ] Add numbered callout / label annotation type
 

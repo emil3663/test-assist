@@ -17,6 +17,7 @@ let redoStack    = [];
 
 let selectedAnnotation = null;
 let dragging = false;
+let moveRecorded = false;
 let dragOffX = 0, dragOffY = 0;
 
 let snapshots    = [];    // { id, label, baseDataUrl, annoDataUrl, annotations }
@@ -85,20 +86,53 @@ modeVideoBtn.addEventListener('click', () => setCaptureMode('video'));
 
 async function captureScreen() {
   try {
-    if (navigator.mediaDevices && navigator.mediaDevices.getDisplayMedia && typeof ImageCapture !== 'undefined') {
-      const stream = await navigator.mediaDevices.getDisplayMedia({ video: { cursor: 'always' }, audio: false });
-      const track  = stream.getVideoTracks()[0];
-      const capture= new ImageCapture(track);
-      const bitmap = await capture.grabFrame();
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getDisplayMedia) {
+      alert('This browser cannot capture the screen. Use Upload Image to annotate a screenshot you already have.');
+      return;
+    }
+    const stream = await navigator.mediaDevices.getDisplayMedia({ video: { cursor: 'always' }, audio: false });
+    const track  = stream.getVideoTracks()[0];
+    try {
+      loadImageBitmap(await grabFrame(track, stream));
+    } finally {
       track.stop();
-      loadImageBitmap(bitmap);
-    } else {
-      alert('Screen capture needs Chrome, Edge or Safari 26+. Use Upload Image to annotate a screenshot you already have.');
     }
   } catch (err) {
     if (err.name !== 'NotAllowedError') {
       alert('Could not capture screen: ' + err.message);
     }
+  }
+}
+
+/* Grab a single frame from a capture stream.
+   ImageCapture is the direct route, but Firefox does not implement it, so fall
+   back to painting one frame of a hidden <video> onto a canvas. */
+async function grabFrame(track, stream) {
+  if (typeof ImageCapture !== 'undefined') {
+    return new ImageCapture(track).grabFrame();
+  }
+
+  const video = document.createElement('video');
+  video.srcObject = stream;
+  video.muted = true;
+  video.playsInline = true;
+
+  try {
+    await video.play();
+    if (!video.videoWidth) {
+      await new Promise((resolve, reject) => {
+        const timer = setTimeout(
+          () => reject(new Error('Timed out waiting for the screen share to start')), 5000);
+        video.onloadedmetadata = () => { clearTimeout(timer); resolve(); };
+      });
+    }
+    const frame = document.createElement('canvas');
+    frame.width  = video.videoWidth;
+    frame.height = video.videoHeight;
+    frame.getContext('2d').drawImage(video, 0, 0);
+    return await createImageBitmap(frame);
+  } finally {
+    video.srcObject = null;
   }
 }
 
@@ -249,6 +283,9 @@ function onMouseDown(e) {
     selectedAnnotation = findAnnotation(x, y);
     if (selectedAnnotation) {
       dragging = true;
+      // the undo state is recorded on the first actual movement, not here, so
+      // that merely clicking an annotation does not add a no-op undo step
+      moveRecorded = false;
       // remember the grab point; the move is applied as a delta so that every
       // kind of annotation (including pen strokes, which have no x/y) moves
       dragOffX = x;
@@ -267,6 +304,7 @@ function onMouseMove(e) {
   const { x, y } = getPos(e);
 
   if (currentTool === 'select' && dragging && selectedAnnotation) {
+    if (!moveRecorded) { pushUndoState(); moveRecorded = true; }
     moveAnnotation(selectedAnnotation, x - dragOffX, y - dragOffY);
     dragOffX = x;
     dragOffY = y;
@@ -319,10 +357,14 @@ function onMouseUp(e) {
   pushAnnotation({ type: currentTool, x: startX, y: startY, x2: x, y2: y, color: strokeColor, size: strokeSize, fillOpacity });
 }
 
-function pushAnnotation(anno) {
+function pushUndoState() {
   undoStack.push(JSON.parse(JSON.stringify(annotations)));
-  annotations.push(anno);
   redoStack = [];
+}
+
+function pushAnnotation(anno) {
+  pushUndoState();
+  annotations.push(anno);
   redrawAnnotations();
 }
 
@@ -518,8 +560,12 @@ function exportJson() {
 }
 
 /* ─── Snapshot gallery ─── */
+let snapshotSeq = 0;
+
 function addSnapshot(dataUrl) {
-  const id    = Date.now().toString();
+  // Date.now() alone collides when two exports land in the same millisecond,
+  // which made delete remove both of them
+  const id    = Date.now() + '-' + (++snapshotSeq);
   const label = 'Snap ' + new Date().toLocaleTimeString();
   snapshots.unshift({ id, label, dataUrl });
   renderSnapshots();

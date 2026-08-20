@@ -113,14 +113,26 @@ export async function dropFile(page: Page, name: string, type: string, base64: s
  * because ImageCapture.grabFrame() rejects on a track that has not yet
  * produced a frame.
  */
-export type CaptureMode = 'grant' | 'deny' | 'error' | 'no-imagecapture';
+export type CaptureMode =
+  | 'grant'                  // stream available, ImageCapture present (Chrome/Edge/Safari)
+  | 'grant-no-imagecapture'  // stream available, ImageCapture absent (Firefox)
+  | 'deny'                   // user dismisses the picker
+  | 'error'                  // the device fails
+  | 'unsupported';           // no getDisplayMedia at all (older Safari, iOS)
 
 export async function stubDisplayMedia(page: Page, mode: CaptureMode = 'grant', w = 640, h = 480) {
   await page.addInitScript(({ mode, w, h }) => {
-    if (mode === 'no-imagecapture') {
-      delete (window as any).ImageCapture;   // emulates Firefox
+    if (mode === 'grant-no-imagecapture') delete (window as any).ImageCapture;
+
+    if (mode === 'unsupported') {
+      // getDisplayMedia lives on MediaDevices.prototype, so `delete` on the
+      // instance is a no-op — shadow it with undefined instead
+      Object.defineProperty(navigator.mediaDevices, 'getDisplayMedia', {
+        value: undefined, configurable: true, writable: true,
+      });
       return;
     }
+
     (navigator.mediaDevices as any).getDisplayMedia = async () => {
       if (mode === 'deny') {
         const e: any = new Error('Permission denied'); e.name = 'NotAllowedError'; throw e;
@@ -144,6 +156,10 @@ export async function stubDisplayMedia(page: Page, mode: CaptureMode = 'grant', 
     };
   }, { mode, w, h });
 }
+
+/** Apply a browser-style page zoom. */
+export const setZoom = (page: Page, factor: number) =>
+  page.evaluate((z) => { document.body.style.zoom = String(z); }, factor);
 
 /* ─── Image fixtures ────────────────────────────────────────────────────── */
 /*

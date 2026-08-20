@@ -1,6 +1,6 @@
 # 🔍 Test Assist — Browser build stability matrix
 
-**Version:** 1.0
+**Version:** 1.1
 **Last updated:** 2026-08-20
 **Applies to:** the browser build only. The desktop build is covered by 29
 pytest regression tests under `python/tests/`.
@@ -63,13 +63,13 @@ Far fewer than expected:
 
 | | Count |
 |---|---|
-| Cases in `TEST_PLAN.md` v1.0 | 54 |
-| Automated and passing | 53 |
+| Cases in `TEST_PLAN.md` v1.2 | 61 |
+| Automated and passing | 60 |
 | Blocked | 1 (VR-04) |
-| Cases added during triage | 3 |
-| Automated tests | 45 (8 smoke, 37 regression) |
+| Cases added during triage | 7 (from an original 54) |
+| Automated tests | 49 (8 smoke, 41 regression) |
 
-Two defects were found by writing these tests; both are fixed and both now have
+Four defects were found by writing these tests; all are fixed and all now have
 a regression test — see **Defects found** below.
 
 ---
@@ -86,7 +86,8 @@ a regression test — see **Defects found** below.
 | IC-06 | Stable | regression | 4200×600; asserts canvas dimensions and no page error |
 | IC-07 | Stable | regression | Real `dragover`/`drop` events with a `DataTransfer` |
 | IC-08 | Stable | regression | Non-image drop must be ignored silently |
-| IC-09 | Moderate | regression | **Added.** Guards the README's browser-support claim: with `ImageCapture` removed (as in Firefox) the user must be pointed at Upload Image |
+| IC-09 | Moderate | regression | **Added.** With `ImageCapture` removed (as in Firefox), capture must still succeed through the video-frame fallback |
+| IC-10 | Stable | regression | **Added.** With no `getDisplayMedia` at all, the user must be pointed at Upload Image |
 
 ## 3.2 Video Recording
 
@@ -115,6 +116,7 @@ a regression test — see **Defects found** below.
 | AT-13 | Stable | regression | Sub-3px drag must add nothing |
 | AT-14 | Moderate | regression | Synthetic `TouchEvent`s; real hardware touch is still a manual check |
 | AT-15 | Stable | regression | **Added.** Dragging a pen stroke — see the second defect below |
+| AT-16 | Stable | regression | **Added.** Drawing with the page zoomed. Added to disprove a documented limitation, not to cover one |
 
 ## 3.4 Undo / Redo
 
@@ -127,10 +129,7 @@ a regression test — see **Defects found** below.
 | UR-05 | Stable | regression | Redo stack cleared by a new annotation |
 | UR-06 | Stable | regression | Also satisfies KS-08 |
 | UR-07 | Stable | regression | Also satisfies KS-09 |
-
-**Known gap, not a test failure:** a select-tool *move* is not pushed onto the
-undo stack, so moves cannot be undone. `TEST_PLAN.md` does not specify this
-either way, so no test asserts it. Worth a decision before it is called done.
+| UR-08 | Stable | regression | **Added.** Moves are undoable, and a bare click adds no undo step |
 
 ## 3.5 Export
 
@@ -149,7 +148,8 @@ either way, so no test asserts it. Worth a decision before it is called done.
 |----|-----------|-------|-------|
 | SG-01 | Stable | regression | |
 | SG-02 | Stable | regression | |
-| SG-03 | Moderate | regression | Snapshot labels are time-based, so the test waits a second between exports |
+| SG-03 | Stable | regression | Was Moderate: it needed a one-second wait between exports until snapshot ids stopped colliding |
+| SG-04 | Stable | regression | **Added.** Two exports in the same millisecond — see the fourth defect below |
 
 ## 3.7 Keyboard Shortcuts
 
@@ -165,8 +165,8 @@ either way, so no test asserts it. Worth a decision before it is called done.
 
 ## Defects found by writing these tests
 
-Both were in the select-tool drag handler, both are fixed, both now have a
-regression test that would catch them coming back.
+All four are fixed, and each has a regression test that would catch it coming
+back.
 
 **1. Dragging a shape deformed it instead of moving it.** `onMouseMove` moved
 `x`/`y` but left `x2`/`y2` where they were, so a rectangle dragged 100px to the
@@ -180,6 +180,17 @@ from `selectedAnnotation.x` — `undefined`. The stroke did not move, and the
 Both are now handled by a single `moveAnnotation(a, dx, dy)` that translates
 every geometry an annotation can carry.
 
+**3. Snapshot ids collided.** Ids were `Date.now()` alone, so two exports in the
+same millisecond shared one id — deleting either removed both, and clicking a
+thumbnail could load the wrong one. Caught by SG-04. This one is worth noting
+as a process point: the first version of SG-03 papered over it with a
+one-second `waitForTimeout` between exports. A sleep that exists to avoid a
+collision is a defect in disguise, and removing it is what exposed this.
+
+**4. The page 404'd on `/favicon.ico`** on every visit, which the smoke suite's
+"no console errors" assertion caught immediately. Fixed with an inline SVG
+icon.
+
 ---
 
 ## Suite design
@@ -190,8 +201,8 @@ Two configs rather than one config with tags:
 |---|---|---|
 | Config | `playwright.smoke.config.ts` | `playwright.regression.config.ts` |
 | Runs | Every push, via CI | On demand |
-| Tests | 8 | 37 |
-| Wall clock | ~10s | ~45s |
+| Tests | 8 | 41 |
+| Wall clock | ~10s | ~50s |
 | Parallel | yes | **no** — `workers: 1` |
 | Retries | **0** | **0** |
 | Port | 4321 | 4322 |
@@ -212,5 +223,5 @@ rather than running against `file://` or a dev server someone left running.
 npm ci
 npx playwright install chromium
 npm run test:smoke        # ~10s
-npm run test:regression   # ~45s
+npm run test:regression   # ~50s
 ```

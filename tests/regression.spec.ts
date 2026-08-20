@@ -10,7 +10,7 @@ import { test } from '@playwright/test';
 import {
   expect, gotoApp, collectDialogs, collectPageErrors, uploadImage, pngBuffer, jpegBuffer,
   selectTool, dragOn, clickOn, setControl, annotations, snapshots, canvasSize,
-  placeholderHidden, stubDisplayMedia, dropFile, pixelAt, isPng,
+  placeholderHidden, stubDisplayMedia, dropFile, pixelAt, isPng, setZoom,
 } from './helpers';
 import { readFile } from 'node:fs/promises';
 
@@ -75,16 +75,34 @@ test.describe('3.1 Image Capture & Upload', () => {
     expect(errors).toEqual([]);
   });
 
-  test('IC-09 — a browser without ImageCapture is told what to do instead', async ({ page }) => {
-    // Not in TEST_PLAN v1.0; added because the README now makes a browser-support
-    // claim (Firefox has no ImageCapture) that should not be able to drift.
-    await stubDisplayMedia(page, 'no-imagecapture');
+  test('IC-09 — a browser without ImageCapture still captures, via the video fallback', async ({ page }) => {
+    // Firefox implements getDisplayMedia but not ImageCapture. The app falls back
+    // to painting one frame of a hidden <video> onto a canvas.
+    await stubDisplayMedia(page, 'grant-no-imagecapture', 720, 540);
+    const dialogs = collectDialogs(page);
+    await gotoApp(page);
+
+    expect(await page.evaluate(() => typeof (window as any).ImageCapture),
+      'the test must actually be running without ImageCapture').toBe('undefined');
+
+    await page.click('#btnCaptureTab');
+    await page.waitForFunction(() => (window as any).baseCanvas.width === 720, null, { timeout: 10_000 });
+
+    expect(await canvasSize(page)).toEqual([720, 540]);
+    expect(await placeholderHidden(page)).toBe(true);
+    expect(dialogs).toEqual([]);
+  });
+
+  test('IC-10 — a browser with no getDisplayMedia is told to upload instead', async ({ page }) => {
+    await stubDisplayMedia(page, 'unsupported');
     const dialogs = collectDialogs(page);
     await gotoApp(page);
     await page.click('#btnCaptureTab');
     await page.waitForTimeout(300);
+
     expect(dialogs).toHaveLength(1);
     expect(dialogs[0]).toMatch(/Upload Image/i);
+    expect(await placeholderHidden(page)).toBe(false);
   });
 });
 
@@ -237,6 +255,28 @@ test.describe('3.3 Annotation Tools', () => {
     expect(list[0].type).toBe('rect');
   });
 
+  test('AT-16 — annotation coordinates stay accurate under browser zoom', async ({ page }) => {
+    // TEST_PLAN v1.0 listed zoom misalignment as a known limitation. getPos()
+    // scales by the canvas' bounding-rect ratio, so it is not one.
+    await gotoApp(page);
+    await setZoom(page, 1.5);
+    await uploadImage(page, FIXTURE());
+    await selectTool(page, 'rect');
+
+    const box = (await page.locator('#annoCanvas').boundingBox())!;
+    await page.mouse.move(box.x + box.width * 0.25, box.y + box.height * 0.25);
+    await page.mouse.down();
+    await page.mouse.move(box.x + box.width * 0.75, box.y + box.height * 0.75, { steps: 8 });
+    await page.mouse.up();
+
+    const [a] = await annotations(page);
+    // the fixture is 400x300, so the quarter and three-quarter points are exact
+    expect(Math.abs(a.x - 100)).toBeLessThanOrEqual(2);
+    expect(Math.abs(a.y - 75)).toBeLessThanOrEqual(2);
+    expect(Math.abs(a.x2 - 300)).toBeLessThanOrEqual(2);
+    expect(Math.abs(a.y2 - 225)).toBeLessThanOrEqual(2);
+  });
+
   test('AT-15 — dragging a pen stroke moves it without corrupting its path', async ({ page }) => {
     // Not in TEST_PLAN v1.0. Pen annotations have no x/y, so the select-tool
     // drag used to write NaN into them and that NaN reached the JSON export.
@@ -289,6 +329,28 @@ test.describe('3.4 Undo / Redo', () => {
     await dragOn(page, 140, 20, 220, 80);
     await page.click('#btnRedo');
     expect(await annotations(page), 'redo must not resurrect the discarded branch').toHaveLength(1);
+  });
+
+  test('UR-08 — a move can be undone, and a bare click adds no undo step', async ({ page }) => {
+    await withImage(page);
+    await selectTool(page, 'rect');
+    await dragOn(page, 40, 40, 140, 120);
+    const before = { ...(await annotations(page))[0] };
+
+    // clicking an annotation without moving it must not add a no-op undo step
+    await selectTool(page, 'select');
+    await clickOn(page, 60, 60);
+    await page.click('#btnUndo');
+    expect(await annotations(page), 'the click should not have been recorded').toHaveLength(0);
+    await page.click('#btnRedo');
+
+    await dragOn(page, 60, 60, 160, 140);
+    expect((await annotations(page))[0].x).toBeCloseTo(before.x + 100, 0);
+
+    await page.click('#btnUndo');
+    const after = (await annotations(page))[0];
+    expect(after.x).toBeCloseTo(before.x, 0);
+    expect(after.x2).toBeCloseTo(before.x2, 0);
   });
 
   test('UR-06/UR-07 — Ctrl+Z and Ctrl+Y mirror the buttons', async ({ page }) => {
@@ -381,10 +443,24 @@ test.describe('3.6 Snapshot Gallery', () => {
     await expect(page.locator('.snapshot-thumb')).toHaveCount(0);
   });
 
+  test('SG-04 — two exports in the same millisecond stay distinct', async ({ page }) => {
+    // ids used to be Date.now() alone, so a rapid second export collided with
+    // the first and deleting one removed both
+    await withImage(page);
+    await exportOnce(page, 20);
+    await exportOnce(page, 150);
+
+    const list = await snapshots(page);
+    expect(list).toHaveLength(2);
+    expect(list[0].id).not.toBe(list[1].id);
+
+    await page.locator('.snap-del').first().click();
+    expect(await snapshots(page), 'deleting one must not remove the other').toHaveLength(1);
+  });
+
   test('SG-03 — the newest snapshot is listed first', async ({ page }) => {
     await withImage(page);
     await exportOnce(page, 20);
-    await page.waitForTimeout(1100);          // labels are time-based
     await exportOnce(page, 150);
 
     const list = await snapshots(page);
