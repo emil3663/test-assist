@@ -44,7 +44,6 @@ images can be exported as PNG or as JSON (for replay / integration).
 | Delete snapshot | ✅ Done | |
 | Keyboard shortcuts | ✅ Done | Ctrl+Z, Ctrl+Y, Ctrl+S, h/t/c/a/r/p/s |
 | Touch / mobile drawing | ✅ Done | Touch events mapped to mouse |
-| Drag-and-drop image upload | ❌ Not wired | Drop zone UI exists but handler missing |
 | Annotation labels (numbering) | ❌ Not started | |
 | Cloud save / share | ❌ Not started | |
 | PDF export | ❌ Not started | |
