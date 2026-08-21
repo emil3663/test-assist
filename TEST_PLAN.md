@@ -1,7 +1,7 @@
 # 🔍 Test Assist — Test Plan
 
-**Version:** 1.2  
-**Last updated:** 2026-08-20  
+**Version:** 1.3  
+**Last updated:** 2026-08-21  
 **Status:** In active development
 
 ---
@@ -36,6 +36,7 @@ images can be exported as PNG or as JSON (for replay / integration).
 | Stroke size slider | ✅ Done | 1–20px |
 | Highlight fill opacity slider | ✅ Done | 0–100% |
 | Undo | ✅ Done | Covers annotation adds and select-tool moves |
+| Session persistence | ✅ Done | IndexedDB; survives a refresh |
 | Redo | ✅ Done | Restores redo stack |
 | Clear all annotations | ✅ Done | Confirm dialog |
 | Export PNG (base + annotations) | ✅ Done | Composited canvas download |
@@ -56,7 +57,7 @@ images can be exported as PNG or as JSON (for replay / integration).
 **Status key:** ✅ covered by an automated Playwright test that passes ·
 🚫 blocked from automation.
 
-60 of the 61 cases below are automated, across a smoke suite and a
+66 of the 67 cases below are automated, across a smoke suite and a
 regression suite. Coverage is not the whole story: several cases substitute a canvas-backed
 `MediaStream` for `getDisplayMedia`, because the native screen-share picker is
 browser chrome that no automation can drive. `STABILITY_MATRIX.md` records the
@@ -160,12 +161,23 @@ classification and the caveat for every case — read it before trusting a ✅.
 | KS-10 | Ctrl+S | Save PNG | ✅ |
 | KS-11 | Typing in the text popup | Tool shortcuts stay inert | ✅ |
 
+### 3.8 Session Persistence
+
+| ID | Test | Expected Result | Status |
+|----|------|-----------------|--------|
+| SP-01 | Reload after annotating | Image and annotations are restored | ✅ |
+| SP-02 | Undo on a restored session | Undo history came back with it | ✅ |
+| SP-03 | Reload with snapshots taken | Snapshot gallery is restored | ✅ |
+| SP-04 | Clear the saved session | Canvas empties and the session does not return on reload | ✅ |
+| SP-05 | Session saved under an old schema | Discarded rather than half-read; no error | ✅ |
+| SP-06 | Storage unavailable (private window) | App works normally; nothing is remembered | ✅ |
+
 ---
 
 ## 4. Known Limitations & Gaps
 
-1. **Annotations not persisted** — Refreshing the page loses all annotations
-   (snapshots gallery is in-memory only).
+1. **Session storage is per-browser** — a restored session belongs to the
+   browser it was made in; it does not follow you to another machine.
 2. **No annotation labels** — Numbered callouts (① ② ③) are not yet supported.
 3. **No PDF export** — Only PNG export currently available.
 4. **Video annotation** — Recorded videos cannot be annotated frame-by-frame.

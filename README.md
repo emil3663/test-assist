@@ -50,7 +50,7 @@ are in the left rail.*
 | **Install** | None — open the live URL | Download the release zip and run `TestAssist.exe`, or run from source |
 | **Capture** | `getDisplayMedia`, `MediaRecorder` | Native screenshot overlay, frame recorder |
 | **Best for** | Trying the full capture → annotate → export loop in ten seconds, with nothing to install | Long test sessions — a tray launcher that stays above the application under test |
-| **Tests** | 49 Playwright tests — smoke suite in CI, regression suite on demand | 29 pytest regression tests, 74 assertions, in CI |
+| **Tests** | 55 Playwright tests — smoke suite in CI, regression suite on demand | 108 pytest tests across a regression and a functional suite, in CI |
 
 Both produce the same two outputs: a composited PNG for attaching to a defect,
 and a structured JSON annotation layer.
@@ -195,13 +195,13 @@ frame sequence.
 Both builds carry automated coverage, and both are honest about what is not
 covered.
 
-**Browser build — 49 Playwright tests**
+**Browser build — 55 Playwright tests**
 
 ```bash
 npm ci
 npx playwright install chromium
 npm run test:smoke        # 8 tests, ~10s — runs in CI on every push
-npm run test:regression   # 41 tests, ~50s — on demand
+npm run test:regression   # 47 tests, ~55s — on demand
 ```
 
 The split is deliberate. The smoke suite guards the critical path a reviewer
@@ -212,16 +212,31 @@ own static server on their own port rather than running against `file://` or a
 dev server, because `file://` is not a secure context and the capture APIs
 behave differently there.
 
-`STABILITY_MATRIX.md` triages every test-plan case — 60 automated, 1 blocked —
+`STABILITY_MATRIX.md` triages every browser test-plan case — 66 automated, 1 blocked —
 and records the caveats. The most important one: the native screen-share picker
 is browser chrome that no automation can drive, so capture and recording tests
 substitute a canvas-backed `MediaStream`. They prove what the app does with a
 stream, not that the picker appears.
 
-**Desktop build — 29 pytest regression tests, 74 assertions**
+**Desktop build — 108 pytest tests**
 
-- In `python/tests/test_regressions.py`; run `pytest` from `python/`
-- Executed on every push by `.github/workflows/python-tests.yml`
+```bash
+cd python
+pytest -q                 # under 2 seconds
+```
+
+`test_regressions.py` holds the original regression cases; `test_functional.py`
+covers every feature in `DESKTOP_TEST_PLAN.md` — each tool, crop, blur,
+selection and layering, zoom, undo/redo, all three export paths, capture
+history, the launcher, shortcuts and the capture overlay. Tests drive real
+widgets offscreen rather than asserting on internals where a real path exists.
+
+`DESKTOP_STABILITY_MATRIX.md` triages all 91 cases — 87 automated, 4 blocked —
+and says plainly what offscreen testing does not prove: that Qt dispatches
+events correctly in a real window, that the layout is usable, or that anything
+is legible. Those stay manual.
+
+Executed on every push by `.github/workflows/python-tests.yml`.
 
 ---
 
@@ -229,8 +244,7 @@ stream, not that the picker appears.
 
 Active development. The full annotation and capture feature set is delivered and
 in use. Known gaps, all listed in `TEST_PLAN.md`: annotation numbering, PDF
-export, cloud save and share, frame-by-frame video annotation, and annotations
-not surviving a page refresh.
+export, cloud save and share, and frame-by-frame video annotation.
 
 ---
 

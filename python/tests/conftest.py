@@ -28,3 +28,24 @@ def blank_pixmap() -> QPixmap:
     pixmap = QPixmap(480, 320)
     pixmap.fill(QColor("white"))
     return pixmap
+
+
+@pytest.fixture(autouse=True)
+def isolate_home(monkeypatch, tmp_path):
+    """Point Path.home() at a temp directory for every test.
+
+    EditorWindow.__init__ calls _load_history(), which creates
+    ~/.test-assist/history and deletes any PNG under 5 KB it finds there. Any
+    test that constructs an editor would otherwise prune the real capture
+    history of whoever ran the suite.
+    """
+    home = tmp_path / "home"
+    home.mkdir(parents=True, exist_ok=True)
+
+    import capture
+    import editor
+
+    monkeypatch.setattr(Path, "home", staticmethod(lambda: home))
+    monkeypatch.setattr(capture.Path, "home", staticmethod(lambda: home))
+    monkeypatch.setattr(editor.Path, "home", staticmethod(lambda: home))
+    return home

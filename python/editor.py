@@ -10,7 +10,7 @@ import time
 import webbrowser
 
 from PySide6.QtCore import Qt, QSize, Signal
-from PySide6.QtGui import QColor, QIcon, QKeySequence, QPixmap, QShortcut
+from PySide6.QtGui import QColor, QIcon, QImage, QKeySequence, QPixmap, QShortcut
 from PySide6.QtWidgets import (
     QApplication,
     QButtonGroup,
@@ -507,11 +507,22 @@ class EditorWindow(QMainWindow):
     def _load_history(self) -> None:
         self._history_dir = Path.home() / ".test-assist" / "history"
         self._history_dir.mkdir(parents=True, exist_ok=True)
-        # Remove blank/corrupt snapshots saved from blank canvas states (< 5 KB).
-        for stale in self._history_dir.glob("*.png"):
-            if stale.stat().st_size < 5000:
-                stale.unlink(missing_ok=True)
+        self._prune_unreadable_history()
         self._refresh_history()
+
+    def _prune_unreadable_history(self) -> None:
+        """Remove snapshots that are not loadable images.
+
+        This used to delete anything under 5 KB, which is a file-size proxy for
+        "blank or corrupt". It is a bad proxy: a capture of a dialog or a form
+        on a plain background compresses well under 5 KB, so real evidence was
+        being deleted on the next launch. Readability is the thing actually
+        being tested for, so test for it directly.
+        """
+        for candidate in self._history_dir.glob("*.png"):
+            image = QImage(str(candidate))
+            if image.isNull() or image.width() == 0 or image.height() == 0:
+                candidate.unlink(missing_ok=True)
 
     def _persist_history_snapshot(self, pixmap: QPixmap) -> None:
         # Skip saving if the image is too small to be a real capture (blank canvas states).

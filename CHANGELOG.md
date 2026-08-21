@@ -3,6 +3,48 @@
 All notable changes to Test Assist. Dates are the date of the change, not of a
 release; only tagged versions appear as releases.
 
+## [1.1.0] — 2026-08-21
+
+### Fixed
+
+- **The recorder held every frame in memory.** Measured at 7.92 MB per frame, so
+  a one-minute recording held roughly 7 GB and would exhaust memory before you
+  pressed stop. Frames are now scaled, encoded and written to disk as they are
+  captured; the same 90 frames cost 4 MB instead of 711 MB. Added a three-minute
+  cap and a dropped-frame counter.
+- **History pruning deleted real captures.** Any history PNG under 5 KB was
+  removed on launch, as a proxy for "blank or corrupt". A capture of a dialog or
+  a form on a plain background compresses well below that, so genuine evidence
+  was being deleted. Pruning now tests whether the file is a readable image.
+- **The recorder crashed** when its frame counter and the files on disk
+  disagreed, raising `IndexError` instead of finishing cleanly.
+- **The test suite could destroy your capture history.** Constructing an editor
+  triggers history pruning against the real `~/.test-assist`, so running the
+  tests operated on your own captures. Every test now runs against a temporary
+  home directory.
+
+### Added
+
+- **Browser sessions survive a refresh.** Image, annotations, undo/redo history
+  and snapshots are stored in IndexedDB and restored on load, behind a versioned
+  schema, with a restore notice and a control to clear it. IndexedDB rather than
+  localStorage because one screenshot as a data URL is comparable to
+  localStorage's entire budget.
+- **`DESKTOP_TEST_PLAN.md`** — 91 ID-coded cases covering every desktop feature.
+- **`DESKTOP_STABILITY_MATRIX.md`** — triage for all of them: 87 automated, 4
+  blocked, and a plain statement of what offscreen testing does not prove.
+- **`python/tests/test_functional.py`** — the automation for that plan. 108
+  pytest tests in total, running in under two seconds.
+- Six browser tests for session persistence, including a session written under
+  an unrecognised schema and storage being unavailable entirely.
+
+### Known limitations
+
+- Recordings are capped at three minutes and scaled to 1280px wide; full
+  resolution frames cannot be encoded inside the frame budget.
+- Selection is bound to double-click for every tool, including Select. Recorded
+  as an open question in `DESKTOP_TEST_PLAN.md` rather than changed silently.
+
 ## [1.0.0] — 2026-08-20
 
 First tagged release. Both builds are feature-complete for the workflow they
