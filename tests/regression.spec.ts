@@ -500,3 +500,115 @@ test.describe('3.7 Keyboard Shortcuts', () => {
     expect(await page.evaluate<string>('currentTool')).toBe('text');
   });
 });
+
+/* ─── 3.8 Session persistence ──────────────────────────────────────────── */
+
+test.describe('3.8 Session Persistence', () => {
+  test('SP-01 — an annotated image survives a reload', async ({ page }) => {
+    await withImage(page);
+    await selectTool(page, 'rect');
+    await dragOn(page, 20, 20, 120, 90);
+    await selectTool(page, 'highlight');
+    await dragOn(page, 150, 40, 260, 110);
+    await page.evaluate(() => (window as any).__saveSessionNow());
+
+    await page.reload();
+    await page.waitForFunction(() => (window as any).__APP_READY__ === true);
+
+    expect(await canvasSize(page)).toEqual([400, 300]);
+    expect(await placeholderHidden(page)).toBe(true);
+    expect((await annotations(page)).map((a: any) => a.type)).toEqual(['rect', 'highlight']);
+    await expect(page.locator('#sessionNotice')).toBeVisible();
+  });
+
+  test('SP-02 — undo still works on a restored session', async ({ page }) => {
+    await withImage(page);
+    await selectTool(page, 'rect');
+    await dragOn(page, 20, 20, 120, 90);
+    await dragOn(page, 150, 20, 250, 90);
+    await page.evaluate(() => (window as any).__saveSessionNow());
+
+    await page.reload();
+    await page.waitForFunction(() => (window as any).__APP_READY__ === true);
+
+    expect(await annotations(page)).toHaveLength(2);
+    await page.click('#btnUndo');
+    expect(await annotations(page), 'the undo history came back too').toHaveLength(1);
+  });
+
+  test('SP-03 — snapshots survive a reload', async ({ page }) => {
+    await withImage(page);
+    await selectTool(page, 'rect');
+    await dragOn(page, 20, 20, 120, 90);
+    await Promise.all([page.waitForEvent('download'), page.click('#btnExportPng')]);
+    await page.evaluate(() => (window as any).__saveSessionNow());
+
+    await page.reload();
+    await page.waitForFunction(() => (window as any).__APP_READY__ === true);
+
+    expect(await snapshots(page)).toHaveLength(1);
+    await expect(page.locator('.snapshot-thumb')).toHaveCount(1);
+  });
+
+  test('SP-04 — clearing the session really clears it', async ({ page }) => {
+    await withImage(page);
+    await selectTool(page, 'rect');
+    await dragOn(page, 20, 20, 120, 90);
+    await page.evaluate(() => (window as any).__saveSessionNow());
+    await page.reload();
+    await page.waitForFunction(() => (window as any).__APP_READY__ === true);
+
+    await page.click('#btnClearSession');
+    await expect(page.locator('#sessionNotice')).toBeHidden();
+    expect(await annotations(page)).toHaveLength(0);
+    expect(await placeholderHidden(page)).toBe(false);
+
+    await page.reload();
+    await page.waitForFunction(() => (window as any).__APP_READY__ === true);
+    expect(await placeholderHidden(page), 'the cleared session must not come back').toBe(false);
+    await expect(page.locator('#sessionNotice')).toBeHidden();
+  });
+
+  test('SP-05 — a session saved under an old schema is discarded, not half-read', async ({ page }) => {
+    await gotoApp(page);
+    const errors = collectPageErrors(page);
+    await page.evaluate(async () => {
+      const db: IDBDatabase = await new Promise((resolve, reject) => {
+        const r = indexedDB.open('test-assist', 1);
+        r.onsuccess = () => resolve(r.result);
+        r.onerror = () => reject(r.error);
+      });
+      const tx = db.transaction('session', 'readwrite');
+      tx.objectStore('session').put(
+        { schema: 999, baseImage: 'data:image/png;base64,zzz', annotations: [{ type: 'nonsense' }] },
+        'current',
+      );
+      await new Promise(res => { tx.oncomplete = res; });
+    });
+
+    await page.reload();
+    await page.waitForFunction(() => (window as any).__APP_READY__ === true);
+
+    expect(await placeholderHidden(page)).toBe(false);
+    expect(await annotations(page)).toHaveLength(0);
+    expect(errors).toEqual([]);
+  });
+
+  test('SP-06 — the app still works when storage is unavailable', async ({ page }) => {
+    // Private windows and blocked site data both break indexedDB.open().
+    await page.addInitScript(() => {
+      Object.defineProperty(window, 'indexedDB', {
+        get() { throw new DOMException('storage blocked', 'SecurityError'); },
+      });
+    });
+    const errors = collectPageErrors(page);
+    await gotoApp(page);
+
+    await uploadImage(page, pngBuffer(400, 300, [40, 70, 120]));
+    await selectTool(page, 'rect');
+    await dragOn(page, 20, 20, 120, 90);
+
+    expect(await annotations(page), 'annotating must not depend on storage').toHaveLength(1);
+    expect(errors).toEqual([]);
+  });
+});

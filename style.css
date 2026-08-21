@@ -286,6 +286,22 @@ button:disabled {
 
 .tool-actions { display: flex; flex-wrap: wrap; gap: 6px; }
 .tool-actions-extra { margin-top: 8px; }
+.session-notice {
+  margin: 14px 0 4px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid rgba(80, 200, 180, 0.28);
+  background: rgba(80, 200, 180, 0.08);
+  color: #9ee9d7;
+  font-size: 0.78rem;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  align-items: flex-start;
+}
+
+.session-notice[hidden] { display: none; }
+
 .snapshot-section { margin-top: 18px; }
 
 /* ── Snapshot list ── */

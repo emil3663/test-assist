@@ -20,6 +20,7 @@ let dragging = false;
 let moveRecorded = false;
 let dragOffX = 0, dragOffY = 0;
 
+let baseImageDataUrl = null;
 let snapshots    = [];    // { id, label, baseDataUrl, annoDataUrl, annotations }
 
 let mediaRecorder = null;
@@ -141,6 +142,8 @@ function loadImageBitmap(bitmap) {
   baseCtx.drawImage(bitmap, 0, 0);
   placeholder.style.display = 'none';
   clearAnnotations(false);
+  baseImageDataUrl = baseCanvas.toDataURL('image/png');
+  scheduleSave();
   launcherStatus.textContent = 'Screenshot loaded. Pick a tool on the left, then export a PNG or the JSON annotation layer.';
 }
 
@@ -151,6 +154,8 @@ function loadImageSrc(src) {
     baseCtx.drawImage(img, 0, 0);
     placeholder.style.display = 'none';
     clearAnnotations(false);
+    baseImageDataUrl = baseCanvas.toDataURL('image/png');
+    scheduleSave();
     launcherStatus.textContent = 'Image loaded. Pick a tool on the left, then export a PNG or the JSON annotation layer.';
   };
   img.src = src;
@@ -366,6 +371,7 @@ function pushAnnotation(anno) {
   pushUndoState();
   annotations.push(anno);
   redrawAnnotations();
+  scheduleSave();
 }
 
 function redrawAnnotations() {
@@ -506,6 +512,7 @@ document.getElementById('btnUndo').addEventListener('click', () => {
   redoStack.push(JSON.parse(JSON.stringify(annotations)));
   annotations = undoStack.pop();
   redrawAnnotations();
+  scheduleSave();
 });
 
 document.getElementById('btnRedo').addEventListener('click', () => {
@@ -513,6 +520,7 @@ document.getElementById('btnRedo').addEventListener('click', () => {
   undoStack.push(JSON.parse(JSON.stringify(annotations)));
   annotations = redoStack.pop();
   redrawAnnotations();
+  scheduleSave();
 });
 
 document.getElementById('btnClearAnno').addEventListener('click', () => {
@@ -525,6 +533,7 @@ function clearAnnotations(pushUndo) {
   annotations = [];
   redoStack   = [];
   annoCtx.clearRect(0, 0, annoCanvas.width, annoCanvas.height);
+  if (typeof scheduleSave === 'function') scheduleSave();
 }
 
 /* ─── Export ─── */
@@ -563,6 +572,7 @@ function exportJson() {
 let snapshotSeq = 0;
 
 function addSnapshot(dataUrl) {
+  scheduleSave();
   // Date.now() alone collides when two exports land in the same millisecond,
   // which made delete remove both of them
   const id    = Date.now() + '-' + (++snapshotSeq);
@@ -588,6 +598,7 @@ window.loadSnapshot = id => {
 window.deleteSnapshot = id => {
   snapshots = snapshots.filter(s => s.id !== id);
   renderSnapshots();
+  scheduleSave();
 };
 
 /* ─── Capture launcher ─── */
@@ -637,7 +648,162 @@ function escHtml(str) {
   return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
 
-/* Test hook: set once initialisation has finished, so the Playwright suites
-   can wait on a real signal instead of an arbitrary timeout after load.
-   Inert in normal use. */
-window.__APP_READY__ = true;
+/* ─── Session persistence ───────────────────────────────────────────────────
+   A refresh used to lose everything. The session lives in IndexedDB rather
+   than localStorage because a single screenshot as a data URL is already
+   comparable to localStorage's whole ~5 MB budget.                          */
+
+const DB_NAME       = 'test-assist';
+const DB_VERSION    = 1;
+const STORE         = 'session';
+const SCHEMA        = 1;      // bump when the saved shape changes
+const SNAPSHOT_CAP  = 20;     // keep the store bounded
+const SAVE_DEBOUNCE = 500;
+
+let saveTimer = null;
+let dbPromise = null;
+
+function openDb() {
+  if (dbPromise) return dbPromise;
+  dbPromise = new Promise((resolve, reject) => {
+    let request;
+    try {
+      request = indexedDB.open(DB_NAME, DB_VERSION);
+    } catch (err) {
+      reject(err);
+      return;
+    }
+    request.onupgradeneeded = () => {
+      const db = request.result;
+      if (!db.objectStoreNames.contains(STORE)) db.createObjectStore(STORE);
+    };
+    request.onsuccess = () => resolve(request.result);
+    request.onerror   = () => reject(request.error);
+  }).catch(err => {
+    // Private windows and blocked storage both land here. The app must still
+    // work; it just will not remember anything.
+    console.warn('Test Assist: session storage unavailable —', err && err.message);
+    return null;
+  });
+  return dbPromise;
+}
+
+function idbPut(db, value) {
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(STORE, 'readwrite');
+    tx.objectStore(STORE).put(value, 'current');
+    tx.oncomplete = resolve;
+    tx.onerror    = () => reject(tx.error);
+  });
+}
+
+function idbGet(db) {
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(STORE, 'readonly');
+    const req = tx.objectStore(STORE).get('current');
+    req.onsuccess = () => resolve(req.result || null);
+    req.onerror   = () => reject(req.error);
+  });
+}
+
+async function saveSession() {
+  const db = await openDb();
+  if (!db) return false;
+  try {
+    await idbPut(db, {
+      schema: SCHEMA,
+      savedAt: new Date().toISOString(),
+      baseImage: baseImageDataUrl,
+      annotations,
+      undoStack: undoStack.slice(-25),
+      redoStack: redoStack.slice(-25),
+      snapshots: snapshots.slice(0, SNAPSHOT_CAP),
+    });
+    return true;
+  } catch (err) {
+    console.warn('Test Assist: could not save the session —', err && err.message);
+    return false;
+  }
+}
+
+/** Coalesce the writes that a single drag would otherwise produce. */
+function scheduleSave() {
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(() => { saveSession(); }, SAVE_DEBOUNCE);
+}
+window.__saveSessionNow = saveSession;   // tests drive this directly
+
+async function clearSession() {
+  const db = await openDb();
+  if (!db) return;
+  await new Promise(resolve => {
+    const tx = db.transaction(STORE, 'readwrite');
+    tx.objectStore(STORE).delete('current');
+    tx.oncomplete = resolve;
+    tx.onerror    = resolve;
+  });
+}
+
+async function restoreSession() {
+  const db = await openDb();
+  if (!db) return false;
+
+  let saved;
+  try {
+    saved = await idbGet(db);
+  } catch {
+    return false;
+  }
+  // An unrecognised schema is discarded rather than half-read.
+  if (!saved || saved.schema !== SCHEMA || !saved.baseImage) return false;
+
+  await new Promise(resolve => {
+    const img = new Image();
+    img.onload = () => {
+      resizeCanvases(img.naturalWidth, img.naturalHeight);
+      baseCtx.drawImage(img, 0, 0);
+      baseImageDataUrl = saved.baseImage;
+      placeholder.style.display = 'none';
+      resolve();
+    };
+    img.onerror = resolve;
+    img.src = saved.baseImage;
+  });
+
+  annotations = Array.isArray(saved.annotations) ? saved.annotations : [];
+  undoStack   = Array.isArray(saved.undoStack) ? saved.undoStack : [];
+  redoStack   = Array.isArray(saved.redoStack) ? saved.redoStack : [];
+  snapshots   = Array.isArray(saved.snapshots) ? saved.snapshots : [];
+  redrawAnnotations();
+  renderSnapshots();
+
+  document.getElementById('sessionNotice').hidden = false;
+  launcherStatus.textContent =
+    'Restored your last session. Capture again to start a new one.';
+  return true;
+}
+
+document.getElementById('btnClearSession').addEventListener('click', async () => {
+  await clearSession();
+  annotations = [];
+  undoStack = [];
+  redoStack = [];
+  snapshots = [];
+  baseImageDataUrl = null;
+  clearAnnotations(false);
+  renderSnapshots();
+  resizeCanvases(300, 150);
+  baseCtx.clearRect(0, 0, baseCanvas.width, baseCanvas.height);
+  placeholder.style.display = '';
+  document.getElementById('sessionNotice').hidden = true;
+  launcherStatus.textContent = 'Saved session cleared.';
+});
+
+restoreSession()
+  .catch(() => false)
+  .finally(() => {
+    /* Test hook: set once initialisation has finished, including any session
+       restore, so the Playwright suites wait on a real signal rather than an
+       arbitrary timeout. Inert in normal use. */
+    window.__APP_READY__ = true;
+  });

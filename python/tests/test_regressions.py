@@ -616,3 +616,91 @@ def test_packaged_icon_exists_and_is_a_real_ico():
     icon = Path(__file__).resolve().parents[2] / "assets" / "icon.ico"
     assert icon.is_file(), "assets/icon.ico is missing"
     assert icon.read_bytes()[:4] == b"\x00\x00\x01\x00", "not an ICO file"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Screen recording
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _recorder(monkeypatch, tmp_path):
+    import capture
+
+    monkeypatch.setattr(capture.Path, "home", staticmethod(lambda: tmp_path))
+    return capture, capture.FrameRecorder()
+
+
+def test_recorder_writes_frames_to_disk_instead_of_holding_them(qapp, monkeypatch, tmp_path):
+    """The recorder used to append a full resolution QPixmap per frame - about
+    7.9 MB every 1/15th of a second, so a one minute recording held roughly
+    7 GB. Frames must reach disk as they are captured."""
+    capture, rec = _recorder(monkeypatch, tmp_path)
+
+    rec.start()
+    for _ in range(6):
+        rec._capture_frame()
+
+    assert rec.frame_count == 6
+    written = sorted(rec._frames_dir.glob("frame_*.jpg"))
+    assert len(written) == 6, "frames were not written as they were captured"
+    assert not hasattr(rec, "_frames"), "the in-memory frame list is gone"
+
+
+def test_recorder_stops_itself_at_the_duration_cap(qapp, monkeypatch, tmp_path):
+    """An unattended recording must not fill the disk."""
+    capture, rec = _recorder(monkeypatch, tmp_path)
+
+    rec.start()
+    rec._count = rec._MAX_SECONDS * rec._FPS
+    rec._capture_frame()
+
+    assert not rec.is_recording(), "the cap did not stop the recording"
+
+
+def test_recorder_scales_frames_below_the_capture_width(qapp, monkeypatch, tmp_path):
+    """Full resolution frames cannot be encoded inside the frame budget."""
+    from PySide6.QtGui import QImage
+
+    capture, rec = _recorder(monkeypatch, tmp_path)
+    rec.start()
+    rec._capture_frame()
+
+    frame = sorted(rec._frames_dir.glob("frame_*.jpg"))[0]
+    assert QImage(str(frame)).width() <= rec._MAX_WIDTH
+
+
+def test_recorder_without_opencv_keeps_the_frame_sequence(qapp, monkeypatch, tmp_path):
+    """Without cv2 the frames on disk are the recording, and must survive."""
+    import builtins
+
+    capture, rec = _recorder(monkeypatch, tmp_path)
+    real_import = builtins.__import__
+
+    def no_cv2(name, *args, **kwargs):
+        if name == "cv2":
+            raise ImportError("simulated: opencv not installed")
+        return real_import(name, *args, **kwargs)
+
+    emitted: list[str] = []
+    rec.finished.connect(emitted.append)
+
+    rec.start()
+    for _ in range(4):
+        rec._capture_frame()
+
+    monkeypatch.setattr(builtins, "__import__", no_cv2)
+    rec.stop()
+
+    result = Path(emitted[0])
+    assert result.is_dir(), "the frame folder is the recording when cv2 is absent"
+    assert len(list(result.glob("frame_*.jpg"))) == 4
+
+
+def test_recorder_with_nothing_captured_emits_empty(qapp, monkeypatch, tmp_path):
+    capture, rec = _recorder(monkeypatch, tmp_path)
+    emitted: list[str] = []
+    rec.finished.connect(emitted.append)
+
+    rec.start()
+    rec.stop()
+
+    assert emitted == [""]
