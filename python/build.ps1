@@ -40,9 +40,18 @@ if ($LASTEXITCODE -ne 0) { throw "PyInstaller failed" }
 $exe = Join-Path $here "dist\TestAssist\TestAssist.exe"
 if (-not (Test-Path $exe)) { throw "Expected $exe to exist" }
 
-# Prove the thing actually runs before calling it a build.
-$reported = & $exe --version
-if ($LASTEXITCODE -ne 0) { throw "The built executable did not run" }
+# Prove the thing actually runs before calling it a build. The app is windowed,
+# so it has no usable stdout - it writes its version to this file instead.
+$probe = Join-Path $here "version-probe.txt"
+if (Test-Path $probe) { Remove-Item $probe }
+$env:TESTASSIST_VERSION_FILE = $probe
+
+$proc = Start-Process -FilePath $exe -ArgumentList '--version' -Wait -PassThru
+if ($proc.ExitCode -ne 0) { throw "The built executable exited with $($proc.ExitCode)" }
+if (-not (Test-Path $probe)) { throw "The executable ran but produced no version file" }
+
+$reported = (Get-Content $probe -Raw).Trim()
+Remove-Item $probe
 Write-Host "Built and verified: $reported" -ForegroundColor Green
 
 $version = ($reported -replace '[^0-9\.]', '').Trim()

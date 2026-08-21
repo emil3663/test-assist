@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import ctypes
+import os
 import sys
 from pathlib import Path
 
@@ -80,7 +81,19 @@ def main() -> None:
     if "--version" in sys.argv:
         # Headless: lets a build pipeline prove the executable actually runs
         # without needing a display.
-        print(f"Test Assist {__version__}")
+        #
+        # A windowed build has no usable stdout on Windows - PyInstaller sets
+        # sys.stdout to None in --noconsole mode - so a pipeline cannot capture
+        # what is printed here. Writing to the path in TESTASSIST_VERSION_FILE
+        # gives it something it can actually read back.
+        text = f"Test Assist {__version__}"
+        target = os.environ.get("TESTASSIST_VERSION_FILE")
+        if target:
+            Path(target).write_text(text, encoding="utf-8")
+        try:
+            print(text)
+        except Exception:
+            pass
         return
 
     try:

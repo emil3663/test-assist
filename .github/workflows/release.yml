@@ -41,10 +41,20 @@ jobs:
         working-directory: python
         shell: pwsh
         run: |
-          $out = & .\dist\TestAssist\TestAssist.exe --version
-          if ($LASTEXITCODE -ne 0) { throw "the built executable did not run" }
+          # The app is built windowed, so it has no usable stdout. Have it write
+          # its version to a file and read that back instead.
+          $probe = Join-Path $PWD 'version-probe.txt'
+          if (Test-Path $probe) { Remove-Item $probe }
+          $env:TESTASSIST_VERSION_FILE = $probe
+
+          $proc = Start-Process -FilePath '.\dist\TestAssist\TestAssist.exe' `
+                                -ArgumentList '--version' -Wait -PassThru
+          if ($proc.ExitCode -ne 0) { throw "the built executable exited with $($proc.ExitCode)" }
+          if (-not (Test-Path $probe)) { throw "the executable ran but produced no version file" }
+
+          $out = (Get-Content $probe -Raw).Trim()
           Write-Host "built: $out"
-          if ($out -notmatch '^Test Assist \d+\.\d+\.\d+') { throw "unexpected version output: $out" }
+          if ($out -notmatch '^Test Assist \d+\.\d+\.\d+$') { throw "unexpected version output: $out" }
 
       - name: Package
         working-directory: python

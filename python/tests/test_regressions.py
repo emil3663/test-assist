@@ -594,6 +594,23 @@ def test_version_flag_reports_a_semantic_version(capsys):
     assert out.endswith(main.__version__)
 
 
+def test_version_flag_writes_a_file_when_asked(monkeypatch, tmp_path):
+    """A windowed build has no usable stdout, so the release pipeline reads this
+    file instead. If this contract breaks, the release cannot be verified."""
+    import sys as _sys
+
+    import main
+
+    target = tmp_path / "version-probe.txt"
+    monkeypatch.setenv("TESTASSIST_VERSION_FILE", str(target))
+    monkeypatch.setattr(_sys, "argv", ["TestAssist.exe", "--version"])
+
+    main.main()
+
+    assert target.is_file(), "no version file was written"
+    assert target.read_text(encoding="utf-8").strip() == f"Test Assist {main.__version__}"
+
+
 def test_packaged_icon_exists_and_is_a_real_ico():
     """The taskbar icon ships with the build; a missing file falls back silently."""
     icon = Path(__file__).resolve().parents[2] / "assets" / "icon.ico"
