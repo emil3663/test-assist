@@ -1,7 +1,7 @@
 # 🔍 Test Assist — Desktop Test Plan
 
 **Version:** 1.3
-**Last updated:** 2026-08-21
+**Last updated:** 2026-08-31
 **Status:** In active development
 **Applies to:** the PySide6 desktop build under `python/`. The browser build has
 its own plan in `TEST_PLAN.md`.
@@ -24,7 +24,7 @@ history that survives restarts.
 |---------|--------|-------|
 | Region screenshot overlay | ✅ Done | Drag to select; Esc cancels |
 | Screen recording | ✅ Done | Frames written as captured; 3-minute cap |
-| MP4 assembly | ✅ Done | Only when `opencv-python` is installed |
+| MP4 assembly | ✅ Done | Via bundled `ffmpeg` (`imageio-ffmpeg`); works everywhere, packaged build included |
 | Select tool | ✅ Done | Click to select, drag to move |
 | Crop | ✅ Done | Undoable; restores original canvas size |
 | Blur / redact | ✅ Done | For masking sensitive content before sharing |
@@ -80,8 +80,8 @@ and why — read it before treating a ✅ as proof of more than it is.
 | REC-02 | Memory during a recording | Memory stays flat; frames are not held in a list | ✅ |
 | REC-03 | Recording reaches the duration cap | Recording stops itself at 3 minutes | ✅ |
 | REC-04 | Frame width | Frames are scaled to at most 1280px wide | ✅ |
-| REC-05 | Stop with `opencv-python` installed | A single `.mp4` is produced and the frames are removed | ✅ |
-| REC-06 | Stop without `opencv-python` | The frame folder is kept and returned as the recording | ✅ |
+| REC-05 | Stop a recording | A single `.mp4` is produced and the frames are removed | ✅ |
+| REC-06 | Stop with ffmpeg unavailable | The frame folder is kept and returned as the recording | ✅ |
 | REC-07 | Stop having captured nothing | Empty result, no crash, no stray folder | ✅ |
 | REC-08 | Frame files missing when saving | Finishes cleanly rather than raising | ✅ |
 
@@ -272,9 +272,11 @@ These need a built artefact rather than a source checkout.
 
 ## 4. Known Limitations & Gaps
 
-1. **MP4 needs opencv** — the packaged build excludes `opencv-python`, which
-   would add roughly 250 MB. Recordings are saved as a JPEG frame sequence
-   unless the app is run from source with opencv installed.
+1. **MP4 assembly depends on a bundled `ffmpeg` binary** (via `imageio-ffmpeg`,
+   ~29 MB compressed) rather than a linked opencv/numpy stack. It ships in the
+   packaged build as well as from source. If encoding ever fails — the
+   dependency is missing, ffmpeg exits non-zero, or it times out — the
+   recording falls back to a JPEG frame sequence rather than being lost.
 2. **Recording is capped at three minutes** — deliberate, so an unattended
    recording cannot fill the disk.
 3. **Recording frames are scaled to 1280px wide** — full-resolution frames

@@ -70,7 +70,8 @@ sandboxed; some of it is simply where the work went.
   screen edge as a compact vertical strip
 - Single-instance enforcement — a second launch focuses the running window
 - Send-to-back layering for overlapping annotations
-- MP4 recording when run from source with `opencv-python` installed
+- MP4 recording via a bundled `ffmpeg` binary — works from source and in the
+  packaged build alike
 
 Everything under **What it does** below is the browser build.
 
@@ -183,10 +184,12 @@ it, and drops a Desktop shortcut you can pin. The tagged-release workflow runs
 the same spec on a clean Windows runner, so a local build and a released build
 are produced the same way.
 
-`opencv-python` and `numpy` are optional and are **not** included in the
-packaged build — they would add around 250 MB for MP4 export alone. Run from
-source with them installed for MP4; otherwise recordings are saved as a PNG
-frame sequence.
+MP4 export uses `imageio-ffmpeg`, a real dependency (`pip install -r
+requirements.txt` pulls it in) that bundles a standalone `ffmpeg` binary rather
+than linking against opencv — about 29 MB compressed versus the ~250 MB an
+opencv/numpy stack would add. It ships in the packaged build too, so MP4
+recording works there as well. If encoding ever fails, recordings fall back to
+a JPEG frame sequence rather than being lost.
 
 ---
 

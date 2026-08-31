@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from PySide6.QtCore import QPoint, QSize, Qt, QTimer
 from PySide6.QtGui import QBrush, QColor, QFont, QIcon, QPainter, QPen, QPixmap, QPolygonF
 from PySide6.QtWidgets import (
@@ -326,10 +328,18 @@ class FloatingLauncher(QWidget):
         self._rec_label.setText(f"⏺  {m:02d}:{s:02d}")
 
     def _on_record_finished(self, path: str) -> None:
-        if path:
-            self._status_lbl.setText(f"Saved: {path}")
-        else:
+        if not path:
             self._status_lbl.setText("Nothing was recorded.")
+            return
+
+        result = Path(path)
+        if result.suffix == ".mp4":
+            self._status_lbl.setText(f"Saved video: {path}")
+        else:
+            n = len(list(result.glob("frame_*.jpg"))) if result.is_dir() else 0
+            self._status_lbl.setText(
+                f"Saved {n} frames (video encoding unavailable): {path}"
+            )
 
     def _refresh_mode_icons(self) -> None:
         """Repaint camera/video glyphs with active vs inactive colors."""

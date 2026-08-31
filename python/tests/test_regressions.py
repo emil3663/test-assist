@@ -673,16 +673,16 @@ def test_recorder_scales_frames_below_the_capture_width(qapp, monkeypatch, tmp_p
     assert QImage(str(frame)).width() <= rec._MAX_WIDTH
 
 
-def test_recorder_without_opencv_keeps_the_frame_sequence(qapp, monkeypatch, tmp_path):
-    """Without cv2 the frames on disk are the recording, and must survive."""
+def test_recorder_without_imageio_ffmpeg_keeps_the_frame_sequence(qapp, monkeypatch, tmp_path):
+    """Without imageio_ffmpeg the frames on disk are the recording, and must survive."""
     import builtins
 
     capture, rec = _recorder(monkeypatch, tmp_path)
     real_import = builtins.__import__
 
-    def no_cv2(name, *args, **kwargs):
-        if name == "cv2":
-            raise ImportError("simulated: opencv not installed")
+    def no_ffmpeg(name, *args, **kwargs):
+        if name == "imageio_ffmpeg":
+            raise ImportError("simulated: imageio_ffmpeg not installed")
         return real_import(name, *args, **kwargs)
 
     emitted: list[str] = []
@@ -692,12 +692,60 @@ def test_recorder_without_opencv_keeps_the_frame_sequence(qapp, monkeypatch, tmp
     for _ in range(4):
         rec._capture_frame()
 
-    monkeypatch.setattr(builtins, "__import__", no_cv2)
+    monkeypatch.setattr(builtins, "__import__", no_ffmpeg)
     rec.stop()
 
     result = Path(emitted[0])
-    assert result.is_dir(), "the frame folder is the recording when cv2 is absent"
+    assert result.is_dir(), "the frame folder is the recording when ffmpeg is unavailable"
     assert len(list(result.glob("frame_*.jpg"))) == 4
+
+
+def test_recorder_a_nonzero_ffmpeg_exit_keeps_the_frame_sequence(qapp, monkeypatch, tmp_path):
+    """A crashing or misconfigured ffmpeg must not lose the recording."""
+    import subprocess
+
+    capture, rec = _recorder(monkeypatch, tmp_path)
+
+    class _FailedRun:
+        returncode = 1
+
+    monkeypatch.setattr(subprocess, "run", lambda *a, **k: _FailedRun())
+
+    emitted: list[str] = []
+    rec.finished.connect(emitted.append)
+
+    rec.start()
+    for _ in range(4):
+        rec._capture_frame()
+    rec.stop()
+
+    result = Path(emitted[0])
+    assert result.is_dir(), "a non-zero ffmpeg exit must fall back to the frame folder"
+    assert len(list(result.glob("frame_*.jpg"))) == 4
+
+
+def test_recorder_encodes_odd_height_frames_without_error(qapp, monkeypatch, tmp_path):
+    """yuv420p rejects odd dimensions; the scale filter must compensate."""
+    from PySide6.QtGui import QColor, QImage
+
+    capture, rec = _recorder(monkeypatch, tmp_path)
+    rec.start()
+    frames_dir = rec._frames_dir
+
+    for i in range(3):
+        image = QImage(101, 63, QImage.Format.Format_RGB32)
+        image.fill(QColor("blue"))
+        image.save(str(frames_dir / f"frame_{i:05d}.jpg"), "JPG", rec._JPEG_QUALITY)
+    rec._count = 3
+
+    emitted: list[str] = []
+    rec.finished.connect(emitted.append)
+    rec.stop()
+
+    result = Path(emitted[0])
+    assert result.suffix == ".mp4", "odd-height frames must still encode successfully"
+    assert result.is_file()
+    assert result.stat().st_size > 0
 
 
 def test_recorder_with_nothing_captured_emits_empty(qapp, monkeypatch, tmp_path):

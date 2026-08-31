@@ -1137,10 +1137,8 @@ def test_CAP_04_a_new_capture_replaces_the_previous_image(editor):
     assert editor._canvas.export_pixmap().width() == 320
 
 
-def test_REC_05_with_opencv_the_frames_become_a_single_mp4(qapp, monkeypatch, tmp_path):
-    """Skips where opencv is absent, which includes the packaged build."""
-    pytest.importorskip("cv2", reason="MP4 assembly requires opencv-python")
-
+def test_REC_05_stopping_assembles_the_frames_into_a_single_mp4(qapp, monkeypatch, tmp_path):
+    """ffmpeg is a real dependency now, so this passes everywhere - no skip."""
     import capture
 
     monkeypatch.setattr(capture.Path, "home", staticmethod(lambda: tmp_path))
@@ -1155,8 +1153,9 @@ def test_REC_05_with_opencv_the_frames_become_a_single_mp4(qapp, monkeypatch, tm
     rec.stop()
 
     result = Path(emitted[0])
-    assert result.suffix == ".mp4", "with opencv the recording is a single video file"
+    assert result.suffix == ".mp4", "the recording is assembled into a single video file"
     assert result.is_file()
+    assert result.stat().st_size > 0
     assert not frames_dir.exists(), "the intermediate frames should be cleaned up"
 
 

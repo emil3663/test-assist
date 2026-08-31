@@ -1,7 +1,7 @@
 # 🔍 Test Assist — Desktop stability matrix
 
 **Version:** 1.0
-**Last updated:** 2026-08-21
+**Last updated:** 2026-08-31
 **Applies to:** the PySide6 desktop build. The browser build has its own matrix
 in `STABILITY_MATRIX.md`.
 
@@ -28,17 +28,15 @@ This document is that check.
 | Cases in `DESKTOP_TEST_PLAN.md` v1.3 | 120 |
 | Automated and passing | 116 |
 | Blocked, documented as manual | 4 |
-| Automated tests | 146 collected — 145 pass anywhere, 1 skips without `opencv-python` |
-| Wall clock | under 2 seconds |
+| Automated tests | 148 collected — 148 pass everywhere, no skips |
+| Wall clock | under 3 seconds |
 
-**A green run is `145 passed, 1 skipped`, not `146 passed`.** REC-05 assembles a
-recording into an MP4 and skips itself where `opencv-python` is absent — which is
-CI, the packaged build, and any clean checkout, because the dependency is
-commented out of `requirements.txt` on purpose to keep the download ~250 MB
-smaller. Installing opencv locally turns the skip into a pass and the total into
-146. Do not treat that skip as a failure, and do not use "146 passed" as an
-acceptance gate: it quietly requires an optional dependency the product
-deliberately ships without.
+**A green run is `148 passed, 0 skipped`, everywhere.** MP4 assembly used to
+depend on `opencv-python`, an optional dependency the product deliberately
+shipped without, which made REC-05 skip itself on CI, the packaged build, and
+any clean checkout. It now shells out to a bundled `ffmpeg` binary via
+`imageio-ffmpeg`, a real entry in `requirements.txt` — so REC-05 runs and
+passes in every environment, and there is no longer a skip to explain away.
 
 Four defects were found by writing these tests. All are fixed and all have a
 regression test — see **Defects found** below.
@@ -77,7 +75,7 @@ These four are the manual pass to run against a release before trusting it.
 | Area | Cases | Stability | Notes |
 |---|---|---|---|
 | 3.1 Capture | 4 | Moderate | The grab is deferred by a 120 ms timer so the overlay can vanish first; the test waits for it rather than assuming. Offscreen grabs return a blank pixmap, so these prove the mechanism, not the pixels. |
-| 3.2 Recording | 8 | Moderate | REC-05 skips where `opencv-python` is absent, which includes the packaged build. The rest are deterministic. |
+| 3.2 Recording | 8 | Moderate | REC-05 shells out to a real bundled `ffmpeg` binary to assemble an mp4; the rest are deterministic. |
 | 3.3 Tools | 10 | Stable | Direct assertions on the annotation model. |
 | 3.4 Crop | 4 | Stable | |
 | 3.5 Blur | 3 | Stable | BLR-02 measures pixel variance in the exported image rather than trusting that a blur annotation exists. |
@@ -184,7 +182,7 @@ yet on the packaged build.
 ```bash
 cd python
 pip install -r requirements.txt
-QT_QPA_PLATFORM=offscreen pytest -q      # 145 passed, 1 skipped, under 3 seconds
+QT_QPA_PLATFORM=offscreen pytest -q      # 148 passed, under 3 seconds
 ```
 
 On Windows the platform variable is unnecessary; `conftest.py` sets it.

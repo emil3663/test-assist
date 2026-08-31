@@ -230,29 +230,64 @@ class FrameRecorder(QObject):
 
         output = _recordings_dir() / f"test-recording-{self._stamp}.mp4"
 
-        try:
-            import cv2          # type: ignore[import]
-
-            first = cv2.imread(str(frames[0]))
-            if first is None:
-                raise ImportError("unreadable frame")
-            h, w = first.shape[:2]
-
-            fourcc = cv2.VideoWriter_fourcc(*"mp4v")
-            writer = cv2.VideoWriter(str(output), fourcc, self._FPS, (w, h))
-            for frame_path in frames:
-                frame = cv2.imread(str(frame_path))
-                if frame is not None:
-                    writer.write(frame)
-            writer.release()
-
+        if self._encode_frames(frames_dir, output):
             # The frames were only ever an intermediate step to the video.
             for frame_path in frames:
                 frame_path.unlink(missing_ok=True)
             frames_dir.rmdir()
-
             self.finished.emit(str(output))
-
-        except ImportError:
-            # No cv2 - the frame sequence on disk is the recording.
+        else:
+            # ffmpeg missing, failed, or timed out - the frame sequence on
+            # disk is the recording. A recording is never lost to an encoding
+            # failure.
             self.finished.emit(str(frames_dir))
+
+    def _encode_frames(self, frames_dir: Path, output: Path) -> bool:
+        """Assemble the frame sequence into an mp4 via ffmpeg.
+
+        Returns False - never raises - on any failure: imageio_ffmpeg not
+        installed, a non-zero exit, a timeout, or no output file, so the
+        caller can fall back to keeping the frames.
+        """
+        try:
+            import imageio_ffmpeg
+        except ImportError:
+            return False
+
+        try:
+            ffmpeg_exe = imageio_ffmpeg.get_ffmpeg_exe()
+        except Exception:
+            return False
+
+        import subprocess
+
+        cmd = [
+            ffmpeg_exe, "-y", "-loglevel", "error", "-nostdin",
+            "-framerate", str(self._FPS),
+            "-i", str(frames_dir / "frame_%05d.jpg"),
+            "-vf", "scale=trunc(iw/2)*2:trunc(ih/2)*2",
+            "-c:v", "libx264", "-preset", "veryfast", "-crf", "23",
+            "-pix_fmt", "yuv420p", "-movflags", "+faststart",
+            str(output),
+        ]
+        try:
+            result = subprocess.run(
+                cmd,
+                timeout=300,
+                # The app is built with console=False; without this a
+                # console window flashes on every save.
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+                capture_output=True,
+                # Never inherit the caller's stdin - under a test runner it
+                # may be a fake object subprocess cannot duplicate a handle
+                # for, which raises before ffmpeg even starts.
+                stdin=subprocess.DEVNULL,
+            )
+        except (OSError, subprocess.SubprocessError):
+            return False
+
+        return (
+            result.returncode == 0
+            and output.is_file()
+            and output.stat().st_size > 0
+        )

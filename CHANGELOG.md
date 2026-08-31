@@ -7,6 +7,14 @@ release; only tagged versions appear as releases.
 
 ### Changed
 
+- **MP4 recording works in the packaged build now.** Assembly moved from an
+  optional, lazily-imported `opencv-python` — never included in the packaged
+  build, so a released copy of the app could only ever produce a JPEG frame
+  sequence — to `imageio-ffmpeg`, a real dependency that bundles a standalone
+  `ffmpeg` binary and is shipped with every build, source or packaged. The
+  download grows by about 29 MB compressed to carry it. Recordings still fall
+  back to the frame sequence rather than being lost if encoding ever fails —
+  the dependency is missing, ffmpeg exits non-zero, or it times out.
 - **The editor was rebuilt for volume use.** It was correct but slow to drive:
   no cursor feedback at all, handles that shrank to nothing when zoomed out, and
   a grab radius four times the size of the visible handle. Marking up one

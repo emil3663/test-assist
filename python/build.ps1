@@ -40,6 +40,13 @@ if ($LASTEXITCODE -ne 0) { throw "PyInstaller failed" }
 $exe = Join-Path $here "dist\TestAssist\TestAssist.exe"
 if (-not (Test-Path $exe)) { throw "Expected $exe to exist" }
 
+# collect_data_files() in the spec is what puts ffmpeg in the bundle - verify
+# it actually landed rather than assuming the hook worked, since MP4
+# recording silently degrades to a frame sequence if it did not.
+$ffmpeg = Get-ChildItem -Path (Join-Path $here "dist\TestAssist") -Recurse -Filter "ffmpeg-win-*.exe" -ErrorAction SilentlyContinue
+if (-not $ffmpeg) { throw "ffmpeg binary missing from dist - MP4 recording would silently degrade to a frame sequence" }
+Write-Host "ffmpeg bundled: $($ffmpeg.FullName)" -ForegroundColor DarkGray
+
 # Prove the thing actually runs before calling it a build. The app is windowed,
 # so it has no usable stdout - it writes its version to this file instead.
 $probe = Join-Path $here "version-probe.txt"

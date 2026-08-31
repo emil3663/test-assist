@@ -14,6 +14,8 @@ Output: dist/TestAssist/TestAssist.exe
 
 from pathlib import Path
 
+from PyInstaller.utils.hooks import collect_data_files
+
 HERE = Path(SPECPATH)
 REPO = HERE.parent
 
@@ -24,6 +26,9 @@ a = Analysis(
     datas=[
         (str(REPO / 'assets' / 'icon.ico'), 'assets'),
         (str(HERE / 'help.html'), '.'),
+        # Pulls in imageio_ffmpeg/binaries/ffmpeg-win-*.exe (~83 MB), the
+        # actual encoder capture.py shells out to for MP4 assembly.
+        *collect_data_files('imageio_ffmpeg'),
     ],
     hiddenimports=[],
     hookspath=[],
@@ -37,9 +42,10 @@ a = Analysis(
         'PySide6.QtMultimedia', 'PySide6.QtMultimediaWidgets', 'PySide6.QtBluetooth',
         'PySide6.QtSql', 'PySide6.QtTest', 'PySide6.QtDesigner', 'PySide6.QtHelp',
         'tkinter', 'unittest', 'pytest', 'pydoc_data',
-        # opencv/numpy would add ~250 MB for MP4 export alone. capture.py
-        # imports cv2 lazily and falls back to a PNG frame sequence, so the
-        # packaged build records frames and stays a reasonable download.
+        # MP4 assembly now shells out to a bundled ffmpeg binary via
+        # imageio_ffmpeg instead of linking opencv, so these never need to be
+        # pulled in - excluding them keeps the ~250 MB opencv/numpy stack out
+        # of the build regardless of what happens to be on the build machine.
         'cv2', 'numpy', 'scipy', 'PIL', 'matplotlib',
     ],
     noarchive=False,
