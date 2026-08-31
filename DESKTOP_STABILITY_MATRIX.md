@@ -28,8 +28,17 @@ This document is that check.
 | Cases in `DESKTOP_TEST_PLAN.md` v1.3 | 120 |
 | Automated and passing | 116 |
 | Blocked, documented as manual | 4 |
-| Automated tests | 146 (`test_regressions.py` + `test_functional.py`) |
+| Automated tests | 146 collected — 145 pass anywhere, 1 skips without `opencv-python` |
 | Wall clock | under 2 seconds |
+
+**A green run is `145 passed, 1 skipped`, not `146 passed`.** REC-05 assembles a
+recording into an MP4 and skips itself where `opencv-python` is absent — which is
+CI, the packaged build, and any clean checkout, because the dependency is
+commented out of `requirements.txt` on purpose to keep the download ~250 MB
+smaller. Installing opencv locally turns the skip into a pass and the total into
+146. Do not treat that skip as a failure, and do not use "146 passed" as an
+acceptance gate: it quietly requires an optional dependency the product
+deliberately ships without.
 
 Four defects were found by writing these tests. All are fixed and all have a
 regression test — see **Defects found** below.
@@ -175,7 +184,7 @@ yet on the packaged build.
 ```bash
 cd python
 pip install -r requirements.txt
-QT_QPA_PLATFORM=offscreen pytest -q      # 146 tests, under 3 seconds
+QT_QPA_PLATFORM=offscreen pytest -q      # 145 passed, 1 skipped, under 3 seconds
 ```
 
 On Windows the platform variable is unnecessary; `conftest.py` sets it.
