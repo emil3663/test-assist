@@ -351,6 +351,7 @@ class EditorWindow(QMainWindow):
     def _connect_signals(self) -> None:
         self._tool_group.buttonClicked.connect(self._on_tool_changed)
         self._canvas.text_editing_changed.connect(self._set_tool_shortcuts_enabled)
+        self._canvas.selection_changed.connect(self._on_selection_changed)
 
         # Per-tool colour wiring
         for tool_id, cbtn in self._tool_color_btns.items():
@@ -376,6 +377,7 @@ class EditorWindow(QMainWindow):
         self._btn_save_png.clicked.connect(self._save_png)
         self._btn_copy.clicked.connect(self._copy_to_clipboard)
         self._btn_export_json.clicked.connect(self._export_json)
+        self._on_selection_changed(self._canvas.has_selection())
 
     def _register_shortcuts(self) -> None:
         QShortcut(QKeySequence("Ctrl+Z"), self, self._canvas.undo)
@@ -419,6 +421,15 @@ class EditorWindow(QMainWindow):
         self._canvas.tool = tool
         for btn in self._tool_group.buttons():
             btn.setChecked(btn.property("tool_id") == tool)
+
+    def _on_selection_changed(self, has_selection: bool) -> None:
+        """Grey out the buttons that need a selection, so the toolbar says what
+        is currently possible instead of offering four no-ops."""
+        for button in (
+            self._btn_delete, self._btn_front,
+            self._btn_back, self._btn_backmost,
+        ):
+            button.setEnabled(has_selection)
 
     def _set_tool_shortcuts_enabled(self, is_text_editing: bool) -> None:
         for shortcut in getattr(self, "_tool_shortcuts", []):

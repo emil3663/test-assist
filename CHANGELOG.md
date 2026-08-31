@@ -3,6 +3,63 @@
 All notable changes to Test Assist. Dates are the date of the change, not of a
 release; only tagged versions appear as releases.
 
+## [Unreleased]
+
+### Changed
+
+- **The editor was rebuilt for volume use.** It was correct but slow to drive:
+  no cursor feedback at all, handles that shrank to nothing when zoomed out, and
+  a grab radius four times the size of the visible handle. Marking up one
+  screenshot was fine; marking up forty was a fight.
+  - **A shape's border is its grip.** One click on the border selects it and
+    shows eight handles; dragging the border moves it. Interiors are
+    click-through, so a rectangle drawn around a defect no longer blocks the
+    marks inside it. A circle selects from its arc rather than its empty
+    bounding-box corners, and an arrow from its shaft rather than the large empty
+    box around a diagonal line.
+  - **A text box works the other way round, deliberately.** Its border moves it;
+    a single click inside it edits the words.
+  - **Handles hold their size on screen.** The drawn and grab radii are divided
+    by the zoom, so they are the same to the hand at 40% as at 250%.
+  - **Edge handles.** Corners resize both axes; the four edge midpoints resize
+    one, so width and height can be changed independently.
+  - **The cursor says what a press will do** — move over a border, the matching
+    diagonal or axis arrow over each handle, an I-beam inside a text box, a
+    crosshair while a drawing tool is active.
+  - **Shift** keeps the proportions on a corner resize, or locks a move to one
+    axis. **Arrow keys** nudge by a pixel, Shift+arrow by ten. **Escape**
+    abandons a drag in progress and restores the geometry.
+  - Delete Selected and the three layer buttons are greyed out when nothing is
+    selected, instead of offering four no-ops.
+- Every drag is now computed from a snapshot taken when the press landed rather
+  than by accumulating per-event deltas — which is what makes Shift-constrain and
+  Escape possible, and removes any chance of drift over a long drag.
+
+### Fixed
+
+- **Moving or resizing an annotation was not undoable.** The drag path mutated
+  the annotation in place without ever pushing an undo snapshot, so a misplaced or
+  mis-sized shape could not be taken back — the only recovery was to delete it and
+  draw it again. A snapshot is now taken once a drag passes the threshold, so
+  a move or a resize undoes and redoes like any other edit.
+- **Drags did not emit `annotation_changed`,** unlike every other mutating
+  operation. Now emitted on release when the drag actually moved something.
+  Nothing in the app connects to that signal yet, so this removes a trap rather
+  than changing behaviour.
+- **A wobbly double-click nudged the annotation.** Selecting on a single press
+  means the opening press of a double-click arms a drag; a hand that wandered a
+  few pixels between the two clicks left the annotation moved and an undo entry
+  behind. Movement below a double-click slop threshold is now reversed when the
+  second click arrives.
+- **The in-app help described history pruning by file size.** It still said blank
+  or corrupt snapshots under 5 KB are removed on startup; that proxy was replaced
+  in 1.1.0 with a readability test, and small valid captures are kept.
+
+### Removed
+
+- The "selection is bound to double-click" known limitation, and the
+  "not usable at volume" limitation that replaced it. Both are now false.
+
 ## [1.1.0] — 2026-08-21
 
 ### Fixed

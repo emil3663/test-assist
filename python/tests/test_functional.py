@@ -26,9 +26,13 @@ from editor import EditorWindow
 class _Mouse:
     x: float
     y: float
+    mods: Qt.KeyboardModifier = Qt.KeyboardModifier.NoModifier
 
     def position(self) -> QPointF:
         return QPointF(self.x, self.y)
+
+    def modifiers(self) -> Qt.KeyboardModifier:
+        return self.mods
 
 
 def drag(canvas: AnnotationCanvas, x1, y1, x2, y2, steps: int = 3) -> None:
@@ -48,6 +52,22 @@ def click(canvas: AnnotationCanvas, x, y) -> None:
 def select_at(canvas: AnnotationCanvas, x, y) -> None:
     """Selection is a double-click, whatever the active tool."""
     canvas.mouseDoubleClickEvent(_Mouse(x, y))
+
+
+def press_key(canvas: AnnotationCanvas, key, mods=Qt.KeyboardModifier.NoModifier) -> None:
+    canvas.keyPressEvent(QKeyEvent(QEvent.Type.KeyPress, key, mods))
+
+
+def border_point(anno: dict, along: float = 0.25) -> tuple[float, float]:
+    """A point on the top border, deliberately clear of every resize handle.
+
+    Selecting and dragging happen on a shape's border, so tests have to click
+    one. `along` is the fraction across the top edge: 0.25 keeps it away from the
+    top-left corner handle and the top-edge midpoint handle alike.
+    """
+    left, right = sorted((anno["x1"], anno["x2"]))
+    top = min(anno["y1"], anno["y2"])
+    return (left + (right - left) * along, top)
 
 
 def draw(canvas: AnnotationCanvas, tool: str, x1=20, y1=20, x2=140, y2=110) -> dict:
@@ -190,21 +210,98 @@ def test_BLR_03_undo_removes_a_blur(canvas):
 # ── 3.6 Selection and layering ───────────────────────────────────────────────
 
 def test_SEL_01_a_double_click_selects_an_annotation(canvas):
-    draw(canvas, "rect", 40, 40, 160, 140)
+    anno = draw(canvas, "rect", 40, 40, 160, 140)
     canvas.tool = "select"
 
-    select_at(canvas, 80, 80)
+    select_at(canvas, *border_point(anno))
+    assert canvas._selected is anno
+
+
+def test_SEL_01b_a_single_click_selects_with_the_select_tool(canvas):
+    anno = draw(canvas, "rect", 40, 40, 160, 140)
+    canvas.tool = "select"
+
+    click(canvas, *border_point(anno))
+    assert canvas._selected is anno
+
+
+def test_SEL_01c_a_single_click_on_empty_canvas_clears_the_selection(canvas):
+    anno = draw(canvas, "rect", 40, 40, 160, 140)
+    canvas.tool = "select"
+
+    click(canvas, *border_point(anno))
     assert canvas._selected is not None
 
+    click(canvas, 320, 260)
+    assert canvas._selected is None
 
-def test_SEL_01b_a_single_click_does_not_select(canvas):
-    """Documents current behaviour: the Select tool needs a double-click.
-    Raised as a UX question rather than silently changed."""
-    draw(canvas, "rect", 40, 40, 160, 140)
+
+def test_SEL_01d_a_single_click_does_not_select_while_a_drawing_tool_is_active(canvas):
+    """Clicking with rect/pen/arrow selected must still draw, not select."""
+    anno = draw(canvas, "rect", 40, 40, 160, 140)
+    canvas.tool = "circle"
+
+    click(canvas, *border_point(anno))
+    assert canvas._selected is None
+
+
+def test_SEL_01e_a_single_click_does_not_move_the_annotation(canvas):
+    """The 3px threshold must survive click-to-select."""
+    anno = draw(canvas, "rect", 40, 40, 160, 140)
+    before = (anno["x1"], anno["y1"], anno["x2"], anno["y2"])
+    undo_depth = len(canvas._undo_stack)
     canvas.tool = "select"
 
-    click(canvas, 80, 80)
-    assert canvas._selected is None
+    bx, by = border_point(anno)
+    canvas.mousePressEvent(_Mouse(bx, by))
+    canvas.mouseMoveEvent(_Mouse(bx + 1, by + 1))
+    canvas.mouseReleaseEvent(_Mouse(bx + 1, by + 1))
+
+    assert (anno["x1"], anno["y1"], anno["x2"], anno["y2"]) == before
+    assert len(canvas._undo_stack) == undo_depth, \
+        "a click that moved nothing should not be undoable"
+
+
+def test_SEL_01f_a_click_on_a_corner_handle_resizes_rather_than_reselecting(canvas):
+    """Single-click select must not steal the resize gesture.
+
+    The handle sits on the outline, so the click point can fall outside the
+    shape's own hit area or on top of a second annotation.
+    """
+    target = draw(canvas, "rect", 40, 40, 160, 140)
+    canvas.tool = "select"
+    click(canvas, *border_point(target))
+    assert canvas._selected is target
+
+    # Press on the bottom-right handle and drag it outward.
+    canvas.mousePressEvent(_Mouse(160, 140))
+    assert canvas._resize_handle == "br", "the corner handle was not picked up"
+    canvas.mouseMoveEvent(_Mouse(180, 160))
+    canvas.mouseMoveEvent(_Mouse(220, 200))
+    canvas.mouseReleaseEvent(_Mouse(220, 200))
+
+    assert canvas._selected is target
+    assert target["x2"] == pytest.approx(220, abs=2)
+    assert target["y2"] == pytest.approx(200, abs=2)
+    assert (target["x1"], target["y1"]) == (40, 40), "the opposite corner moved"
+
+
+def test_SEL_02b_a_drag_can_be_undone(canvas):
+    anno = draw(canvas, "rect", 40, 40, 160, 140)
+    before = (anno["x1"], anno["y1"], anno["x2"], anno["y2"])
+    canvas.tool = "select"
+
+    bx, by = border_point(anno)
+    canvas.mousePressEvent(_Mouse(bx, by))
+    canvas.mouseMoveEvent(_Mouse(bx + 40, by + 40))
+    canvas.mouseMoveEvent(_Mouse(bx + 80, by + 70))
+    canvas.mouseReleaseEvent(_Mouse(bx + 80, by + 70))
+    moved = canvas._annotations[0]
+    assert (moved["x1"], moved["y1"], moved["x2"], moved["y2"]) != before
+
+    canvas.undo()
+    restored = canvas._annotations[0]
+    assert (restored["x1"], restored["y1"], restored["x2"], restored["y2"]) == before
 
 
 def test_SEL_02_dragging_a_selection_moves_it_without_deforming(canvas):
@@ -214,10 +311,11 @@ def test_SEL_02_dragging_a_selection_moves_it_without_deforming(canvas):
     origin = (anno["x1"], anno["y1"])
 
     canvas.tool = "select"
-    canvas.mouseDoubleClickEvent(_Mouse(80, 80))
-    canvas.mouseMoveEvent(_Mouse(130, 130))
-    canvas.mouseMoveEvent(_Mouse(180, 160))
-    canvas.mouseReleaseEvent(_Mouse(180, 160))
+    bx, by = border_point(anno)
+    canvas.mousePressEvent(_Mouse(bx, by))
+    canvas.mouseMoveEvent(_Mouse(bx + 50, by + 50))
+    canvas.mouseMoveEvent(_Mouse(bx + 90, by + 70))
+    canvas.mouseReleaseEvent(_Mouse(bx + 90, by + 70))
 
     moved = canvas._annotations[0]
     assert (moved["x1"], moved["y1"]) != origin, "the annotation did not move"
@@ -225,10 +323,310 @@ def test_SEL_02_dragging_a_selection_moves_it_without_deforming(canvas):
     assert moved["y2"] - moved["y1"] == pytest.approx(height, abs=1)
 
 
-def test_SEL_03_delete_removes_the_selection(canvas):
-    draw(canvas, "rect", 40, 40, 160, 140)
+def test_SEL_02c_a_resize_can_be_undone(canvas):
+    anno = draw(canvas, "rect", 40, 40, 160, 140)
+    before = (anno["x1"], anno["y1"], anno["x2"], anno["y2"])
     canvas.tool = "select"
-    select_at(canvas, 80, 80)
+
+    click(canvas, *border_point(anno))
+    canvas.mousePressEvent(_Mouse(160, 140))
+    assert canvas._resize_handle == "br"
+    canvas.mouseMoveEvent(_Mouse(190, 170))
+    canvas.mouseMoveEvent(_Mouse(230, 210))
+    canvas.mouseReleaseEvent(_Mouse(230, 210))
+    resized = canvas._annotations[0]
+    assert (resized["x2"], resized["y2"]) != (before[2], before[3])
+
+    canvas.undo()
+    restored = canvas._annotations[0]
+    assert (restored["x1"], restored["y1"], restored["x2"], restored["y2"]) == before
+
+
+def test_SEL_02d_redo_reapplies_an_undone_move(canvas):
+    anno = draw(canvas, "rect", 40, 40, 160, 140)
+    canvas.tool = "select"
+
+    bx, by = border_point(anno)
+    canvas.mousePressEvent(_Mouse(bx, by))
+    canvas.mouseMoveEvent(_Mouse(bx + 40, by + 40))
+    canvas.mouseMoveEvent(_Mouse(bx + 80, by + 70))
+    canvas.mouseReleaseEvent(_Mouse(bx + 80, by + 70))
+    moved = canvas._annotations[0]
+    after_drag = (moved["x1"], moved["y1"], moved["x2"], moved["y2"])
+
+    canvas.undo()
+    canvas.redo()
+    redone = canvas._annotations[0]
+    assert (redone["x1"], redone["y1"], redone["x2"], redone["y2"]) == after_drag
+
+
+def test_SEL_02e_a_drag_reports_the_annotations_as_changed(canvas):
+    """Every other mutating operation emits annotation_changed; a drag must too.
+
+    Nothing currently listens to it, so this pins consistency rather than a
+    user-visible behaviour — see DESKTOP_STABILITY_MATRIX.md.
+    """
+    anno = draw(canvas, "rect", 40, 40, 160, 140)
+    canvas.tool = "select"
+    bx, by = border_point(anno)
+
+    emitted = []
+    canvas.annotation_changed.connect(lambda: emitted.append(1))
+
+    # A click that moves nothing is not a change.
+    canvas.mousePressEvent(_Mouse(bx, by))
+    canvas.mouseMoveEvent(_Mouse(bx + 1, by + 1))
+    canvas.mouseReleaseEvent(_Mouse(bx + 1, by + 1))
+    assert emitted == [], "a click that moved nothing reported a change"
+
+    # A real drag is.
+    canvas.mousePressEvent(_Mouse(bx, by))
+    canvas.mouseMoveEvent(_Mouse(bx + 40, by + 40))
+    canvas.mouseReleaseEvent(_Mouse(bx + 40, by + 40))
+    assert len(emitted) == 1
+
+
+def test_SEL_01g_the_interior_of_an_outlined_shape_is_click_through(canvas):
+    """Selection is border-based: an outline is only drawn on its border."""
+    draw(canvas, "rect", 40, 40, 240, 200)
+    canvas.tool = "select"
+
+    click(canvas, 140, 120)
+    assert canvas._selected is None
+
+
+def test_SEL_01h_an_annotation_inside_a_larger_one_is_still_reachable(canvas):
+    """The case border-based hit-testing exists to solve.
+
+    A tester ringing a defect in a big rectangle must still be able to grab the
+    smaller marks inside it without reordering layers.
+    """
+    outer = draw(canvas, "rect", 40, 40, 300, 260)
+    inner = draw(canvas, "circle", 120, 100, 200, 180)
+    canvas.tool = "select"
+
+    click(canvas, 160, 100)              # on the inner ellipse's outline
+    assert canvas._selected is inner
+
+    click(canvas, *border_point(outer))
+    assert canvas._selected is outer
+
+
+def test_SEL_01i_a_circle_is_not_selected_from_its_empty_corners(canvas):
+    circle = draw(canvas, "circle", 40, 40, 240, 200)
+    canvas.tool = "select"
+
+    click(canvas, 50, 50)                # inside the bounding box, outside the ellipse
+    assert canvas._selected is None
+
+    click(canvas, 140, 40)               # on the ellipse itself (top of the arc)
+    assert canvas._selected is circle
+
+
+def test_SEL_01j_an_arrow_is_grabbed_by_its_shaft_not_its_bounding_box(canvas):
+    arrow = draw(canvas, "arrow", 60, 60, 300, 240)
+    canvas.tool = "select"
+
+    click(canvas, 290, 70)               # inside the box, nowhere near the arrow
+    assert canvas._selected is None
+
+    click(canvas, 180, 150)              # on the shaft
+    assert canvas._selected is arrow
+
+
+@pytest.mark.parametrize("case,handle,point,expect", [
+    ("SEL-08a", "r", (240, 120), "width"),
+    ("SEL-08b", "l", (40, 120),  "width"),
+    ("SEL-08c", "t", (140, 40),  "height"),
+    ("SEL-08d", "b", (140, 200), "height"),
+])
+def test_SEL_08_edge_handles_resize_one_axis_only(canvas, case, handle, point, expect):
+    anno = draw(canvas, "rect", 40, 40, 240, 200)
+    canvas.tool = "select"
+    click(canvas, *border_point(anno))
+
+    canvas.mousePressEvent(_Mouse(*point))
+    assert canvas._resize_handle == handle
+    canvas.mouseMoveEvent(_Mouse(point[0] + 30, point[1] + 30))
+    canvas.mouseMoveEvent(_Mouse(point[0] + 50, point[1] + 40))
+    canvas.mouseReleaseEvent(_Mouse(point[0] + 50, point[1] + 40))
+
+    width  = anno["x2"] - anno["x1"]
+    height = anno["y2"] - anno["y1"]
+    if expect == "width":
+        assert width != 200, "the width did not change"
+        assert height == pytest.approx(160), "the height changed on a horizontal handle"
+    else:
+        assert height != 160, "the height did not change"
+        assert width == pytest.approx(200), "the width changed on a vertical handle"
+
+
+def test_SEL_09_shift_keeps_the_proportions_on_a_corner_resize(canvas):
+    anno = draw(canvas, "rect", 40, 40, 240, 200)      # 200 x 160, ratio 0.8
+    canvas.tool = "select"
+    click(canvas, *border_point(anno))
+
+    shift = Qt.KeyboardModifier.ShiftModifier
+    canvas.mousePressEvent(_Mouse(240, 200))
+    canvas.mouseMoveEvent(_Mouse(300, 210, shift))
+    canvas.mouseMoveEvent(_Mouse(340, 215, shift))
+    canvas.mouseReleaseEvent(_Mouse(340, 215, shift))
+
+    width  = anno["x2"] - anno["x1"]
+    height = anno["y2"] - anno["y1"]
+    assert width != 200, "the shape did not resize at all"
+    assert height / width == pytest.approx(0.8, abs=0.01)
+
+
+def test_SEL_10_shift_locks_a_move_to_one_axis(canvas):
+    anno = draw(canvas, "rect", 40, 40, 240, 200)
+    canvas.tool = "select"
+    bx, by = border_point(anno)
+    click(canvas, bx, by)
+
+    shift = Qt.KeyboardModifier.ShiftModifier
+    canvas.mousePressEvent(_Mouse(bx, by))
+    canvas.mouseMoveEvent(_Mouse(bx + 50, by + 15, shift))
+    canvas.mouseMoveEvent(_Mouse(bx + 90, by + 25, shift))
+    canvas.mouseReleaseEvent(_Mouse(bx + 90, by + 25, shift))
+
+    assert anno["x1"] == pytest.approx(130), "the dominant axis did not move"
+    assert anno["y1"] == pytest.approx(40), "the locked axis moved"
+
+
+def test_SEL_11_arrow_keys_nudge_the_selection(canvas):
+    anno = draw(canvas, "rect", 40, 40, 240, 200)
+    canvas.tool = "select"
+    click(canvas, *border_point(anno))
+
+    press_key(canvas, Qt.Key.Key_Right)
+    assert anno["x1"] == pytest.approx(41), "the fine step is not one pixel"
+
+    press_key(canvas, Qt.Key.Key_Down, Qt.KeyboardModifier.ShiftModifier)
+    assert anno["y1"] == pytest.approx(50), "the coarse step is not ten pixels"
+
+    canvas.undo()
+    canvas.undo()
+    # undo() swaps in a restored copy of the list, so re-read rather than
+    # holding the original dict.
+    restored = canvas._annotations[0]
+    assert (restored["x1"], restored["y1"]) == (40, 40), "nudges are not undoable"
+
+
+def test_SEL_11b_arrow_keys_with_no_selection_do_nothing(canvas):
+    draw(canvas, "rect", 40, 40, 240, 200)
+    canvas.tool = "select"
+    canvas._selected = None
+    depth = len(canvas._undo_stack)
+
+    press_key(canvas, Qt.Key.Key_Right)
+    assert len(canvas._undo_stack) == depth
+
+
+def test_SEL_12_escape_cancels_a_drag_and_leaves_no_undo_entry(canvas):
+    anno = draw(canvas, "rect", 40, 40, 240, 200)
+    before = (anno["x1"], anno["y1"], anno["x2"], anno["y2"])
+    canvas.tool = "select"
+    bx, by = border_point(anno)
+    click(canvas, bx, by)
+    depth = len(canvas._undo_stack)
+
+    canvas.mousePressEvent(_Mouse(bx, by))
+    canvas.mouseMoveEvent(_Mouse(bx + 60, by + 60))
+    assert (anno["x1"], anno["y1"]) != (before[0], before[1]), "the drag never started"
+
+    press_key(canvas, Qt.Key.Key_Escape)
+
+    assert (anno["x1"], anno["y1"], anno["x2"], anno["y2"]) == before
+    assert len(canvas._undo_stack) == depth, "a cancelled drag left an undo entry"
+    assert canvas._dragging is False
+
+
+def test_SEL_13_handles_stay_the_same_size_on_screen_at_any_zoom(canvas):
+    """Zoomed out, an image-space handle shrinks to nothing — exactly when you
+    are most likely to be repositioning things."""
+    sizes = set()
+    for zoom in (0.4, 1.0, 2.5):
+        canvas.set_zoom(zoom)
+        sizes.add((
+            round(canvas._handle_radius() * zoom, 6),
+            round(canvas._grab_radius() * zoom, 6),
+        ))
+    assert len(sizes) == 1, f"handle size varies with zoom: {sizes}"
+
+
+def test_SEL_13b_a_handle_is_grabbable_when_zoomed_out(canvas):
+    anno = draw(canvas, "rect", 40, 40, 240, 200)
+    canvas.tool = "select"
+    click(canvas, *border_point(anno))
+    canvas.set_zoom(0.5)
+
+    # Widget coordinates: the corner sits at half its image position on screen.
+    canvas.mousePressEvent(_Mouse(240 * 0.5, 200 * 0.5))
+    assert canvas._resize_handle == "br"
+
+
+def test_SEL_14_a_wobbly_double_click_does_not_nudge_the_annotation(canvas):
+    """The first press of a double-click arms a drag. A shaky hand between the
+    two clicks must not leave the annotation moved and an undo entry behind."""
+    anno = draw(canvas, "rect", 40, 40, 240, 200)
+    before = (anno["x1"], anno["y1"], anno["x2"], anno["y2"])
+    canvas.tool = "select"
+    bx, by = border_point(anno)
+    depth = len(canvas._undo_stack)
+
+    canvas.mousePressEvent(_Mouse(bx, by))
+    canvas.mouseMoveEvent(_Mouse(bx + 5, by + 3))      # wobble, past the 4px threshold
+    canvas.mouseReleaseEvent(_Mouse(bx + 5, by + 3))
+    canvas.mouseDoubleClickEvent(_Mouse(bx + 5, by + 3))
+
+    assert (anno["x1"], anno["y1"], anno["x2"], anno["y2"]) == before
+    assert len(canvas._undo_stack) == depth
+
+
+def test_SEL_14b_a_deliberate_drag_followed_by_a_click_is_not_reverted(canvas):
+    anno = draw(canvas, "rect", 40, 40, 240, 200)
+    canvas.tool = "select"
+    bx, by = border_point(anno)
+
+    canvas.mousePressEvent(_Mouse(bx, by))
+    canvas.mouseMoveEvent(_Mouse(bx + 60, by + 60))
+    canvas.mouseReleaseEvent(_Mouse(bx + 60, by + 60))
+    moved = (anno["x1"], anno["y1"])
+    canvas.mouseDoubleClickEvent(_Mouse(bx + 60, by + 60))
+
+    assert (anno["x1"], anno["y1"]) == moved, "a real drag was undone as wobble"
+
+
+@pytest.mark.parametrize("case,point,expected", [
+    ("SEL-15a", (350, 280), Qt.CursorShape.ArrowCursor),      # empty canvas
+    ("SEL-15b", (140, 120), Qt.CursorShape.ArrowCursor),      # click-through interior
+    ("SEL-15c", (90, 40),   Qt.CursorShape.SizeAllCursor),    # border: move
+    ("SEL-15d", (40, 40),   Qt.CursorShape.SizeFDiagCursor),  # corner
+    ("SEL-15e", (240, 40),  Qt.CursorShape.SizeBDiagCursor),  # other corner
+    ("SEL-15f", (140, 40),  Qt.CursorShape.SizeVerCursor),    # top edge
+    ("SEL-15g", (240, 120), Qt.CursorShape.SizeHorCursor),    # right edge
+])
+def test_SEL_15_the_cursor_says_what_a_press_would_do(canvas, case, point, expected):
+    anno = draw(canvas, "rect", 40, 40, 240, 200)
+    canvas.tool = "select"
+    click(canvas, *border_point(anno))       # so the handles are live
+
+    canvas.mouseMoveEvent(_Mouse(*point))
+    assert canvas.cursor().shape() == expected
+
+
+def test_SEL_16_a_drawing_tool_shows_a_crosshair_not_a_move_cursor(canvas):
+    draw(canvas, "rect", 40, 40, 240, 200)
+    canvas.tool = "rect"
+    canvas.mouseMoveEvent(_Mouse(90, 40))
+    assert canvas.cursor().shape() == Qt.CursorShape.CrossCursor
+
+
+def test_SEL_03_delete_removes_the_selection(canvas):
+    anno = draw(canvas, "rect", 40, 40, 160, 140)
+    canvas.tool = "select"
+    select_at(canvas, *border_point(anno))
     assert canvas._selected is not None
 
     canvas.delete_selected()
@@ -256,6 +654,97 @@ def test_SEL_05_06_07_layering_changes_the_stack(canvas):
     canvas.send_selected_to_back()
     assert lower.get("z", 0) == min(a.get("z", 0) for a in canvas._annotations)
     assert upper.get("z", 0) == top_z()
+
+
+def test_TXT_10_a_single_click_inside_a_text_box_opens_the_editor(canvas, monkeypatch):
+    """Border moves the label, inside changes the words."""
+    canvas._push({
+        "type": "text", "x1": 60, "y1": 200, "width": 160, "height": 24,
+        "color": "#ff3b30", "size": 3, "text": "Login fails", "text_id": 1,
+    })
+    anno = canvas._annotations[-1]
+    canvas.tool = "select"
+
+    calls = []
+    monkeypatch.setattr(
+        "canvas.QInputDialog.getMultiLineText",
+        lambda *a, **k: (calls.append(a) or ("Login fails on submit", True)),
+    )
+
+    click(canvas, 140, 212)                      # inside the box
+    assert calls, "the editor did not open"
+    assert anno["text"] == "Login fails on submit"
+    assert canvas._selected is anno
+
+
+def test_TXT_11_the_border_of_a_text_box_moves_it_without_editing(canvas, monkeypatch):
+    canvas._push({
+        "type": "text", "x1": 60, "y1": 200, "width": 160, "height": 24,
+        "color": "#ff3b30", "size": 3, "text": "Login fails", "text_id": 1,
+    })
+    anno = canvas._annotations[-1]
+    canvas.tool = "select"
+
+    calls = []
+    monkeypatch.setattr(
+        "canvas.QInputDialog.getMultiLineText",
+        lambda *a, **k: (calls.append(a) or ("changed", True)),
+    )
+
+    canvas.mousePressEvent(_Mouse(100, 200))     # on the top border
+    assert not calls, "moving the box opened the text editor"
+    canvas.mouseMoveEvent(_Mouse(130, 230))
+    canvas.mouseReleaseEvent(_Mouse(130, 230))
+
+    assert (anno["x1"], anno["y1"]) == (90, 230)
+    assert anno["text"] == "Login fails"
+
+
+def test_TXT_12_the_cursor_inside_a_text_box_is_an_ibeam(canvas):
+    canvas._push({
+        "type": "text", "x1": 60, "y1": 200, "width": 160, "height": 24,
+        "color": "#ff3b30", "size": 3, "text": "Login fails", "text_id": 1,
+    })
+    canvas.tool = "select"
+
+    canvas.mouseMoveEvent(_Mouse(140, 212))
+    assert canvas.cursor().shape() == Qt.CursorShape.IBeamCursor
+
+
+def test_TXT_13_cancelling_the_editor_leaves_the_text_and_undo_stack_alone(canvas, monkeypatch):
+    canvas._push({
+        "type": "text", "x1": 60, "y1": 200, "width": 160, "height": 24,
+        "color": "#ff3b30", "size": 3, "text": "Login fails", "text_id": 1,
+    })
+    anno = canvas._annotations[-1]
+    canvas.tool = "select"
+    depth = len(canvas._undo_stack)
+
+    monkeypatch.setattr("canvas.QInputDialog.getMultiLineText", lambda *a, **k: ("", False))
+    click(canvas, 140, 212)
+
+    assert anno["text"] == "Login fails"
+    assert len(canvas._undo_stack) == depth
+
+
+def test_SEL_17_the_panel_buttons_follow_the_selection(editor):
+    anno = editor._canvas._annotations
+    buttons = (
+        editor._btn_delete, editor._btn_front,
+        editor._btn_back, editor._btn_backmost,
+    )
+    assert not any(b.isEnabled() for b in buttons), \
+        "selection buttons are offered with nothing selected"
+
+    editor._canvas._push({
+        "type": "rect", "x1": 40, "y1": 40, "x2": 240, "y2": 200,
+        "color": "#ff3b30", "size": 3, "opacity": 0.3,
+    })
+    editor._canvas._selected = anno[-1]
+    assert all(b.isEnabled() for b in buttons)
+
+    editor._canvas._selected = None
+    assert not any(b.isEnabled() for b in buttons)
 
 
 # ── 3.7 Style controls ───────────────────────────────────────────────────────

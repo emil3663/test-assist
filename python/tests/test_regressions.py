@@ -84,8 +84,10 @@ def test_canvas_mousePressEvent_clicking_empty_space_clears_selection(qapp, blan
     })
 
     canvas.tool = "select"
-    canvas.mousePressEvent(_MouseEventStub(30, 30))
-    assert canvas._selected is None
+    # Selecting happens on the border. (30, 20) is on the top edge and clear of
+    # both the top-left corner handle and the top-edge midpoint handle.
+    canvas.mousePressEvent(_MouseEventStub(30, 10))
+    assert canvas._selected is not None, "a click on the border should select"
 
     canvas.mousePressEvent(_MouseEventStub(200, 200))
     assert canvas._selected is None
@@ -109,13 +111,10 @@ def test_canvas_mouseMoveEvent_text_corner_drag_resizes_annotation(qapp, blank_p
     handle_x = text["x1"] + text["width"] + 4
     handle_y = text["y1"] + text["height"] + 4
 
-    # Set drag state directly to avoid opening the text edit dialog on double-click.
-    canvas._selected = text
-    canvas._dragging = True
-    canvas._drag_started = True
-    canvas._resize_handle = "br"
-    canvas._start = QPointF(handle_x, handle_y)
-    canvas._drag_last_pos = QPointF(handle_x, handle_y)
+    # Arm the drag through the real entry point, so the pre-drag snapshot the
+    # resize maths works from is taken exactly as a press would take it. Going
+    # through mousePressEvent directly would risk the text edit dialog.
+    canvas._begin_selection_drag(text, "br", QPointF(handle_x, handle_y))
 
     canvas.mouseMoveEvent(_MouseEventStub(handle_x + 28, handle_y + 18))
     canvas.mouseReleaseEvent(_MouseEventStub(handle_x + 28, handle_y + 18))
@@ -174,12 +173,18 @@ def test_canvas_send_selected_to_back_changes_topmost_hit_target(qapp, blank_pix
         "opacity": 0.3,
     })
 
-    canvas.mouseDoubleClickEvent(_MouseEventStub(60, 60))
+    # A point where both outlines pass: on the rectangle's right edge and, to
+    # within the hit tolerance, on the ellipse too. Selection is border-based, so
+    # the probe has to be somewhere both shapes are actually drawn.
+    overlap = _MouseEventStub(100, 45)
+
+    canvas.mouseDoubleClickEvent(overlap)
     topmost = canvas._selected
     assert topmost is canvas._annotations[1]
 
     canvas.send_selected_to_back()
-    canvas.mouseDoubleClickEvent(_MouseEventStub(60, 60))
+    canvas._selected = None
+    canvas.mouseDoubleClickEvent(overlap)
 
     assert canvas._selected is canvas._annotations[0]
     canvas.close()

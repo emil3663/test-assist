@@ -1,6 +1,6 @@
 # 🔍 Test Assist — Desktop Test Plan
 
-**Version:** 1.1
+**Version:** 1.3
 **Last updated:** 2026-08-21
 **Status:** In active development
 **Applies to:** the PySide6 desktop build under `python/`. The browser build has
@@ -120,14 +120,51 @@ and why — read it before treating a ✅ as proof of more than it is.
 
 | ID | Test | Expected Result | Status |
 |----|------|-----------------|--------|
-| SEL-01 | Double-click an annotation | That annotation becomes selected | ✅ |
-| SEL-01b | Single-click an annotation with the Select tool | Nothing is selected — see the UX note in section 4 | ✅ |
-| SEL-02 | Drag a selected annotation | It moves without deforming | ✅ |
+| SEL-01 | Double-click a shape's border | That annotation becomes selected, whatever the active tool | ✅ |
+| SEL-01b | Single-click a shape's border with the Select tool | That annotation becomes selected | ✅ |
+| SEL-01c | Single-click empty canvas with the Select tool | The selection is cleared | ✅ |
+| SEL-01d | Single-click a shape with a drawing tool active | Nothing is selected; the click starts a new shape | ✅ |
+| SEL-01e | Press and release within 4px of the same point | Nothing moves and nothing is added to the undo stack | ✅ |
+| SEL-01f | Press a corner handle of the current selection and drag | It resizes; selection does not jump to whatever sits under the corner | ✅ |
+| SEL-01g | Click inside an outlined shape | Nothing is selected — interiors are click-through | ✅ |
+| SEL-01h | Click a small annotation drawn inside a larger one | The small one is selected; the enclosing shape does not swallow it | ✅ |
+| SEL-01i | Click a circle's empty bounding-box corner | Nothing is selected; only the arc itself selects | ✅ |
+| SEL-01j | Click inside an arrow's bounding box, off the shaft | Nothing is selected; only the shaft selects | ✅ |
+| SEL-02 | Drag a selected annotation by its border | It moves without deforming | ✅ |
+| SEL-02b | Undo after a move | The annotation returns to its pre-drag geometry | ✅ |
+| SEL-02c | Undo after a corner-handle resize | The annotation returns to its pre-drag geometry | ✅ |
+| SEL-02d | Redo after undoing a move | The move is reapplied | ✅ |
+| SEL-02e | `annotation_changed` after a drag | Emitted once for a real drag, not for a click that moved nothing | ✅ |
+| SEL-08a–d | Drag each edge handle (l, r, t, b) | Width or height changes; the other axis does not | ✅ |
+| SEL-09 | Shift-drag a corner handle | The original proportions are kept | ✅ |
+| SEL-10 | Shift-drag the border | The move is locked to the dominant axis | ✅ |
+| SEL-11 | Arrow keys with a selection | Nudges 1px, or 10px with Shift; both undoable | ✅ |
+| SEL-11b | Arrow keys with nothing selected | Nothing happens; no undo entry | ✅ |
+| SEL-12 | Escape during a drag | Geometry is restored and no undo entry is left behind | ✅ |
+| SEL-13 | Handle size across zoom levels | Drawn and grab radii are constant in screen pixels | ✅ |
+| SEL-13b | Grab a corner handle at 50% zoom | The handle is picked up | ✅ |
+| SEL-14 | Double-click whose first press wandered a few pixels | The annotation is not moved and no undo entry is left | ✅ |
+| SEL-14b | Deliberate drag, then a double-click | The drag is not reverted as wobble | ✅ |
+| SEL-15a–g | Hover empty canvas, interior, border, corners, edges | The cursor matches what a press would do | ✅ |
+| SEL-16 | Hover with a drawing tool active | Crosshair, not a selection cursor | ✅ |
+| SEL-17 | Panel buttons with and without a selection | Delete and the layer buttons enable only with a selection | ✅ |
 | SEL-03 | Delete key with a selection | Selected annotation is removed | ✅ |
 | SEL-04 | Delete key with nothing selected | Nothing happens; no crash | ✅ |
 | SEL-05 | Bring to front | Selected annotation becomes the topmost hit target | ✅ |
 | SEL-06 | Send to back | Selected annotation is no longer the topmost hit target | ✅ |
 | SEL-07 | Send backward | Annotation moves one step down the stack | ✅ |
+
+### 3.6b Editing placed text
+
+Border and interior mean different things on a text box: the border moves it, the
+inside changes the words.
+
+| ID | Test | Expected Result | Status |
+|----|------|-----------------|--------|
+| TXT-10 | Single-click inside a text box with the Select tool | The text editor opens | ✅ |
+| TXT-11 | Drag a text box by its border | It moves; the editor does not open | ✅ |
+| TXT-12 | Hover inside a text box | I-beam cursor | ✅ |
+| TXT-13 | Cancel the text editor | Text and undo stack are unchanged | ✅ |
 
 ### 3.7 Style Controls
 
@@ -242,12 +279,7 @@ These need a built artefact rather than a source checkout.
    recording cannot fill the disk.
 3. **Recording frames are scaled to 1280px wide** — full-resolution frames
    cannot be encoded inside the frame budget.
-4. **Selection needs a double-click** — with the Select tool active, a single
-   click does not select anything; selection is bound to double-click for every
-   tool. SEL-01b documents the current behaviour rather than asserting the
-   intended one. Worth a decision: a tool called Select that does not select on
-   click is surprising.
-5. **No annotation numbering, PDF export, or frame-by-frame video annotation.**
+4. **No annotation numbering, PDF export, or frame-by-frame video annotation.**
 
 ---
 
@@ -264,6 +296,17 @@ These need a built artefact rather than a source checkout.
 ### Sprint 3 (Output)
 - [ ] PDF export combining several captures into one document
 - [ ] Frame-by-frame annotation of recordings
+
+### Sprint 4 (Editor usability) — done
+- [x] Hover cursors: move over a border, the matching arrow over each handle
+- [x] Handle size and grab radius held constant in screen pixels at any zoom
+- [x] Grab radius brought close to the drawn handle size
+- [x] Edge handles for width-only and height-only resize
+- [x] Shift to constrain, arrow keys to nudge, Escape to cancel a drag
+- [x] Panel selection buttons disabled when nothing is selected
+- [x] Border-based hit-testing, so interiors are click-through
+- [x] Single click inside a text box edits it; its border moves it
+- [x] Double-click wobble no longer nudges the annotation
 
 ---
 

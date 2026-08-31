@@ -451,8 +451,15 @@
   <div class="tool-grid">
     <div class="tool-item">
       <div class="badge">S — Select</div>
-      <p>Double-click an annotation to select it. Drag to move it. Use the layer buttons in
-         the panel to reorder. Press <code>Delete</code> to remove the selected annotation.</p>
+      <p><strong>Click a shape's border</strong> to select it — eight handles appear.
+         Drag the border to move it, a corner to resize both axes, or an edge handle to
+         change width or height alone. Interiors are click-through, so a big rectangle
+         never blocks the marks inside it.</p>
+      <p>Hold <code>Shift</code> to keep the proportions while resizing, or to lock a
+         move to one axis. Arrow keys nudge by a pixel, <code>Shift</code>+arrow by ten.
+         <code>Esc</code> abandons a drag in progress and <code>Delete</code> removes the
+         selection. Everything here is undoable. The cursor tells you what a press will
+         do before you press it.</p>
     </div>
     <div class="tool-item">
       <div class="badge">X — Crop</div>
@@ -593,10 +600,10 @@
         to the front.</li>
     <li>Use <strong>Crop</strong> first to trim unwanted areas, then annotate — the crop is
         fully undoable.</li>
-    <li>Text tool: after typing, click elsewhere to place the label. Double-click a placed
-        text annotation (with the Select tool) to edit it.</li>
-    <li>Blank/corrupt history snapshots smaller than 5 KB are automatically cleaned up on
-        startup.</li>
+    <li>Text: with the Select tool, click <em>inside</em> a placed label to change its
+        words, or drag its <em>border</em> to move it.</li>
+    <li>History snapshots that can no longer be decoded as an image are cleaned up on
+        startup. Small but valid captures are kept.</li>
   </ul>
 
 </div>

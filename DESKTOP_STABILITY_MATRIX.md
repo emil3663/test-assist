@@ -9,7 +9,7 @@ in `STABILITY_MATRIX.md`.
 
 ## Why this document exists
 
-`DESKTOP_TEST_PLAN.md` says 87 of 91 cases are automated. That number is only
+`DESKTOP_TEST_PLAN.md` says 116 of 120 cases are automated. That number is only
 worth anything if you can check what it covers and what it quietly does not.
 This document is that check.
 
@@ -25,13 +25,13 @@ This document is that check.
 
 | | Count |
 |---|---|
-| Cases in `DESKTOP_TEST_PLAN.md` v1.1 | 91 |
-| Automated and passing | 87 |
+| Cases in `DESKTOP_TEST_PLAN.md` v1.3 | 120 |
+| Automated and passing | 116 |
 | Blocked, documented as manual | 4 |
-| Automated tests | 108 (`test_regressions.py` + `test_functional.py`) |
+| Automated tests | 146 (`test_regressions.py` + `test_functional.py`) |
 | Wall clock | under 2 seconds |
 
-Three defects were found by writing these tests. All are fixed and all have a
+Four defects were found by writing these tests. All are fixed and all have a
 regression test — see **Defects found** below.
 
 ---
@@ -72,7 +72,8 @@ These four are the manual pass to run against a release before trusting it.
 | 3.3 Tools | 10 | Stable | Direct assertions on the annotation model. |
 | 3.4 Crop | 4 | Stable | |
 | 3.5 Blur | 3 | Stable | BLR-02 measures pixel variance in the exported image rather than trusting that a blur annotation exists. |
-| 3.6 Selection & layering | 8 | Stable | |
+| 3.6 Selection & layering | 33 | Stable | SEL-01f pins the ordering between grabbing a resize handle and hit-testing for a new selection. |
+| 3.6b Placed text | 4 | Stable | The edit dialog is substituted, so these prove the routing — border vs interior — not the dialog. |
 | 3.7 Style | 5 | Stable | |
 | 3.8 Zoom | 6 | Stable | ZOM-05 asserts that coordinates are in image space, not widget space. |
 | 3.9 Undo/redo | 6 | Stable | |
@@ -115,16 +116,58 @@ Caught by REC-03 while testing the duration cap.
 so a one-minute recording held roughly 7 GB. Fixed before this suite was
 written; REC-01 and REC-02 now hold the line.
 
+**4. Moving or resizing an annotation was not undoable.** The drag path mutated
+the annotation in place without ever pushing an undo snapshot, so a misplaced or
+mis-sized shape could not be taken back — the only recovery was to delete it and
+draw it again. Found while implementing single-click selection, which makes an
+accidental nudge easier to trigger. SEL-02b and SEL-02c hold the line, SEL-02d
+covers redo.
+
+The same path also skipped `annotation_changed`, which every other mutating
+operation emits. That is now emitted too, and SEL-02e pins it — but be clear
+about what it is worth: **nothing in the app currently connects to that signal.**
+There is no dirty-state indicator, no unsaved-changes prompt and no autosave, so
+the missing emit had no user-visible effect. It is fixed for consistency, so that
+anything wired to the signal later sees drags as well.
+
 ---
 
-## An open question, not a defect
+## The selection model
 
-**Selection is bound to double-click**, for every tool including Select. A
-single click with the Select tool active selects nothing. SEL-01b documents the
-current behaviour rather than asserting the intended one, because a tool named
-Select that does not select on click is surprising enough to be worth a decision
-rather than a silent fix.
+Selecting, moving and resizing were rebuilt for volume use. The model is now:
 
+- **A shape's border is its grip.** One click on the border selects it and shows
+  eight handles; dragging the border moves it. Interiors are click-through, so a
+  rectangle drawn around a defect never blocks the marks inside it, and nothing
+  has to be reordered to reach them. A circle selects from its arc, not its empty
+  bounding-box corners; an arrow from its shaft, not the large empty box around a
+  diagonal line.
+- **A text box is the exception, deliberately.** Its border moves it; clicking
+  inside it edits the words.
+- **Handles are in screen pixels.** Both the drawn radius and the grab radius are
+  divided by the zoom, so they are the same size to the hand at 40% as at 250%.
+  Previously they lived in image space and shrank to nothing when zoomed out —
+  precisely when you are repositioning things.
+- **Corners resize both axes, edge midpoints one.** Shift keeps the proportions
+  on a corner, or locks a move to an axis. Arrow keys nudge, Escape abandons a
+  drag, and everything is undoable.
+- **The cursor states the outcome before the click.** SEL-15a–g assert the exact
+  shape at seven positions, which is the only way this stays true.
+
+The riskiest part is border-based hit-testing, because it changes how every
+existing shape selects. It is the piece to check first if anything about
+selection feels wrong.
+
+### What automation still cannot tell you
+
+These tests drive the widget's own handlers offscreen. They prove the geometry,
+the state machine and the cursor *shape*. They cannot tell you whether the
+handles are comfortable to hit with a real mouse on a real screen, whether the
+grab radius is right for the hand, or whether the cursor changes feel
+responsive. That is a sitting-down-with-it judgement and it has not been made
+yet on the packaged build.
+
+---
 ---
 
 ## Running them
@@ -132,7 +175,7 @@ rather than a silent fix.
 ```bash
 cd python
 pip install -r requirements.txt
-QT_QPA_PLATFORM=offscreen pytest -q      # 108 tests, under 2 seconds
+QT_QPA_PLATFORM=offscreen pytest -q      # 146 tests, under 3 seconds
 ```
 
 On Windows the platform variable is unnecessary; `conftest.py` sets it.
