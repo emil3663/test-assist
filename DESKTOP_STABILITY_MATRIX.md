@@ -29,7 +29,7 @@ This document is that check.
 | Automated and passing | 116 |
 | Blocked, documented as manual | 4 |
 | Automated tests | 148 collected — 148 pass everywhere, no skips |
-| Wall clock | under 3 seconds |
+| Wall clock | about 2-3 seconds warm; the first run is slower while the bundled ffmpeg loads |
 
 **A green run is `148 passed, 0 skipped`, everywhere.** MP4 assembly used to
 depend on `opencv-python`, an optional dependency the product deliberately
@@ -182,7 +182,9 @@ yet on the packaged build.
 ```bash
 cd python
 pip install -r requirements.txt
-QT_QPA_PLATFORM=offscreen pytest -q      # 148 passed, under 3 seconds
+QT_QPA_PLATFORM=offscreen pytest -q      # 148 passed, about 2-3 seconds warm;
+                                          # slower on the first run while the
+                                          # bundled ffmpeg loads
 ```
 
 On Windows the platform variable is unnecessary; `conftest.py` sets it.
