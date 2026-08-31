@@ -616,6 +616,79 @@ def test_version_flag_writes_a_file_when_asked(monkeypatch, tmp_path):
     assert target.read_text(encoding="utf-8").strip() == f"Test Assist {main.__version__}"
 
 
+def test_selftest_flag_resolves_and_runs_the_bundled_ffmpeg(monkeypatch, tmp_path):
+    """--selftest proves the packaged build can actually find its ffmpeg, not
+    just that the binary exists somewhere in the dist folder - collect_data_
+    files() landing the file on disk does not prove the frozen import resolves
+    the same way. build.ps1 and the release workflow run exactly this."""
+    import sys as _sys
+
+    import main
+
+    target = tmp_path / "selftest-probe.txt"
+    monkeypatch.setenv("TESTASSIST_VERSION_FILE", str(target))
+    monkeypatch.setattr(_sys, "argv", ["TestAssist.exe", "--selftest"])
+
+    main.main()
+
+    assert target.is_file(), "no selftest file was written"
+    lines = target.read_text(encoding="utf-8").splitlines()
+    assert len(lines) == 2
+    path, version_line = lines
+    assert Path(path).is_file(), f"resolved ffmpeg path does not exist: {path}"
+    assert "version" in version_line.lower()
+
+
+def test_selftest_flag_leaves_the_path_empty_on_resolution_failure(monkeypatch, tmp_path):
+    """A resolution failure must be visible as an empty path, not a crash or a
+    stale/misleading value - it is exactly what build.ps1 checks for."""
+    import sys as _sys
+
+    import capture
+    import main
+
+    monkeypatch.setattr(
+        capture,
+        "_resolve_ffmpeg_exe",
+        lambda: (_ for _ in ()).throw(RuntimeError("simulated: not found")),
+    )
+
+    target = tmp_path / "selftest-probe.txt"
+    monkeypatch.setenv("TESTASSIST_VERSION_FILE", str(target))
+    monkeypatch.setattr(_sys, "argv", ["TestAssist.exe", "--selftest"])
+
+    main.main()
+
+    assert target.is_file()
+    lines = target.read_text(encoding="utf-8").splitlines()
+    assert lines[0] == "", "the path must be empty when resolution fails"
+
+
+def test_version_info_matches_main_version():
+    """v1.1.0 shipped reporting itself as 1.0.0 because version_info.txt was a
+    second place to remember and nobody updated it alongside __version__.
+    generate_version_info.py derives it from __version__ at build time, but
+    version_info.txt is also checked into the repo so a plain `pyinstaller
+    TestAssist.spec` still works - this pins the two together so the checked
+    in copy cannot silently drift from source between releases."""
+    import re
+
+    import main
+
+    here = Path(main.__file__).resolve().parent
+    text = (here / "version_info.txt").read_text(encoding="utf-8")
+
+    file_version = re.search(r"StringStruct\('FileVersion', '([^']+)'\)", text)
+    product_version = re.search(r"StringStruct\('ProductVersion', '([^']+)'\)", text)
+    assert file_version and file_version.group(1) == main.__version__
+    assert product_version and product_version.group(1) == main.__version__
+
+    parts = tuple(int(p) for p in main.__version__.split("."))
+    filevers = re.search(r"filevers=\(([^)]+)\)", text)
+    assert filevers
+    assert tuple(int(p.strip()) for p in filevers.group(1).split(",")) == (*parts, 0)
+
+
 def test_packaged_icon_exists_and_is_a_real_ico():
     """The taskbar icon ships with the build; a missing file falls back silently."""
     icon = Path(__file__).resolve().parents[2] / "assets" / "icon.ico"

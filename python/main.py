@@ -7,7 +7,7 @@ import os
 import sys
 from pathlib import Path
 
-__version__ = "1.0.0"
+__version__ = "1.2.0"
 
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QAction, QColor, QFont, QIcon, QPainter, QPen, QPixmap
@@ -77,6 +77,54 @@ def _setup_tray(app: QApplication, launcher: FloatingLauncher, editor: EditorWin
     return tray
 
 
+def _run_selftest() -> None:
+    """Headless proof that the packaged build can actually find and run its
+    bundled ffmpeg - not just that collect_data_files() dropped the exe
+    somewhere under dist/. capture._resolve_ffmpeg_exe() locates the binary
+    via imageio_ffmpeg.__file__, which only resolves to a real path inside
+    the frozen bundle if PyInstaller rewrote it correctly; a file existing on
+    disk does not by itself prove the frozen import resolves the same way.
+
+    Same file-probe pattern as --version: a windowed build has no usable
+    stdout, so the result is written to TESTASSIST_VERSION_FILE as two lines
+    - the resolved path, then the first line of `ffmpeg -version` - and the
+    path is left empty on any failure rather than raising.
+    """
+    import subprocess
+
+    import capture
+
+    path = ""
+    version_line = ""
+    try:
+        path = capture._resolve_ffmpeg_exe()
+    except Exception:
+        path = ""
+
+    if path:
+        try:
+            result = subprocess.run(
+                [path, "-version"],
+                capture_output=True,
+                timeout=15,
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+                stdin=subprocess.DEVNULL,
+            )
+            if result.stdout:
+                version_line = result.stdout.decode(errors="replace").splitlines()[0]
+        except Exception:
+            version_line = ""
+
+    text = f"{path}\n{version_line}"
+    target = os.environ.get("TESTASSIST_VERSION_FILE")
+    if target:
+        Path(target).write_text(text, encoding="utf-8")
+    try:
+        print(text)
+    except Exception:
+        pass
+
+
 def main() -> None:
     if "--version" in sys.argv:
         # Headless: lets a build pipeline prove the executable actually runs
@@ -94,6 +142,10 @@ def main() -> None:
             print(text)
         except Exception:
             pass
+        return
+
+    if "--selftest" in sys.argv:
+        _run_selftest()
         return
 
     try:

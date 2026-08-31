@@ -33,6 +33,10 @@ if ($LASTEXITCODE -ne 0) {
     & $python -m pip install --quiet pyinstaller
 }
 
+Write-Host "Generating version_info.txt from __version__..." -ForegroundColor Cyan
+& $python generate_version_info.py
+if ($LASTEXITCODE -ne 0) { throw "Failed to generate version_info.txt" }
+
 Write-Host "Building..." -ForegroundColor Cyan
 & $python -m PyInstaller --noconfirm --clean TestAssist.spec
 if ($LASTEXITCODE -ne 0) { throw "PyInstaller failed" }
@@ -63,6 +67,34 @@ Write-Host "Built and verified: $reported" -ForegroundColor Green
 
 $version = ($reported -replace '[^0-9\.]', '').Trim()
 if (-not $version) { $version = "0.0.0" }
+
+# The ffmpeg-file check above only proves collect_data_files() dropped the
+# exe somewhere under dist/. It does not prove the frozen app can actually
+# find it: _resolve_ffmpeg_exe() resolves via imageio_ffmpeg.__file__, which
+# only points inside the frozen bundle if PyInstaller rewrote it correctly.
+# --selftest exercises that real resolution path and reports where it landed.
+$selftestProbe = Join-Path $here "selftest-probe.txt"
+if (Test-Path $selftestProbe) { Remove-Item $selftestProbe }
+$env:TESTASSIST_VERSION_FILE = $selftestProbe
+
+$proc = Start-Process -FilePath $exe -ArgumentList '--selftest' -Wait -PassThru
+if ($proc.ExitCode -ne 0) { throw "The built executable exited with $($proc.ExitCode) during --selftest" }
+if (-not (Test-Path $selftestProbe)) { throw "The executable ran --selftest but produced no probe file" }
+
+$selftestLines = Get-Content $selftestProbe
+$ffmpegPath = $selftestLines[0]
+Remove-Item $selftestProbe
+
+if ([string]::IsNullOrWhiteSpace($ffmpegPath)) {
+    throw "--selftest could not resolve an ffmpeg binary in the built app"
+}
+
+$distRoot = (Resolve-Path (Join-Path $here "dist\TestAssist")).Path
+$resolvedFfmpeg = Resolve-Path $ffmpegPath -ErrorAction SilentlyContinue
+if (-not $resolvedFfmpeg -or -not $resolvedFfmpeg.Path.StartsWith($distRoot, [System.StringComparison]::OrdinalIgnoreCase)) {
+    throw "--selftest resolved ffmpeg outside the dist folder: $ffmpegPath"
+}
+Write-Host "ffmpeg resolves at runtime: $ffmpegPath" -ForegroundColor Green
 
 if ($Zip) {
     $zip = Join-Path $here "dist\TestAssist-$version-win64.zip"

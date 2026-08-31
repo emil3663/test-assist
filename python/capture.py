@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import time
 from pathlib import Path
 
@@ -19,6 +20,33 @@ def _recordings_dir() -> Path:
     path = Path.home() / ".test-assist" / "recordings"
     path.mkdir(parents=True, exist_ok=True)
     return path
+
+
+def _resolve_ffmpeg_exe() -> str:
+    """Locate the ffmpeg binary bundled with imageio_ffmpeg.
+
+    Deliberately does not call imageio_ffmpeg.get_ffmpeg_exe() directly: it
+    validates whatever it finds by running `ffmpeg -version` as a subprocess
+    without redirecting stdin, and a process with no real stdin handle - this
+    app is built with console=False, and a test runner's captured stdin has
+    the same shape - can make that validation subprocess fail to start even
+    though the binary itself is perfectly runnable. Finding the bundled binary
+    by path sidesteps that check entirely.
+    """
+    import imageio_ffmpeg
+
+    override = os.environ.get("IMAGEIO_FFMPEG_EXE")
+    if override:
+        return override
+
+    binaries_dir = Path(imageio_ffmpeg.__file__).resolve().parent / "binaries"
+    matches = sorted(binaries_dir.glob("ffmpeg-*"))
+    if matches:
+        return str(matches[0])
+
+    # No bundled binary found - fall back to the library's own resolution
+    # (e.g. a system or conda ffmpeg), validity check and all.
+    return imageio_ffmpeg.get_ffmpeg_exe()
 
 
 class ScreenshotOverlay(QWidget):
@@ -250,12 +278,7 @@ class FrameRecorder(QObject):
         caller can fall back to keeping the frames.
         """
         try:
-            import imageio_ffmpeg
-        except ImportError:
-            return False
-
-        try:
-            ffmpeg_exe = imageio_ffmpeg.get_ffmpeg_exe()
+            ffmpeg_exe = _resolve_ffmpeg_exe()
         except Exception:
             return False
 

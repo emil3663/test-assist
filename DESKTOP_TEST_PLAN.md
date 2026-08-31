@@ -1,6 +1,6 @@
 # 🔍 Test Assist — Desktop Test Plan
 
-**Version:** 1.3
+**Version:** 1.4
 **Last updated:** 2026-08-31
 **Status:** In active development
 **Applies to:** the PySide6 desktop build under `python/`. The browser build has
@@ -267,6 +267,7 @@ These need a built artefact rather than a source checkout.
 | PKG-03 | Taskbar icon | Pinned icon matches the tray icon | 🚫 |
 | PKG-04 | First launch on a machine without Python | App starts from the unzipped folder | 🚫 |
 | PKG-05 | Windows file properties | Product name and version are populated | 🚫 |
+| PKG-06 | `version_info.txt` vs `__version__` | The checked-in file properties resource agrees with `main.__version__` | ✅ |
 
 ---
 

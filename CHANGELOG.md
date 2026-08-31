@@ -45,6 +45,26 @@ release; only tagged versions appear as releases.
 
 ### Fixed
 
+- **v1.1.0 shipped reporting itself as 1.0.0.** `__version__` in `main.py` was
+  bumped for the release but `version_info.txt` — a second, hand-maintained
+  copy that drives the Windows file properties on the built exe — was not, so
+  `TestAssist-1.1.0-win64.zip` contained a binary whose file properties and
+  `--version` output both said 1.0.0. The release verify step only checked
+  that the output matched a version-shaped pattern, so it could not have
+  caught this. `version_info.txt` is now generated from `__version__` at build
+  time (`generate_version_info.py`, run from `build.ps1`) instead of hand-kept
+  in step with it, the release workflow now asserts the built binary's
+  self-reported version equals the git tag on an actual tag push, and a test
+  pins the checked-in `version_info.txt` to `__version__` so the two cannot
+  drift between releases again. Bumped to **1.2.0**.
+- **MP4 encoding could fail in the packaged build even with ffmpeg bundled and
+  working.** `imageio_ffmpeg.get_ffmpeg_exe()` validates the binary it finds by
+  running `ffmpeg -version` as a subprocess without redirecting stdin; a
+  process with no real stdin handle — which describes this app, built with
+  `console=False` — can make that validation subprocess fail to start even
+  though ffmpeg itself is perfectly runnable, so recording would silently and
+  unpredictably fall back to a frame sequence. `capture.py` now locates the
+  bundled binary directly instead of going through that check.
 - **Moving or resizing an annotation was not undoable.** The drag path mutated
   the annotation in place without ever pushing an undo snapshot, so a misplaced or
   mis-sized shape could not be taken back — the only recovery was to delete it and

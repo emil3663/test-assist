@@ -9,7 +9,7 @@ in `STABILITY_MATRIX.md`.
 
 ## Why this document exists
 
-`DESKTOP_TEST_PLAN.md` says 116 of 120 cases are automated. That number is only
+`DESKTOP_TEST_PLAN.md` says 117 of 121 cases are automated. That number is only
 worth anything if you can check what it covers and what it quietly does not.
 This document is that check.
 
@@ -25,20 +25,20 @@ This document is that check.
 
 | | Count |
 |---|---|
-| Cases in `DESKTOP_TEST_PLAN.md` v1.3 | 120 |
-| Automated and passing | 116 |
+| Cases in `DESKTOP_TEST_PLAN.md` v1.4 | 121 |
+| Automated and passing | 117 |
 | Blocked, documented as manual | 4 |
-| Automated tests | 148 collected — 148 pass everywhere, no skips |
+| Automated tests | 149 collected — 149 pass everywhere, no skips |
 | Wall clock | about 2-3 seconds warm; the first run is slower while the bundled ffmpeg loads |
 
-**A green run is `148 passed, 0 skipped`, everywhere.** MP4 assembly used to
+**A green run is `149 passed, 0 skipped`, everywhere.** MP4 assembly used to
 depend on `opencv-python`, an optional dependency the product deliberately
 shipped without, which made REC-05 skip itself on CI, the packaged build, and
 any clean checkout. It now shells out to a bundled `ffmpeg` binary via
 `imageio-ffmpeg`, a real entry in `requirements.txt` — so REC-05 runs and
 passes in every environment, and there is no longer a skip to explain away.
 
-Four defects were found by writing these tests. All are fixed and all have a
+Six defects were found by writing these tests. All are fixed and all have a
 regression test — see **Defects found** below.
 
 ---
@@ -89,7 +89,7 @@ These four are the manual pass to run against a release before trusting it.
 | 3.12 Launcher | 7 | Stable | LCH-07 asserts the always-on-top flag is set, not that the window is actually on top. |
 | 3.13 Shortcuts | 5 | Stable | KEY-05 exercises the real signal path rather than calling the setter directly. |
 | 3.14 Lifecycle | 4 | Moderate | INS-01 binds a uniquely named local server so it cannot collide with a running app. |
-| 3.15 Packaging | 5 | Blocked (3) | PKG-01 and PKG-02 are automated. |
+| 3.15 Packaging | 6 | Blocked (3) | PKG-01, PKG-02 and PKG-06 are automated. |
 
 ---
 
@@ -137,6 +137,26 @@ There is no dirty-state indicator, no unsaved-changes prompt and no autosave, so
 the missing emit had no user-visible effect. It is fixed for consistency, so that
 anything wired to the signal later sees drags as well.
 
+**5. v1.1.0 shipped reporting itself as 1.0.0.** `version_info.txt` was a second,
+hand-maintained copy of the version number, and it was not updated when
+`__version__` was bumped for that release. Nothing caught it because the release
+verify step only checked that the output was version-*shaped*, not that it was
+the *right* version. Found by inspecting the actual v1.1.0 release artefact
+while adding PKG-06, not by a failing test — there was no test to catch it.
+There is now: PKG-06 pins `version_info.txt` to `__version__`, and the release
+workflow asserts the built binary's self-reported version equals the git tag.
+
+**6. MP4 encoding could silently fail even with ffmpeg correctly bundled.**
+`imageio_ffmpeg.get_ffmpeg_exe()` validates the binary it finds by running
+`ffmpeg -version` as a subprocess without redirecting stdin. A process with no
+real stdin handle — this app, built with `console=False` — can make that
+validation subprocess fail to start even though ffmpeg itself runs fine, so
+recording would unpredictably fall back to a frame sequence for reasons that
+had nothing to do with ffmpeg. Caught as intermittent (roughly 1-in-3) failures
+of REC-05 while verifying this suite is actually deterministic, not by a single
+failing run — flaky is easy to mistake for fine. `capture.py` now locates the
+bundled binary by path instead of going through that check.
+
 ---
 
 ## The selection model
@@ -182,7 +202,7 @@ yet on the packaged build.
 ```bash
 cd python
 pip install -r requirements.txt
-QT_QPA_PLATFORM=offscreen pytest -q      # 148 passed, about 2-3 seconds warm;
+QT_QPA_PLATFORM=offscreen pytest -q      # 149 passed, about 2-3 seconds warm;
                                           # slower on the first run while the
                                           # bundled ffmpeg loads
 ```

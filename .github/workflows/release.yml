@@ -56,6 +56,50 @@ jobs:
           Write-Host "built: $out"
           if ($out -notmatch '^Test Assist \d+\.\d+\.\d+$') { throw "unexpected version output: $out" }
 
+          # The pattern check above only proves the exe runs and reports
+          # *something* shaped like a version - it cannot tell 1.0.0 from
+          # 1.1.0, which is exactly how v1.1.0 shipped reporting itself as
+          # 1.0.0. On an actual tag push, the binary must report that tag.
+          # workflow_dispatch runs against a branch, not a tag, so ref_name
+          # there is not a version and this check does not apply.
+          if ("${{ github.ref_type }}" -eq "tag") {
+            $expected = "${{ github.ref_name }}" -replace '^v', ''
+            if ($out -ne "Test Assist $expected") {
+              throw "binary reports '$out' but the tag is v$expected"
+            }
+          }
+
+      - name: Verify the packaged build can find its ffmpeg
+        working-directory: python
+        shell: pwsh
+        run: |
+          # Bundling the binary is not the same as the frozen app being able
+          # to find it: _resolve_ffmpeg_exe() resolves via
+          # imageio_ffmpeg.__file__, which only points inside the frozen
+          # bundle if PyInstaller rewrote it correctly. --selftest exercises
+          # that real resolution path and reports where it landed.
+          $probe = Join-Path $PWD 'selftest-probe.txt'
+          if (Test-Path $probe) { Remove-Item $probe }
+          $env:TESTASSIST_VERSION_FILE = $probe
+
+          $proc = Start-Process -FilePath '.\dist\TestAssist\TestAssist.exe' `
+                                -ArgumentList '--selftest' -Wait -PassThru
+          if ($proc.ExitCode -ne 0) { throw "the built executable exited with $($proc.ExitCode) during --selftest" }
+          if (-not (Test-Path $probe)) { throw "the executable ran --selftest but produced no probe file" }
+
+          $lines = Get-Content $probe
+          $ffmpegPath = $lines[0]
+          if ([string]::IsNullOrWhiteSpace($ffmpegPath)) {
+            throw "--selftest could not resolve an ffmpeg binary in the built app"
+          }
+
+          $distRoot = (Resolve-Path 'dist\TestAssist').Path
+          $resolvedFfmpeg = Resolve-Path $ffmpegPath -ErrorAction SilentlyContinue
+          if (-not $resolvedFfmpeg -or -not $resolvedFfmpeg.Path.StartsWith($distRoot, [System.StringComparison]::OrdinalIgnoreCase)) {
+            throw "--selftest resolved ffmpeg outside the dist folder: $ffmpegPath"
+          }
+          Write-Host "ffmpeg resolves at runtime: $ffmpegPath"
+
       - name: Package
         working-directory: python
         shell: pwsh
