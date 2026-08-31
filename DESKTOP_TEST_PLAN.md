@@ -1,6 +1,6 @@
 # 🔍 Test Assist — Desktop Test Plan
 
-**Version:** 1.4
+**Version:** 1.5
 **Last updated:** 2026-08-31
 **Status:** In active development
 **Applies to:** the PySide6 desktop build under `python/`. The browser build has
@@ -45,6 +45,7 @@ history that survives restarts.
 | System tray icon and menu | ✅ Done | Show launcher, open editor, exit |
 | Single-instance enforcement | ✅ Done | Second launch focuses the running app |
 | Packaged Windows executable | ✅ Done | Built by the tagged-release workflow |
+| Manual "Check for Updates" | ✅ Done | Button in the launcher; compares `__version__` against the latest GitHub release tag |
 | Annotation numbering | ❌ Not done | Numbered callouts not supported |
 | PDF export | ❌ Not done | PNG and JSON only |
 | Frame-by-frame video annotation | ❌ Not done | |
@@ -268,6 +269,27 @@ These need a built artefact rather than a source checkout.
 | PKG-04 | First launch on a machine without Python | App starts from the unzipped folder | 🚫 |
 | PKG-05 | Windows file properties | Product name and version are populated | 🚫 |
 | PKG-06 | `version_info.txt` vs `__version__` | The checked-in file properties resource agrees with `main.__version__` | ✅ |
+| PKG-07 | `--selftest` reports TLS support | `QSslSocket.supportsSsl()` and the active backend are written to the probe file; the build fails if unsupported | ✅ |
+
+### 3.16 Update Check
+
+The parsing and comparison are pure functions with no I/O and are fully covered.
+The real network round-trip to GitHub is not — see `DESKTOP_STABILITY_MATRIX.md`.
+
+| ID | Test | Expected Result | Status |
+|----|------|-----------------|--------|
+| UPD-01 | Parse a valid `releases/latest` payload | `tag_name` and `html_url` are extracted | ✅ |
+| UPD-02 | Parse malformed JSON, an empty payload, a non-object response, or a missing/non-string `tag_name` | `None`, never an exception | ✅ |
+| UPD-03 | A newer release exists | Reported as an update | ✅ |
+| UPD-04 | The server reports the current version | Reported as up to date | ✅ |
+| UPD-05 | The server reports an older version | Never offered as an update — no downgrades | ✅ |
+| UPD-06 | `v`-prefixed vs bare tags, on either side | Compared equivalently | ✅ |
+| UPD-07 | `1.10.0` vs `1.9.0` | Compared as integer tuples, not strings | ✅ |
+| UPD-08 | Click "Check for Updates" | The button disables itself and one check is issued | ✅ |
+| UPD-09 | Result: up to date | Dialog names the current version | ✅ |
+| UPD-10 | Result: newer available | Dialog names the new version and explains how to update (close the app, download the zip, replace the folder contents) | ✅ |
+| UPD-11 | Result: network failure or unparseable response | A calm message, never a traceback | ✅ |
+| UPD-12 | An actual round-trip to the real GitHub API | Not provable here — see the stability matrix | 🚫 |
 
 ---
 
@@ -283,6 +305,10 @@ These need a built artefact rather than a source checkout.
 3. **Recording frames are scaled to 1280px wide** — full-resolution frames
    cannot be encoded inside the frame budget.
 4. **No annotation numbering, PDF export, or frame-by-frame video annotation.**
+5. **The update check is manual only, by design** — no on-launch poll, no
+   telemetry, no auto-download. It also cannot auto-install: the app is
+   installed by unzipping, so an update means closing Test Assist, downloading
+   the new zip, and replacing the contents of the folder it runs from.
 
 ---
 

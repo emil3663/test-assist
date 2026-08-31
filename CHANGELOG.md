@@ -3,7 +3,28 @@
 All notable changes to Test Assist. Dates are the date of the change, not of a
 release; only tagged versions appear as releases.
 
-## [Unreleased]
+## [1.3.0] — 2026-08-31
+
+### Added
+
+- **A manual "Check for Updates" button** on the floating launcher. Compares
+  the running version against the latest GitHub release tag and, if newer,
+  links to its release page — nothing is downloaded or installed
+  automatically. Manual only, by design: no on-launch poll, no telemetry, and
+  a short (~5s) timeout so a slow or absent network can never freeze the UI.
+  Since the app is installed by unzipping, the result dialog says how to
+  actually update: close Test Assist, download the zip, replace the folder's
+  contents.
+  - Comparison is now trustworthy by construction, not by having been
+    corrected once: the version-tag fix above means `__version__` is exactly
+    what CI already enforces the built binary reports.
+  - Extends the `--selftest` mechanism (see below) to also report whether TLS
+    is available, since Qt does not link it in — HTTPS depends on a separate
+    plugin PyInstaller must bundle alongside it, and if that plugin is
+    missing the update check would fail forever, indistinguishable from being
+    offline. `build.ps1` and the release workflow now fail the build if TLS
+    is unsupported in the frozen app; verified clean against a real
+    PyInstaller build (backend: `schannel`).
 
 ### Changed
 

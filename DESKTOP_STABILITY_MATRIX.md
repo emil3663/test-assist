@@ -9,7 +9,7 @@ in `STABILITY_MATRIX.md`.
 
 ## Why this document exists
 
-`DESKTOP_TEST_PLAN.md` says 117 of 121 cases are automated. That number is only
+`DESKTOP_TEST_PLAN.md` says 129 of 134 cases are automated. That number is only
 worth anything if you can check what it covers and what it quietly does not.
 This document is that check.
 
@@ -25,18 +25,26 @@ This document is that check.
 
 | | Count |
 |---|---|
-| Cases in `DESKTOP_TEST_PLAN.md` v1.4 | 121 |
-| Automated and passing | 117 |
-| Blocked, documented as manual | 4 |
-| Automated tests | 149 collected — 149 pass everywhere, no skips |
+| Cases in `DESKTOP_TEST_PLAN.md` v1.5 | 134 |
+| Automated and passing | 129 |
+| Blocked, documented as manual | 5 |
+| Automated tests | 177 collected — 177 pass everywhere, no skips |
 | Wall clock | about 2-3 seconds warm; the first run is slower while the bundled ffmpeg loads |
 
-**A green run is `149 passed, 0 skipped`, everywhere.** MP4 assembly used to
+**A green run is `177 passed, 0 skipped`, everywhere.** MP4 assembly used to
 depend on `opencv-python`, an optional dependency the product deliberately
 shipped without, which made REC-05 skip itself on CI, the packaged build, and
 any clean checkout. It now shells out to a bundled `ffmpeg` binary via
 `imageio-ffmpeg`, a real entry in `requirements.txt` — so REC-05 runs and
 passes in every environment, and there is no longer a skip to explain away.
+
+**The update check's network round-trip is not in that number.** UPD-01
+through UPD-11 test the pure parsing and comparison functions, and the
+launcher's dialog logic with a substituted result — none of it touches the
+network. Whether `https://api.github.com/...` actually answers is UPD-12,
+listed as Blocked below. Be honest with yourself about the difference: this
+suite proves the update check's *logic* is correct, not that it will
+successfully reach GitHub from a real machine.
 
 Six defects were found by writing these tests. All are fixed and all have a
 regression test — see **Defects found** below.
@@ -57,7 +65,7 @@ Those are properties of a running desktop and remain manual.
 
 ---
 
-## The blocked four
+## The blocked five
 
 | ID | Case | Why it cannot be automated here |
 |----|------|--------------------------------|
@@ -65,8 +73,9 @@ Those are properties of a running desktop and remain manual.
 | PKG-03 | The pinned taskbar icon matches the tray icon | A property of the Windows shell, not of the process. |
 | PKG-04 | First launch on a machine without Python | Needs a clean Windows machine. The release workflow proves the exe runs on a runner, which is close but not the same as a machine that never had Python. |
 | PKG-05 | Windows file properties show product name and version | Readable only from a Windows build; the version resource is ignored on Linux, where the validation build runs. |
+| UPD-12 | A real round-trip to the GitHub API | Would make the suite depend on the network and GitHub's rate limits - "a suite that reaches the internet is a suite that fails on a train." `build.ps1` and the release workflow separately prove the packaged build *can* do TLS at all (PKG-07); nothing proves the request itself succeeds. |
 
-These four are the manual pass to run against a release before trusting it.
+These five are the manual pass to run against a release before trusting it.
 
 ---
 
@@ -89,7 +98,35 @@ These four are the manual pass to run against a release before trusting it.
 | 3.12 Launcher | 7 | Stable | LCH-07 asserts the always-on-top flag is set, not that the window is actually on top. |
 | 3.13 Shortcuts | 5 | Stable | KEY-05 exercises the real signal path rather than calling the setter directly. |
 | 3.14 Lifecycle | 4 | Moderate | INS-01 binds a uniquely named local server so it cannot collide with a running app. |
-| 3.15 Packaging | 6 | Blocked (3) | PKG-01, PKG-02 and PKG-06 are automated. |
+| 3.15 Packaging | 7 | Blocked (3) | PKG-01, PKG-02, PKG-06 and PKG-07 are automated. PKG-07's "True" assertion is also exercised for real, once, against an actual PyInstaller build - see below. |
+| 3.16 Update check | 12 | Stable (11) / Blocked (1) | UPD-01 through UPD-11 are pure-function and substituted-result tests, no network. UPD-12 (the real round-trip) is blocked. |
+
+---
+
+## Verified against a real PyInstaller build
+
+The pytest suite runs `--selftest` through `main.main()` directly - real
+logic, but never actually frozen. Two things it asserts only make sense once
+frozen, so both were separately checked against an actual `build.ps1` run
+(PyInstaller 6.22.2) rather than trusted on the strength of the source-level
+tests alone:
+
+- **ffmpeg resolution.** `_resolve_ffmpeg_exe()` locates the binary via
+  `imageio_ffmpeg.__file__`, which only points inside the bundle if
+  PyInstaller rewrote it correctly. The real build resolved it to
+  `dist\TestAssist\_internal\imageio_ffmpeg\binaries\ffmpeg-win-x86_64-v7.1.exe`
+  - genuinely inside `dist\`, not merely present somewhere on disk.
+- **TLS.** Qt does not link TLS in; it depends on a separate plugin PyInstaller
+  must also bundle. The real build reported `supportsSsl() -> True`, backend
+  `schannel` - so `TestAssist.spec`'s aggressive `excludes` list does not
+  catch it by accident, but that was verified, not assumed.
+
+Both came back clean; no defect was found in either mechanism. That is a
+different, weaker claim than "this is tested" - it means these two specific,
+previously-uninspected risks turned out fine on this machine, this PyInstaller
+version, this once. `build.ps1` and the release workflow re-run both checks
+on every build, which is what makes the claim durable rather than a one-time
+observation.
 
 ---
 
@@ -202,7 +239,7 @@ yet on the packaged build.
 ```bash
 cd python
 pip install -r requirements.txt
-QT_QPA_PLATFORM=offscreen pytest -q      # 149 passed, about 2-3 seconds warm;
+QT_QPA_PLATFORM=offscreen pytest -q      # 177 passed, about 2-3 seconds warm;
                                           # slower on the first run while the
                                           # bundled ffmpeg loads
 ```

@@ -72,6 +72,7 @@ sandboxed; some of it is simply where the work went.
 - Send-to-back layering for overlapping annotations
 - MP4 recording via a bundled `ffmpeg` binary — works from source and in the
   packaged build alike
+- A manual "Check for Updates" button — no on-launch poll, no telemetry
 
 Everything under **What it does** below is the browser build.
 
@@ -163,6 +164,13 @@ screen-capture permission is handled — you can still upload an image and annot
 
 The app sits in the system tray with a floating capture launcher. Captures are
 kept in `~/.test-assist/history`, recordings in `~/.test-assist/recordings`.
+
+**Checking for updates and updating:** click the update icon on the floating
+launcher ("Check for Updates"). It's manual only — nothing is checked
+automatically, and nothing is downloaded for you. If a newer version exists,
+the dialog links to its release page; to actually update: **close Test
+Assist, download the new zip, and replace the contents of the folder you run
+it from** — the app is installed by unzipping, so that's the whole update.
 
 **Desktop — from source**:
 

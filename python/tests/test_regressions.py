@@ -5,11 +5,12 @@ from pathlib import Path
 
 from PySide6.QtCore import QEvent, QPointF, Qt
 from PySide6.QtGui import QColor, QKeyEvent, QPixmap
-from PySide6.QtWidgets import QDialog, QFrame, QLabel, QPushButton, QTabWidget, QWidget
+from PySide6.QtWidgets import QDialog, QFrame, QLabel, QMessageBox, QPushButton, QTabWidget, QWidget
 
 from canvas import AnnotationCanvas
 from editor import EditorWindow
 from launcher import FloatingLauncher
+from update_check import UpdateResult
 
 
 @dataclass
@@ -445,6 +446,7 @@ def test_launcher_build_ui_header_controls_have_expected_tooltips(qapp) -> None:
     qapp.processEvents()
 
     assert launcher._btn_open_editor.toolTip() == "Open Editor"
+    assert launcher._btn_check_updates.toolTip() == "Check for Updates"
     assert launcher._btn_dock_right.toolTip() == "Dock to right side"
     assert launcher._btn_close.toolTip() == "Close Test Assist"
     launcher.close()
@@ -459,6 +461,113 @@ def test_launcher_open_editor_button_is_available_without_capture(qapp) -> None:
     assert launcher._btn_open_editor.isEnabled()
     launcher._btn_open_editor.click()
     assert editor.bring_forward_calls == 1
+    launcher.close()
+
+
+def test_update_check_failure_shows_a_calm_message_not_a_traceback(qapp, monkeypatch):
+    """No test may touch the network - the reply is substituted with a literal
+    UpdateResult, exactly at the seam UpdateChecker.interpret() produces."""
+    launcher = FloatingLauncher(_EditorStub(), version="1.2.0")
+
+    seen = []
+    monkeypatch.setattr(QMessageBox, "information", staticmethod(lambda *a, **k: seen.append(a[-1])))
+
+    launcher._on_update_result(UpdateResult(ok=False))
+
+    assert seen == ["Couldn't reach GitHub to check. Try again later."]
+    assert launcher._btn_check_updates.isEnabled(), "the button must re-enable after the check finishes"
+    launcher.close()
+
+
+def test_update_check_reports_up_to_date(qapp, monkeypatch):
+    launcher = FloatingLauncher(_EditorStub(), version="1.2.0")
+
+    seen = []
+    monkeypatch.setattr(QMessageBox, "information", staticmethod(lambda *a, **k: seen.append(a[-1])))
+
+    launcher._on_update_result(UpdateResult(ok=True, is_newer=False))
+
+    assert seen == ["You're on 1.2.0 — this is the latest version."]
+    launcher.close()
+
+
+def test_update_check_offers_to_open_the_release_page(qapp, monkeypatch):
+    """Clicking "Open Download Page" must open html_url; the dialog text must
+    say how to update, since unzip-install users cannot just click "Update"."""
+    import launcher as launcher_module
+
+    launcher = FloatingLauncher(_EditorStub(), version="1.2.0")
+
+    opened = []
+    monkeypatch.setattr(launcher_module.QDesktopServices, "openUrl", staticmethod(lambda url: opened.append(url.toString())))
+
+    def _click_the_action_button(self):
+        # QMessageBox.buttons() is not insertion order, so find our custom
+        # button by role rather than by position - simulating the user
+        # clicking "Open Download Page" without blocking on a real modal loop.
+        button = next(b for b in self.buttons() if self.buttonRole(b) == QMessageBox.ButtonRole.ActionRole)
+        button.click()
+
+    monkeypatch.setattr(QMessageBox, "exec", _click_the_action_button)
+
+    launcher._on_update_result(
+        UpdateResult(ok=True, is_newer=True, latest_version="1.3.0", html_url="https://example.test/releases/v1.3.0")
+    )
+
+    assert opened == ["https://example.test/releases/v1.3.0"]
+    launcher.close()
+
+
+def test_update_check_hides_the_open_button_when_there_is_no_url(qapp, monkeypatch):
+    """parse_latest_release() returns an empty html_url when the GitHub
+    payload omits it. The button must not appear at all in that case - a
+    button that does nothing when clicked is worse than no button."""
+    launcher = FloatingLauncher(_EditorStub(), version="1.2.0")
+
+    captured = {}
+    monkeypatch.setattr(QMessageBox, "exec", lambda self: captured.setdefault("box", self))
+
+    launcher._on_update_result(
+        UpdateResult(ok=True, is_newer=True, latest_version="1.3.0", html_url="")
+    )
+
+    box = captured["box"]
+    action_buttons = [b for b in box.buttons() if box.buttonRole(b) == QMessageBox.ButtonRole.ActionRole]
+    assert action_buttons == [], "no 'Open Download Page' button when there is no URL to open"
+    launcher.close()
+
+
+def test_update_check_dialog_names_the_new_version_and_how_to_update(qapp, monkeypatch):
+    launcher = FloatingLauncher(_EditorStub(), version="1.2.0")
+
+    captured = {}
+
+    def _fake_exec(self):
+        captured["text"] = self.text()
+
+    monkeypatch.setattr(QMessageBox, "exec", _fake_exec)
+
+    launcher._on_update_result(
+        UpdateResult(ok=True, is_newer=True, latest_version="1.3.0", html_url="https://example.test")
+    )
+
+    assert "1.3.0" in captured["text"]
+    assert "1.2.0" in captured["text"]
+    assert "close test assist" in captured["text"].lower()
+    assert "replace the" in captured["text"].lower()
+    launcher.close()
+
+
+def test_update_check_button_click_disables_it_until_the_result_arrives(qapp, monkeypatch):
+    launcher = FloatingLauncher(_EditorStub(), version="1.2.0")
+
+    calls = []
+    monkeypatch.setattr(launcher._update_checker, "check", lambda cb: calls.append(cb))
+
+    launcher._btn_check_updates.click()
+
+    assert not launcher._btn_check_updates.isEnabled(), "must disable immediately, before any result arrives"
+    assert len(calls) == 1
     launcher.close()
 
 
@@ -633,10 +742,12 @@ def test_selftest_flag_resolves_and_runs_the_bundled_ffmpeg(monkeypatch, tmp_pat
 
     assert target.is_file(), "no selftest file was written"
     lines = target.read_text(encoding="utf-8").splitlines()
-    assert len(lines) == 2
-    path, version_line = lines
+    assert len(lines) == 4
+    path, version_line, ssl_supported, ssl_backend = lines
     assert Path(path).is_file(), f"resolved ffmpeg path does not exist: {path}"
     assert "version" in version_line.lower()
+    assert ssl_supported == "True", "TLS must be supported for the update check to ever work once frozen"
+    assert ssl_backend
 
 
 def test_selftest_flag_leaves_the_path_empty_on_resolution_failure(monkeypatch, tmp_path):
@@ -662,6 +773,29 @@ def test_selftest_flag_leaves_the_path_empty_on_resolution_failure(monkeypatch, 
     assert target.is_file()
     lines = target.read_text(encoding="utf-8").splitlines()
     assert lines[0] == "", "the path must be empty when resolution fails"
+
+
+def test_selftest_flag_reports_ssl_unsupported_rather_than_crashing(monkeypatch, tmp_path):
+    """A frozen build missing the TLS plugin must show up as a plain
+    'False' in the probe file - not an exception, and not a value that could
+    be mistaken for a working backend."""
+    import sys as _sys
+
+    import main
+    from PySide6.QtNetwork import QSslSocket
+
+    monkeypatch.setattr(QSslSocket, "supportsSsl", staticmethod(lambda: False))
+    monkeypatch.setattr(QSslSocket, "activeBackend", staticmethod(lambda: ""))
+
+    target = tmp_path / "selftest-probe.txt"
+    monkeypatch.setenv("TESTASSIST_VERSION_FILE", str(target))
+    monkeypatch.setattr(_sys, "argv", ["TestAssist.exe", "--selftest"])
+
+    main.main()
+
+    lines = target.read_text(encoding="utf-8").splitlines()
+    assert lines[2] == "False"
+    assert lines[3] == ""
 
 
 def test_version_info_matches_main_version():

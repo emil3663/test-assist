@@ -4,18 +4,31 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PySide6.QtCore import QPoint, QSize, Qt, QTimer
-from PySide6.QtGui import QBrush, QColor, QFont, QIcon, QPainter, QPen, QPixmap, QPolygonF
+from PySide6.QtCore import QPoint, QSize, Qt, QTimer, QUrl
+from PySide6.QtGui import (
+    QBrush,
+    QColor,
+    QDesktopServices,
+    QFont,
+    QIcon,
+    QPainter,
+    QPen,
+    QPixmap,
+    QPolygonF,
+)
+from PySide6.QtNetwork import QNetworkAccessManager
 from PySide6.QtWidgets import (
     QApplication,
     QHBoxLayout,
     QLabel,
+    QMessageBox,
     QPushButton,
     QVBoxLayout,
     QWidget,
 )
 
 from capture import FrameRecorder, ScreenshotOverlay
+from update_check import UpdateChecker
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -33,10 +46,11 @@ class FloatingLauncher(QWidget):
     Right-click for a context menu with a Quit option.
     """
 
-    def __init__(self, editor, parent: QWidget | None = None) -> None:
+    def __init__(self, editor, version: str = "0.0.0", parent: QWidget | None = None) -> None:
         super().__init__(parent)
-        self._editor = editor
-        self._mode   = "photo"
+        self._editor  = editor
+        self._mode    = "photo"
+        self._version = version
 
         # Window chrome
         self.setWindowFlags(
@@ -58,6 +72,10 @@ class FloatingLauncher(QWidget):
         self._rec_seconds = 0
         self._rec_timer   = QTimer(self)
         self._rec_timer.timeout.connect(self._tick)
+
+        # Update check - one manager for the process, not one per click.
+        self._network_manager = QNetworkAccessManager(self)
+        self._update_checker  = UpdateChecker(self._network_manager, self._version, self)
 
         # Drag-to-move state
         self._drag_pos: QPoint | None = None
@@ -115,6 +133,13 @@ class FloatingLauncher(QWidget):
         self._btn_open_editor.setStyleSheet(self._style_icon_btn())
         self._btn_open_editor.setEnabled(True)
 
+        self._btn_check_updates = QPushButton()
+        self._btn_check_updates.setFixedSize(26, 26)
+        self._btn_check_updates.setIcon(self._make_update_icon())
+        self._btn_check_updates.setIconSize(QSize(14, 14))
+        self._btn_check_updates.setToolTip("Check for Updates")
+        self._btn_check_updates.setStyleSheet(self._style_icon_btn())
+
         self._btn_close = QPushButton()
         self._btn_close.setFixedSize(26, 26)
         self._btn_close.setIcon(self._make_close_icon())
@@ -123,6 +148,7 @@ class FloatingLauncher(QWidget):
         self._btn_close.setStyleSheet(self._style_icon_btn())
 
         header_row.addWidget(self._btn_open_editor)
+        header_row.addWidget(self._btn_check_updates)
         header_row.addWidget(self._btn_dock_right)
         header_row.addWidget(self._btn_close)
         float_layout.addLayout(header_row)
@@ -191,6 +217,7 @@ class FloatingLauncher(QWidget):
         self._btn_capture.clicked.connect(self._on_action_click)
         self._btn_full_capture.clicked.connect(self._start_full_capture)
         self._btn_open_editor.clicked.connect(self._editor.bring_forward)
+        self._btn_check_updates.clicked.connect(self._check_for_updates)
         self._btn_dock_right.clicked.connect(self._dock_right)
         self._btn_close.clicked.connect(self._close_launcher)
 
@@ -340,6 +367,46 @@ class FloatingLauncher(QWidget):
             self._status_lbl.setText(
                 f"Saved {n} frames (video encoding unavailable): {path}"
             )
+
+    # ── Update check ─────────────────────────────────────────────────────────
+
+    def _check_for_updates(self) -> None:
+        self._btn_check_updates.setEnabled(False)
+        self._update_checker.check(self._on_update_result)
+
+    def _on_update_result(self, result) -> None:
+        self._btn_check_updates.setEnabled(True)
+
+        if not result.ok:
+            QMessageBox.information(
+                self,
+                "Check for Updates",
+                "Couldn't reach GitHub to check. Try again later.",
+            )
+            return
+
+        if not result.is_newer:
+            QMessageBox.information(
+                self,
+                "Check for Updates",
+                f"You're on {self._version} — this is the latest version.",
+            )
+            return
+
+        box = QMessageBox(self)
+        box.setWindowTitle("Update available")
+        box.setText(
+            f"Version {result.latest_version} is available — you're on {self._version}.\n\n"
+            "To update: close Test Assist, download the zip, and replace the "
+            "contents of the folder you run it from."
+        )
+        open_btn = None
+        if result.html_url:
+            open_btn = box.addButton("Open Download Page", QMessageBox.ButtonRole.ActionRole)
+        box.addButton(QMessageBox.StandardButton.Close)
+        box.exec()
+        if open_btn is not None and box.clickedButton() is open_btn:
+            QDesktopServices.openUrl(QUrl(result.html_url))
 
     def _refresh_mode_icons(self) -> None:
         """Repaint camera/video glyphs with active vs inactive colors."""
@@ -612,6 +679,21 @@ class FloatingLauncher(QWidget):
         p.setPen(QColor("#1f1208"))
         p.setFont(QFont("Segoe UI", 6, QFont.Weight.Bold))
         p.drawText(pix.rect(), Qt.AlignmentFlag.AlignCenter, "TA")
+        p.end()
+        return QIcon(pix)
+
+    @staticmethod
+    def _make_update_icon(color: str = "#f8d3ad") -> QIcon:
+        pix = QPixmap(14, 14)
+        pix.fill(Qt.GlobalColor.transparent)
+        p = QPainter(pix)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        pen = QPen(QColor(color), 1.6)
+        p.setPen(pen)
+        p.drawLine(7, 2, 7, 9)
+        p.drawLine(4, 6, 7, 9)
+        p.drawLine(10, 6, 7, 9)
+        p.drawLine(3, 12, 11, 12)
         p.end()
         return QIcon(pix)
 

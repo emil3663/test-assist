@@ -83,6 +83,8 @@ if (-not (Test-Path $selftestProbe)) { throw "The executable ran --selftest but 
 
 $selftestLines = Get-Content $selftestProbe
 $ffmpegPath = $selftestLines[0]
+$sslSupported = $selftestLines[2]
+$sslBackend = $selftestLines[3]
 Remove-Item $selftestProbe
 
 if ([string]::IsNullOrWhiteSpace($ffmpegPath)) {
@@ -95,6 +97,15 @@ if (-not $resolvedFfmpeg -or -not $resolvedFfmpeg.Path.StartsWith($distRoot, [Sy
     throw "--selftest resolved ffmpeg outside the dist folder: $ffmpegPath"
 }
 Write-Host "ffmpeg resolves at runtime: $ffmpegPath" -ForegroundColor Green
+
+# Qt does not link TLS in - HTTPS depends on a separate plugin
+# (qschannelbackend.dll) that PyInstaller's Qt hooks may not catch, since
+# plugins are not modules. If it is missing, the update check would fail
+# forever, indistinguishable from being offline.
+if ($sslSupported -ne "True") {
+    throw "--selftest reports SSL unsupported in the built app - the TLS plugin was not bundled; the update check would fail on a perfectly good network"
+}
+Write-Host "SSL supported at runtime, backend: $sslBackend" -ForegroundColor Green
 
 if ($Zip) {
     $zip = Join-Path $here "dist\TestAssist-$version-win64.zip"

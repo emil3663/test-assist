@@ -7,7 +7,7 @@ import os
 import sys
 from pathlib import Path
 
-__version__ = "1.2.0"
+__version__ = "1.3.0"
 
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QAction, QColor, QFont, QIcon, QPainter, QPen, QPixmap
@@ -78,17 +78,26 @@ def _setup_tray(app: QApplication, launcher: FloatingLauncher, editor: EditorWin
 
 
 def _run_selftest() -> None:
-    """Headless proof that the packaged build can actually find and run its
-    bundled ffmpeg - not just that collect_data_files() dropped the exe
-    somewhere under dist/. capture._resolve_ffmpeg_exe() locates the binary
-    via imageio_ffmpeg.__file__, which only resolves to a real path inside
-    the frozen bundle if PyInstaller rewrote it correctly; a file existing on
-    disk does not by itself prove the frozen import resolves the same way.
+    """Headless proof of two things a frozen build can silently get wrong:
+
+    1. Can it actually find and run its bundled ffmpeg - not just that
+       collect_data_files() dropped the exe somewhere under dist/.
+       capture._resolve_ffmpeg_exe() locates the binary via
+       imageio_ffmpeg.__file__, which only resolves to a real path inside the
+       frozen bundle if PyInstaller rewrote it correctly; a file existing on
+       disk does not by itself prove the frozen import resolves the same way.
+
+    2. Can it do TLS. Qt does not link TLS in - HTTPS depends on a separate
+       plugin (qschannelbackend.dll on Windows) that PyInstaller must bundle
+       alongside the modules its hooks already know about. If that plugin is
+       missing, QSslSocket.supportsSsl() is False and every https:// request
+       (the update check) fails, indistinguishable from being offline.
 
     Same file-probe pattern as --version: a windowed build has no usable
-    stdout, so the result is written to TESTASSIST_VERSION_FILE as two lines
-    - the resolved path, then the first line of `ffmpeg -version` - and the
-    path is left empty on any failure rather than raising.
+    stdout, so the result is written to TESTASSIST_VERSION_FILE as four lines
+    - the resolved ffmpeg path, the first line of `ffmpeg -version`, whether
+    SSL is supported, and the active SSL backend name - and each value is
+    left empty/False on its own failure rather than raising.
     """
     import subprocess
 
@@ -115,7 +124,23 @@ def _run_selftest() -> None:
         except Exception:
             version_line = ""
 
-    text = f"{path}\n{version_line}"
+    ssl_supported = False
+    ssl_backend = ""
+    try:
+        from PySide6.QtNetwork import QSslSocket
+
+        ssl_supported = bool(QSslSocket.supportsSsl())
+        ssl_backend = QSslSocket.activeBackend() or ""
+    except Exception:
+        ssl_supported = False
+        ssl_backend = ""
+
+    # A trailing newline is required, not cosmetic: when ssl_backend is empty
+    # (SSL unsupported), a line-splitter that treats a final "\n" as a plain
+    # terminator - which both Python's splitlines() and PowerShell's
+    # Get-Content do - silently drops that last, empty line instead of
+    # reporting it, leaving only 3 fields where 4 were written.
+    text = "\n".join([path, version_line, str(ssl_supported), ssl_backend]) + "\n"
     target = os.environ.get("TESTASSIST_VERSION_FILE")
     if target:
         Path(target).write_text(text, encoding="utf-8")
@@ -172,7 +197,7 @@ def main() -> None:
     single.quit_requested.connect(app.quit)
 
     editor   = EditorWindow()
-    launcher = FloatingLauncher(editor)
+    launcher = FloatingLauncher(editor, version=__version__)
     tray = _setup_tray(app, launcher, editor)
     app.setProperty("trayIcon", tray)
     launcher.show()
