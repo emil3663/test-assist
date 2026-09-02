@@ -481,6 +481,72 @@ def test_launcher_full_capture_uses_the_screen_the_widget_is_on(qapp, monkeypatc
     launcher.close()
 
 
+def test_open_folder_button_appears_after_a_recording_and_opens_its_folder(qapp, monkeypatch) -> None:
+    """Fixes the discoverability complaint properly, per the data-locations
+    brief: "where did it go" gets a one-click answer instead of a folder name
+    buried in a status line."""
+    import launcher as launcher_module
+
+    launcher = FloatingLauncher(_EditorStub())
+    launcher.show()
+    qapp.processEvents()
+    assert launcher._btn_open_folder.isHidden()
+
+    import paths
+    video_path = paths.recordings_dir() / "test-recording-1.mp4"
+    video_path.write_bytes(b"fake mp4")
+
+    launcher._on_record_finished(str(video_path))
+    assert not launcher._btn_open_folder.isHidden()
+
+    opened = []
+    monkeypatch.setattr(
+        launcher_module.QDesktopServices, "openUrl", staticmethod(lambda url: opened.append(url.toLocalFile())),
+    )
+
+    launcher._btn_open_folder.click()
+
+    # QUrl normalises separators, so compare as paths rather than raw strings.
+    assert [Path(p) for p in opened] == [video_path.parent]
+    launcher.close()
+
+
+def test_open_folder_button_hides_again_when_nothing_was_recorded(qapp) -> None:
+    launcher = FloatingLauncher(_EditorStub())
+    launcher.show()
+    qapp.processEvents()
+
+    launcher._on_record_finished("")
+
+    assert launcher._btn_open_folder.isHidden()
+    launcher.close()
+
+
+def test_open_folder_opens_the_frame_folder_itself_when_encoding_fell_back(qapp, monkeypatch, tmp_path) -> None:
+    """When ffmpeg is unavailable, the "recording" is the frame folder itself,
+    not a file inside one - the folder to open is that directory, not its
+    parent."""
+    import launcher as launcher_module
+
+    launcher = FloatingLauncher(_EditorStub())
+    launcher.show()
+    qapp.processEvents()
+
+    frames_dir = tmp_path / "test-recording-1_frames"
+    frames_dir.mkdir()
+
+    launcher._on_record_finished(str(frames_dir))
+
+    opened = []
+    monkeypatch.setattr(
+        launcher_module.QDesktopServices, "openUrl", staticmethod(lambda url: opened.append(url.toLocalFile())),
+    )
+    launcher._btn_open_folder.click()
+
+    assert [Path(p) for p in opened] == [frames_dir]
+    launcher.close()
+
+
 def test_launcher_keyPressEvent_alt_v_toggles_recording_mode(qapp) -> None:
     launcher = FloatingLauncher(_EditorStub())
     launcher.show()
@@ -750,16 +816,18 @@ def test_canvas_mouseReleaseEvent_pen_tool_creates_pen_annotation(qapp, blank_pi
 # Packaging / file locations
 # ─────────────────────────────────────────────────────────────────────────────
 
-def test_recordings_are_written_beside_the_history_not_loose_in_home(monkeypatch, tmp_path):
-    """Recordings used to land directly in the user's home folder."""
+def test_recordings_dir_resolves_through_the_paths_module(isolate_home):
+    """Recordings used to land under ~/.test-assist, a dot-prefixed folder
+    Windows users do not look in. TA-202 moved resolution to paths.py -
+    capture.py's own helper must delegate rather than build the path itself,
+    or the two could drift the way version_info.txt once did."""
     import capture
+    import paths
 
-    monkeypatch.setattr(capture.Path, "home", staticmethod(lambda: tmp_path))
     target = capture._recordings_dir()
 
-    assert target == tmp_path / ".test-assist" / "recordings"
+    assert target == paths.recordings_dir()
     assert target.is_dir()
-    assert not list(tmp_path.glob("test-recording-*"))
 
 
 def test_version_flag_reports_a_semantic_version(capsys):
@@ -1015,9 +1083,12 @@ def test_packaged_icon_exists_and_is_a_real_ico():
 # ─────────────────────────────────────────────────────────────────────────────
 
 def _recorder(monkeypatch, tmp_path):
+    """isolate_home (autouse) already redirects paths.recordings_dir() under
+    tmp_path; monkeypatch/tmp_path are kept as parameters so every call site
+    doesn't need editing, even though this helper no longer patches anything
+    itself."""
     import capture
 
-    monkeypatch.setattr(capture.Path, "home", staticmethod(lambda: tmp_path))
     return capture, capture.FrameRecorder()
 
 

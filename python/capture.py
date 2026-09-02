@@ -10,6 +10,7 @@ from PySide6.QtCore import QObject, QPoint, QRect, QSize, Qt, QTimer, Signal
 from PySide6.QtGui import QColor, QImage, QPainter, QPixmap
 from PySide6.QtWidgets import QApplication, QRubberBand, QWidget
 
+import paths
 from screen_geometry import overlay_local_to_global, plan_capture
 
 
@@ -18,10 +19,9 @@ from screen_geometry import overlay_local_to_global, plan_capture
 # ─────────────────────────────────────────────────────────────────────────────
 
 def _recordings_dir() -> Path:
-    """Recordings live beside the capture history, not loose in the home folder."""
-    path = Path.home() / ".test-assist" / "recordings"
-    path.mkdir(parents=True, exist_ok=True)
-    return path
+    """Recordings live in Documents\\Test Assist, not ~/.test-assist - see
+    paths.py for why."""
+    return paths.recordings_dir()
 
 
 def _resolve_ffmpeg_exe() -> str:

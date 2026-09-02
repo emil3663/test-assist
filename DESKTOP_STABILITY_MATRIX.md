@@ -1,7 +1,7 @@
 # 🔍 Test Assist — Desktop stability matrix
 
-**Version:** 1.1
-**Last updated:** 2026-09-02
+**Version:** 1.2
+**Last updated:** 2026-09-03
 **Applies to:** the PySide6 desktop build. The browser build has its own matrix
 in `STABILITY_MATRIX.md`.
 
@@ -25,13 +25,13 @@ This document is that check.
 
 | | Count |
 |---|---|
-| Cases in `DESKTOP_TEST_PLAN.md` v1.6 | 144 |
-| Automated and passing | 138 |
+| Cases in `DESKTOP_TEST_PLAN.md` v1.7 | 151 |
+| Automated and passing | 145 |
 | Blocked, documented as manual | 6 |
-| Automated tests | 216 collected — 216 pass everywhere, no skips |
+| Automated tests | 229 collected — 229 pass everywhere, no skips |
 | Wall clock | about 2-3 seconds warm; the first run is slower while the bundled ffmpeg loads |
 
-**A green run is `216 passed, 0 skipped`, everywhere.** MP4 assembly used to
+**A green run is `229 passed, 0 skipped`, everywhere.** MP4 assembly used to
 depend on `opencv-python`, an optional dependency the product deliberately
 shipped without, which made REC-05 skip itself on CI, the packaged build, and
 any clean checkout. It now shells out to a bundled `ffmpeg` binary via
@@ -59,6 +59,18 @@ spanning two screens is composited from both rather than clamped to one -
 returning less than the user selected is exactly the class of bug this
 removes. What is not provable here: the actual grabbed pixels coming out the
 right size from a real high-DPI secondary. That is CAP-12, listed below.
+
+**Data now lives somewhere update-safe, and the isolation moved with it
+(TA-202).** `~/.test-assist` was undiscoverable on Windows and, worse, the
+install folder it was tempting to move data *into* instead is wiped by every
+update. Recordings now go to `Documents\Test Assist\`, capture history to
+`%LOCALAPPDATA%\Test Assist\history` (deliberately not under Documents, since
+it is auto-pruned on every launch), resolved through a single seam
+(`paths.py`) rather than built by hand in two places. A populated
+`~/.test-assist` from an earlier version migrates once, best-effort, and can
+never block startup. The test isolation this suite depends on moved onto the
+same seam — see **A safety fix the suite needed** below for what that means
+and why it is asserted rather than assumed.
 
 Six defects were found by writing these tests, and a seventh was fixed
 following a user bug report rather than an internal test — see
@@ -117,6 +129,7 @@ These six are the manual pass to run against a release before trusting it.
 | 3.15 Packaging | 7 | Blocked (3) | PKG-01, PKG-02, PKG-06 and PKG-07 are automated. PKG-07's "True" assertion is also exercised for real, once, against an actual PyInstaller build - see below. |
 | 3.16 Update check | 12 | Stable (11) / Blocked (1) | UPD-01 through UPD-11 are pure-function and substituted-result tests, no network. UPD-12 (the real round-trip) is blocked. |
 | 3.17 Diagnostics | 4 | Stable | ABT-02's clipboard assertion is the same shape as issue #1's own diagnosis - proving a reporter's monitor layout is now visible without a code read. |
+| 3.18 Data Locations | 7 | Stable | `QStandardPaths.writableLocation` is substituted, not the real Windows API, so these prove the resolution and migration logic; they do not prove `Documents\Test Assist\` looks right in actual Windows Explorer. |
 
 ---
 
@@ -149,13 +162,23 @@ observation.
 
 ## A safety fix the suite needed
 
-`EditorWindow.__init__` calls `_load_history()`, which touches
-`~/.test-assist/history` — and used to delete files there. Any test that
-constructs an editor was therefore operating on the real capture history of
-whoever ran the suite.
+`EditorWindow.__init__` calls `_load_history()`, which touches the capture
+history folder and deletes unreadable files there. Any test that constructs
+an editor was therefore operating on the real capture history of whoever ran
+the suite.
 
-`conftest.py` now redirects `Path.home()` to a temporary directory for **every**
-test. A test suite that can destroy the user's data is worse than no test suite.
+`conftest.py` redirects every location the app writes to, for **every** test.
+Originally that meant patching `Path.home()`, back when history and recordings
+were both built from it by hand; TA-202 moved resolution onto `paths.py` and
+`QStandardPaths`, so `conftest.py`'s `isolate_home` fixture now patches
+`paths.QStandardPaths.writableLocation` instead (`Path.home()` is still
+patched too, since `paths.legacy_dir()` - migration only - still uses it), and
+**asserts the redirect actually took effect** rather than trusting the patch:
+a path returned by `paths.recordings_dir()` / `paths.history_dir()` must
+resolve under `tmp_path`, checked on every single test via the fixture
+itself. A test suite that can destroy the user's data is worse than no test
+suite, and one where the isolation seam silently stopped working while still
+reporting green would be worse still.
 
 ---
 
@@ -277,7 +300,7 @@ yet on the packaged build.
 ```bash
 cd python
 pip install -r requirements.txt
-QT_QPA_PLATFORM=offscreen pytest -q      # 216 passed, about 2-3 seconds warm;
+QT_QPA_PLATFORM=offscreen pytest -q      # 229 passed, about 2-3 seconds warm;
                                           # slower on the first run while the
                                           # bundled ffmpeg loads
 ```

@@ -944,8 +944,9 @@ def test_HIS_02_blank_captures_are_not_persisted(editor):
 
 
 def test_HIS_03_tiny_files_are_pruned_on_load(qapp, isolate_home):
-    history = isolate_home / ".test-assist" / "history"
-    history.mkdir(parents=True, exist_ok=True)
+    import paths
+
+    history = paths.history_dir()
     junk = history / "corrupt.png"
     junk.write_bytes(b"not a real png")
 
@@ -1044,8 +1045,9 @@ def test_HIS_03b_a_small_but_valid_capture_is_not_deleted(qapp, isolate_home):
     that, so real evidence was being deleted on the next launch. Pruning now
     tests whether the file is a readable image.
     """
-    history = isolate_home / ".test-assist" / "history"
-    history.mkdir(parents=True, exist_ok=True)
+    import paths
+
+    history = paths.history_dir()
 
     flat = QPixmap(400, 300)
     flat.fill(QColor("#ffffff"))

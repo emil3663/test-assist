@@ -50,7 +50,7 @@ are in the left rail.*
 | **Install** | None — open the live URL | Download the release zip and run `TestAssist.exe`, or run from source |
 | **Capture** | `getDisplayMedia`, `MediaRecorder` | Native screenshot overlay, frame recorder |
 | **Best for** | Trying the full capture → annotate → export loop in ten seconds, with nothing to install | Long test sessions — a tray launcher that stays above the application under test |
-| **Tests** | 55 Playwright tests — smoke suite in CI, regression suite on demand | 216 pytest tests across a regression and a functional suite, in CI |
+| **Tests** | 55 Playwright tests — smoke suite in CI, regression suite on demand | 229 pytest tests across a regression and a functional suite, in CI |
 
 Both produce the same two outputs: a composited PNG for attaching to a defect,
 and a structured JSON annotation layer.
@@ -168,8 +168,16 @@ screen-capture permission is handled — you can still upload an image and annot
 2. Unzip it anywhere you like
 3. Run `TestAssist.exe` — then right-click it and **Pin to taskbar**
 
-The app sits in the system tray with a floating capture launcher. Captures are
-kept in `~/.test-assist/history`, recordings in `~/.test-assist/recordings`.
+The app sits in the system tray with a floating capture launcher. Recordings
+land in `Documents\Test Assist\` — discoverable, backed up with the rest of
+Documents, and never touched by the "replace the folder you run it from"
+update procedure above, since it's a different folder entirely. An "Open
+folder" button appears on the launcher once a recording finishes. Capture
+history is separate: an app-managed cache, auto-pruned on every launch, kept
+in `%LOCALAPPDATA%\Test Assist\history` rather than under Documents, so
+pruning never touches a folder you'd notice losing files from. A populated
+`~/.test-assist` from an earlier version is migrated across automatically the
+first time you run a build with this change.
 
 **Checking for updates and updating:** click the update icon on the floating
 launcher ("Check for Updates"). It's manual only — nothing is checked
@@ -235,7 +243,7 @@ is browser chrome that no automation can drive, so capture and recording tests
 substitute a canvas-backed `MediaStream`. They prove what the app does with a
 stream, not that the picker appears.
 
-**Desktop build — 216 pytest tests**
+**Desktop build — 229 pytest tests**
 
 ```bash
 cd python
@@ -251,7 +259,7 @@ shortcuts and the capture overlay; `test_screen_geometry.py` and
 with no display or network involved. Tests drive real widgets offscreen
 rather than asserting on internals where a real path exists.
 
-`DESKTOP_STABILITY_MATRIX.md` triages all 144 cases — 138 automated, 6
+`DESKTOP_STABILITY_MATRIX.md` triages all 151 cases — 145 automated, 6
 blocked — and says plainly what offscreen testing does not prove: that Qt
 dispatches events correctly in a real window, that the layout is usable, that
 anything is legible, or that a capture on real mixed-DPI hardware comes out

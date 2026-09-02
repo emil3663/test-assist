@@ -211,6 +211,15 @@ class FloatingLauncher(QWidget):
         self._status_lbl.setWordWrap(True)
         self._status_lbl.hide()
 
+        # "Where did it go" gets a one-click answer instead of a folder name
+        # in a status line the user has to go and find themselves.
+        self._btn_open_folder = QPushButton("Open folder")
+        self._btn_open_folder.setFixedHeight(26)
+        self._btn_open_folder.setStyleSheet(self._style_outline())
+        self._btn_open_folder.hide()
+        float_layout.addWidget(self._btn_open_folder)
+        self._last_recording_path: Path | None = None
+
         # Wire signals
         self._btn_photo.clicked.connect(lambda: self._set_mode("photo"))
         self._btn_video.clicked.connect(lambda: self._set_mode("video"))
@@ -218,6 +227,7 @@ class FloatingLauncher(QWidget):
         self._btn_full_capture.clicked.connect(self._start_full_capture)
         self._btn_open_editor.clicked.connect(self._editor.bring_forward)
         self._btn_check_updates.clicked.connect(self._check_for_updates)
+        self._btn_open_folder.clicked.connect(self._open_last_recording_folder)
         self._btn_dock_right.clicked.connect(self._dock_right)
         self._btn_close.clicked.connect(self._close_launcher)
 
@@ -357,6 +367,8 @@ class FloatingLauncher(QWidget):
     def _on_record_finished(self, path: str) -> None:
         if not path:
             self._status_lbl.setText("Nothing was recorded.")
+            self._last_recording_path = None
+            self._btn_open_folder.hide()
             return
 
         result = Path(path)
@@ -367,6 +379,18 @@ class FloatingLauncher(QWidget):
             self._status_lbl.setText(
                 f"Saved {n} frames (video encoding unavailable): {path}"
             )
+        self._last_recording_path = result
+        self._btn_open_folder.show()
+
+    def _open_last_recording_folder(self) -> None:
+        """"Where did it go" gets a one-click answer, whatever the path is -
+        Documents\\Test Assist by default, or the frame-sequence folder if
+        encoding fell back."""
+        path = self._last_recording_path
+        if path is None:
+            return
+        folder = path if path.is_dir() else path.parent
+        QDesktopServices.openUrl(QUrl.fromLocalFile(str(folder)))
 
     # ── Update check ─────────────────────────────────────────────────────────
 

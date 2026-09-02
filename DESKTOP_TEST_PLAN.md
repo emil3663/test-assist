@@ -1,7 +1,7 @@
 # 🔍 Test Assist — Desktop Test Plan
 
-**Version:** 1.6
-**Last updated:** 2026-09-02
+**Version:** 1.7
+**Last updated:** 2026-09-03
 **Status:** In active development
 **Applies to:** the PySide6 desktop build under `python/`. The browser build has
 its own plan in `TEST_PLAN.md`.
@@ -38,7 +38,7 @@ history that survives restarts.
 | Export PNG | ✅ Done | Also written to history |
 | Export JSON | ✅ Done | Annotation list plus timestamp |
 | Copy to clipboard | ✅ Done | Also written to history |
-| Capture history | ✅ Done | Persists in `~/.test-assist/history` |
+| Capture history | ✅ Done | Persists in `%LOCALAPPDATA%\Test Assist\history`, auto-pruned on launch |
 | History filters | ✅ Done | Recent 5 / Today / This Week / This Month |
 | Floating launcher | ✅ Done | Always on top; drag to reposition |
 | Edge docking | ✅ Done | Compact vertical strip |
@@ -49,6 +49,8 @@ history that survives restarts.
 | Multi-display capture | ✅ Done | Region capture, full-screen capture, recording and launcher pinning all follow the actual screen; a selection spanning two screens is composited rather than clamped |
 | Version in the window title | ✅ Done | `Test Assist <version> — Editor`, always visible |
 | About dialog / bug-report details | ✅ Done | Version, OS and full display layout (screen count, geometry, DPR), one click to copy |
+| Recordings in a discoverable, update-safe location | ✅ Done | `Documents\Test Assist\`, not the dot-prefixed `~/.test-assist`; an "Open folder" button appears after a recording |
+| One-time migration from `~/.test-assist` | ✅ Done | Best-effort, wrapped, never blocks startup; the old folder is left in place |
 | Annotation numbering | ❌ Not done | Numbered callouts not supported |
 | PDF export | ❌ Not done | PNG and JSON only |
 | Frame-by-frame video annotation | ❌ Not done | |
@@ -84,7 +86,7 @@ and why — read it before treating a ✅ as proof of more than it is.
 
 | ID | Test | Expected Result | Status |
 |----|------|-----------------|--------|
-| REC-01 | Record for a few seconds and stop | Frames are written to `~/.test-assist/recordings` as captured | ✅ |
+| REC-01 | Record for a few seconds and stop | Frames are written to `Documents\Test Assist\` as captured | ✅ |
 | REC-02 | Memory during a recording | Memory stays flat; frames are not held in a list | ✅ |
 | REC-03 | Recording reaches the duration cap | Recording stops itself at 3 minutes | ✅ |
 | REC-04 | Frame width | Frames are scaled to at most 1280px wide | ✅ |
@@ -312,6 +314,22 @@ monitor layout.
 | ABT-01 | Open the About dialog | Shows the running version and the OS name/version | ✅ |
 | ABT-02 | Click "Copy details for a bug report" | Clipboard holds the version, OS description, and every screen's geometry and DPR | ✅ |
 | ABT-03 | About button | Reachable from the toolbar, beside Help | ✅ |
+
+### 3.18 Data Locations
+
+`~/.test-assist` was undiscoverable on Windows, and recordings placed in the
+install folder would be deleted by the documented update procedure. See
+`docs/data-locations-brief.md` for the full reasoning.
+
+| ID | Test | Expected Result | Status |
+|----|------|-----------------|--------|
+| DAT-01 | `recordings_dir()` and `history_dir()` | Resolve to distinct locations; neither is nested inside the other | ✅ |
+| DAT-02 | `history_dir()` relative to Documents | Never resolves under Documents, since it is auto-pruned on every launch | ✅ |
+| DAT-03 | A populated `~/.test-assist` on first run | Recordings and history are moved into the new locations | ✅ |
+| DAT-04 | Migration run a second time | No-op — nothing left to move, no duplication or error | ✅ |
+| DAT-05 | Migration with no (or an empty) legacy folder | No-op | ✅ |
+| DAT-06 | Migration hits a permission or filesystem error | Swallowed; does not block startup; the item is left where it was | ✅ |
+| DAT-07 | "Open folder" after a recording finishes | Opens the actual containing folder — the mp4's parent, or the frame folder itself if encoding fell back | ✅ |
 
 ---
 

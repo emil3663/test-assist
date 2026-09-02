@@ -34,6 +34,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+import paths
 from canvas import AnnotationCanvas
 from theme import ACCENT, BG_800, LINE, MUTED, TEXT
 
@@ -608,8 +609,10 @@ class EditorWindow(QMainWindow):
                 json.dump(data, fh, indent=2)
 
     def _load_history(self) -> None:
-        self._history_dir = Path.home() / ".test-assist" / "history"
-        self._history_dir.mkdir(parents=True, exist_ok=True)
+        # AppLocalDataLocation, not Documents - see paths.py. This folder is
+        # auto-pruned below on every launch, which must never happen to a
+        # folder the user keeps things in.
+        self._history_dir = paths.history_dir()
         self._prune_unreadable_history()
         self._refresh_history()
 

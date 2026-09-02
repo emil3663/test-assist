@@ -13,6 +13,7 @@ from PySide6.QtCore import Qt
 from PySide6.QtGui import QAction, QColor, QFont, QIcon, QPainter, QPen, QPixmap
 from PySide6.QtWidgets import QApplication, QMenu, QSystemTrayIcon
 
+import paths
 from editor import EditorWindow
 from launcher import FloatingLauncher
 from single_instance import SingleInstanceManager
@@ -179,8 +180,12 @@ def main() -> None:
         pass
 
     app = QApplication(sys.argv)
+    # No setOrganizationName(): QStandardPaths' AppLocalDataLocation folds it
+    # in ahead of the application name, which would give
+    # AppData\Local\TestAssist\Test Assist\ for no reason - nothing else in
+    # the app reads organizationName (single_instance.py uses its own
+    # hardcoded server name), so there is nothing to preserve by keeping it.
     app.setApplicationName("Test Assist")
-    app.setOrganizationName("TestAssist")
     app.setStyle("Fusion")
     app.setStyleSheet(EDITOR_STYLE)
     app.setWindowIcon(_make_tray_icon())
@@ -188,6 +193,8 @@ def main() -> None:
     # Keep the process alive even when all windows are hidden
     # (launcher is the "last" visible window and must not trigger quit).
     app.setQuitOnLastWindowClosed(False)
+
+    paths.migrate_legacy_data()
 
     single = SingleInstanceManager()
     if not single.acquire():

@@ -41,6 +41,43 @@ release; only tagged versions appear as releases.
   describe the reporter's monitor layout; pasting this would have answered
   the mixed-DPI question immediately.
 
+### Changed
+
+- **Recordings and capture history moved out of `~/.test-assist`.**
+  `~/.test-assist/recordings` was undiscoverable on Windows — a dot-prefixed
+  folder is a Unix convention Windows users do not look in — and moving it
+  into the install folder instead, which looked like the obvious fix, would
+  have made every recording get deleted by the documented update procedure
+  ("close the app, download the zip, replace the folder's contents"). Split
+  instead by what the files are: recordings and saved exports now live in
+  `Documents\Test Assist\` (discoverable, backed up, untouched by an update),
+  and capture history — an app-managed cache the app auto-prunes on every
+  launch — lives in `%LOCALAPPDATA%\Test Assist\history` instead, since an
+  auto-deleting folder must never sit where a user keeps things they'd miss.
+  Both resolve through one new module, `paths.py`, rather than being built
+  by hand in two places. A recording now offers an "Open folder" button once
+  it finishes, so "where did it go" has a one-click answer regardless of
+  which of the two outcomes (a finished mp4, or a kept frame sequence if
+  encoding fell back) produced it.
+  - `setOrganizationName("TestAssist")` is removed. Nothing in the app read
+    it (`single_instance.py` already used its own hardcoded server name),
+    and `QStandardPaths.AppLocalDataLocation` folds the organisation name in
+    ahead of the application name, which would otherwise have produced
+    `AppData\Local\TestAssist\Test Assist\history` for no reason.
+  - A populated `~/.test-assist` from an earlier install migrates into the
+    new locations once, automatically, the first time a build with this
+    change runs. Best-effort and never fatal: v1.0.0, v1.1.0 and v1.3.0 are
+    public downloads, at least one person outside this repo has real
+    recordings sitting in the old location, and a broken migration must
+    never be the reason the app fails to start. The old folder is left in
+    place rather than risking a delete of anything that failed to copy.
+  - The test isolation this depends on moved with it: `conftest.py` used to
+    redirect `Path.home()`, which is what capture.py and editor.py built
+    paths from directly; both now go through `paths.py`, so the fixture
+    patches `paths.QStandardPaths.writableLocation` instead and asserts the
+    redirect actually took effect, rather than assuming a patched seam still
+    does anything.
+
 ## [1.3.0] — 2026-08-31
 
 ### Added
