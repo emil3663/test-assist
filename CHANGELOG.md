@@ -3,6 +3,44 @@
 All notable changes to Test Assist. Dates are the date of the change, not of a
 release; only tagged versions appear as releases.
 
+## [Unreleased]
+
+### Fixed
+
+- **Region capture, full-screen capture, recording and the launcher's own
+  positioning all read `primaryScreen()` unconditionally** (GitHub issue #1).
+  On a laptop with an external monitor, dragging a selection on the secondary
+  display returned the matching area on the *primary* instead — the overlay
+  is placed at the virtual desktop's origin, so its widget coordinates are
+  not global coordinates whenever a screen sits left of or above the primary,
+  which is negative on Windows and was being treated as global (0, 0).
+  Recording had the identical bug and was not in the original report: a
+  tester recording a repro on a secondary monitor got footage of the primary
+  with nothing to hint at it until playback. Docking and positioning the
+  launcher measured the primary's edge even when the launcher was on another
+  screen. All six sites now resolve the actual screen(s) involved; a
+  selection spanning two screens is composited from every intersecting
+  screen rather than clamped to one, since silently returning less than the
+  user selected is the class of bug this removes. The underlying geometry is
+  pure functions over `QRect` values (`screen_geometry.py`), so negative-
+  coordinate and mixed-size layouts are covered without a second monitor —
+  the one thing that still needs real mixed-DPI hardware is whether the
+  grabbed pixels come out the right *size*, tracked as Blocked (CAP-12).
+
+### Added
+
+- **The version now shows up without opening a dialog.** The editor's
+  window title reads `Test Assist <version> — Editor`, and `help.html`'s
+  header and footer show the version too — both taken from `__version__` at
+  build time (`generate_version_info.py` now stamps `help.html` alongside
+  `version_info.txt`), so there is no third place for the number to drift.
+- **An About dialog**, reachable from the toolbar beside Help, with a "Copy
+  details for a bug report" button that copies the version, OS name/version,
+  and the full display layout — every screen's geometry and device pixel
+  ratio. Issue #1 took a code read to diagnose because the report could not
+  describe the reporter's monitor layout; pasting this would have answered
+  the mixed-DPI question immediately.
+
 ## [1.3.0] — 2026-08-31
 
 ### Added

@@ -3,9 +3,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
-from PySide6.QtCore import QEvent, QPointF, Qt
+from PySide6.QtCore import QEvent, QPointF, QRect, Qt
 from PySide6.QtGui import QColor, QKeyEvent, QPixmap
-from PySide6.QtWidgets import QDialog, QFrame, QLabel, QMessageBox, QPushButton, QTabWidget, QWidget
+from PySide6.QtWidgets import QApplication, QDialog, QFrame, QLabel, QMessageBox, QPushButton, QTabWidget, QWidget
 
 from canvas import AnnotationCanvas
 from editor import EditorWindow
@@ -405,6 +405,79 @@ def test_launcher_dock_right_moves_to_expected_x_position(qapp) -> None:
     geom = qapp.primaryScreen().availableGeometry()
     expected_x = geom.right() - launcher.width()
     assert launcher.x() == expected_x
+    launcher.close()
+
+
+def test_LCH_08_dock_right_uses_the_screen_the_widget_is_on(qapp, monkeypatch) -> None:
+    """Issue #1: docking measured primaryScreen().availableGeometry()
+    unconditionally, so dragging the launcher to a secondary monitor's edge
+    docked it against the primary's edge instead."""
+    launcher = FloatingLauncher(_EditorStub())
+    launcher.show()
+    qapp.processEvents()
+
+    class _FakeScreen:
+        def availableGeometry(self) -> QRect:
+            return QRect(2000, 100, 800, 600)
+
+    monkeypatch.setattr(QApplication, "screenAt", staticmethod(lambda point: _FakeScreen()))
+
+    launcher._dock_right()
+    qapp.processEvents()
+
+    # QRect.right() is x()+width()-1, not x()+width() - match that convention.
+    assert launcher.x() == 2000 + 800 - 1 - launcher.width()
+    launcher.close()
+
+
+def test_launcher_position_top_right_uses_the_screen_the_widget_is_on(qapp, monkeypatch) -> None:
+    class _FakeScreen:
+        def availableGeometry(self) -> QRect:
+            return QRect(3000, 200, 1000, 700)
+
+    monkeypatch.setattr(QApplication, "screenAt", staticmethod(lambda point: _FakeScreen()))
+
+    launcher = FloatingLauncher(_EditorStub())
+    launcher.show()
+    qapp.processEvents()
+
+    # QRect.right() is x()+width()-1, not x()+width() - match that convention.
+    assert launcher.x() == 3000 + 1000 - 1 - launcher.width() - 20
+    assert launcher.y() == 200 + 20
+    launcher.close()
+
+
+def test_launcher_current_screen_falls_back_to_primary_when_off_every_screen(qapp, monkeypatch) -> None:
+    """screenAt() returns None for a point off every screen - a real case,
+    not a hypothetical one, e.g. mid-drag before layout settles."""
+    monkeypatch.setattr(QApplication, "screenAt", staticmethod(lambda point: None))
+
+    launcher = FloatingLauncher(_EditorStub())
+    launcher.show()
+    qapp.processEvents()
+
+    assert launcher._current_screen() is QApplication.primaryScreen()
+    launcher.close()
+
+
+def test_launcher_full_capture_uses_the_screen_the_widget_is_on(qapp, monkeypatch) -> None:
+    """launcher.py:312 - full-screen capture only ever grabbed the primary."""
+    launcher = FloatingLauncher(_EditorStub())
+    launcher.show()
+    qapp.processEvents()
+
+    calls = []
+
+    class _FakeScreen:
+        def grabWindow(self, _wid):
+            calls.append(True)
+            return QPixmap(10, 10)
+
+    monkeypatch.setattr(launcher, "_current_screen", lambda: _FakeScreen())
+
+    launcher._grab_full_capture()
+
+    assert calls == [True]
     launcher.close()
 
 
@@ -823,6 +896,113 @@ def test_version_info_matches_main_version():
     assert tuple(int(p.strip()) for p in filevers.group(1).split(",")) == (*parts, 0)
 
 
+def test_help_html_matches_main_version():
+    """help.html is opened as a static file:// URI via webbrowser.open(), so
+    nothing can stamp its version at runtime the way a server-rendered page
+    could. generate_version_info.py stamps it at build time from
+    __version__; this pins the checked-in copy so it cannot silently drift
+    the way version_info.txt once did for v1.1.0."""
+    import re
+
+    import main
+
+    here = Path(main.__file__).resolve().parent
+    text = (here / "help.html").read_text(encoding="utf-8")
+
+    header_version = re.search(r'id="app-version">([^<]*)<', text)
+    footer_version = re.search(r'id="app-version-footer">([^<]*)<', text)
+    assert header_version and header_version.group(1) == main.__version__
+    assert footer_version and footer_version.group(1) == main.__version__
+
+
+def test_WIN_01_editor_window_title_includes_the_running_version(qapp) -> None:
+    """Zero new UI, always visible, and it shows up in any screenshot a
+    reporter sends - the only way to learn the version in-app used to be
+    pressing Check for Updates."""
+    editor = EditorWindow(version="1.3.0")
+    assert editor.windowTitle() == "Test Assist 1.3.0 — Editor"
+    editor.close()
+
+
+def test_editor_window_title_never_hardcodes_a_version(qapp) -> None:
+    editor = EditorWindow(version="9.9.9")
+    assert "9.9.9" in editor.windowTitle()
+    editor.close()
+
+
+def test_format_bug_report_details_includes_version_os_and_every_screen():
+    """Pure formatting, no QScreen involved - issue #1 took a code read to
+    diagnose because the report could not describe the monitor layout; this
+    is the text a reporter would paste instead."""
+    from editor import _format_bug_report_details
+
+    screens = [
+        {"x": 0, "y": 0, "width": 1920, "height": 1080, "dpr": 1.0},
+        {"x": 1920, "y": 0, "width": 1280, "height": 800, "dpr": 1.5},
+    ]
+    details = _format_bug_report_details("1.3.0", "Windows 11 Version 24H2", screens)
+
+    assert "Test Assist 1.3.0" in details
+    assert "Windows 11 Version 24H2" in details
+    assert "2 screen(s)" in details
+    assert "1920x1080 at (0, 0), DPR 1.0" in details
+    assert "1280x800 at (1920, 0), DPR 1.5" in details
+
+
+def test_format_bug_report_details_with_no_screens_does_not_crash():
+    from editor import _format_bug_report_details
+
+    details = _format_bug_report_details("1.3.0", "Some OS", [])
+    assert "0 screen(s)" in details
+
+
+def test_ABT_01_about_dialog_shows_the_running_version_and_os(qapp, monkeypatch) -> None:
+    editor = EditorWindow(version="1.3.0")
+    editor.show()
+    qapp.processEvents()
+
+    captured = {}
+    monkeypatch.setattr(QDialog, "exec", lambda self: captured.setdefault("dialog", self) and 0)
+
+    editor._open_about()
+
+    labels = [w.text() for w in captured["dialog"].findChildren(QLabel)]
+    assert any("1.3.0" in text for text in labels), "the dialog does not show the running version"
+    editor.close()
+
+
+def test_ABT_02_copy_details_button_copies_version_os_and_display_layout(qapp, monkeypatch) -> None:
+    """The point of the About dialog: a reporter can paste this instead of
+    describing their monitor layout in prose."""
+    editor = EditorWindow(version="1.3.0")
+
+    monkeypatch.setattr(
+        "editor.QSysInfo.prettyProductName", staticmethod(lambda: "Windows 11 Version 24H2"),
+    )
+
+    editor._copy_bug_report_details()
+    copied = qapp.clipboard().text()
+
+    assert "Test Assist 1.3.0" in copied
+    assert "Windows 11 Version 24H2" in copied
+    assert "screen(s):" in copied
+    editor.close()
+
+
+def test_ABT_03_about_button_is_reachable_from_the_toolbar(qapp) -> None:
+    editor = EditorWindow()
+    editor.show()
+    qapp.processEvents()
+
+    about_buttons = [
+        btn for btn in editor.findChildren(QPushButton)
+        if btn.objectName() == "btn_about"
+    ]
+    assert about_buttons
+    assert about_buttons[0].toolTip() == "About Test Assist"
+    editor.close()
+
+
 def test_packaged_icon_exists_and_is_a_real_ico():
     """The taskbar icon ships with the build; a missing file falls back silently."""
     icon = Path(__file__).resolve().parents[2] / "assets" / "icon.ico"
@@ -953,6 +1133,44 @@ def test_recorder_encodes_odd_height_frames_without_error(qapp, monkeypatch, tmp
     assert result.suffix == ".mp4", "odd-height frames must still encode successfully"
     assert result.is_file()
     assert result.stat().st_size > 0
+
+
+def test_REC_09_recording_uses_the_screen_passed_to_start_not_always_primary(qapp, monkeypatch, tmp_path):
+    """Issue #1, the site not in the original bug report: capture.py:226 read
+    QApplication.primaryScreen() on every frame, so a tester recording a
+    repro on their secondary monitor got footage of the primary instead, with
+    nothing to hint at it until playback."""
+    capture, rec = _recorder(monkeypatch, tmp_path)
+
+    class _FakeScreen:
+        def __init__(self) -> None:
+            self.grab_calls = 0
+
+        def grabWindow(self, _wid):
+            self.grab_calls += 1
+            pixmap = QPixmap(64, 48)
+            pixmap.fill(QColor("blue"))
+            return pixmap
+
+    fake_screen = _FakeScreen()
+    real_primary_calls = []
+    monkeypatch.setattr(
+        capture.QApplication, "primaryScreen",
+        staticmethod(lambda: real_primary_calls.append(1) or fake_screen),
+    )
+
+    rec.start(screen=fake_screen)
+    real_primary_calls.clear()   # start() itself may or may not consult it; only frame capture matters here
+    rec._capture_frame()
+
+    assert fake_screen.grab_calls == 1
+    assert real_primary_calls == [], "a frame was captured from primaryScreen() instead of the pinned screen"
+
+
+def test_recorder_start_defaults_to_the_primary_screen_when_none_is_given(qapp, monkeypatch, tmp_path):
+    capture, rec = _recorder(monkeypatch, tmp_path)
+    rec.start()
+    assert rec._screen is capture.QApplication.primaryScreen()
 
 
 def test_recorder_with_nothing_captured_emits_empty(qapp, monkeypatch, tmp_path):

@@ -50,7 +50,7 @@ are in the left rail.*
 | **Install** | None — open the live URL | Download the release zip and run `TestAssist.exe`, or run from source |
 | **Capture** | `getDisplayMedia`, `MediaRecorder` | Native screenshot overlay, frame recorder |
 | **Best for** | Trying the full capture → annotate → export loop in ten seconds, with nothing to install | Long test sessions — a tray launcher that stays above the application under test |
-| **Tests** | 55 Playwright tests — smoke suite in CI, regression suite on demand | 108 pytest tests across a regression and a functional suite, in CI |
+| **Tests** | 55 Playwright tests — smoke suite in CI, regression suite on demand | 216 pytest tests across a regression and a functional suite, in CI |
 
 Both produce the same two outputs: a composited PNG for attaching to a defect,
 and a structured JSON annotation layer.
@@ -73,6 +73,12 @@ sandboxed; some of it is simply where the work went.
 - MP4 recording via a bundled `ffmpeg` binary — works from source and in the
   packaged build alike
 - A manual "Check for Updates" button — no on-launch poll, no telemetry
+- Multi-monitor aware: region capture, full-screen capture, recording and the
+  launcher's own positioning all follow whichever screen you're actually using,
+  and a selection spanning two screens is composited rather than clamped
+- An About dialog with one-click "Copy details for a bug report" — version,
+  OS, and the full display layout, so a bug report never needs a screenshot of
+  your monitor settings just to describe them
 
 Everything under **What it does** below is the browser build.
 
@@ -229,23 +235,27 @@ is browser chrome that no automation can drive, so capture and recording tests
 substitute a canvas-backed `MediaStream`. They prove what the app does with a
 stream, not that the picker appears.
 
-**Desktop build — 108 pytest tests**
+**Desktop build — 216 pytest tests**
 
 ```bash
 cd python
-pytest -q                 # under 2 seconds
+pytest -q                 # about 2-3 seconds warm
 ```
 
-`test_regressions.py` holds the original regression cases; `test_functional.py`
-covers every feature in `DESKTOP_TEST_PLAN.md` — each tool, crop, blur,
-selection and layering, zoom, undo/redo, all three export paths, capture
-history, the launcher, shortcuts and the capture overlay. Tests drive real
-widgets offscreen rather than asserting on internals where a real path exists.
+`test_regressions.py` holds the original regression cases plus packaging,
+version and update-check coverage; `test_functional.py` covers every feature
+in `DESKTOP_TEST_PLAN.md` — each tool, crop, blur, selection and layering,
+zoom, undo/redo, all three export paths, capture history, the launcher,
+shortcuts and the capture overlay; `test_screen_geometry.py` and
+`test_update_check.py` cover the pure multi-display and update-check logic
+with no display or network involved. Tests drive real widgets offscreen
+rather than asserting on internals where a real path exists.
 
-`DESKTOP_STABILITY_MATRIX.md` triages all 91 cases — 87 automated, 4 blocked —
-and says plainly what offscreen testing does not prove: that Qt dispatches
-events correctly in a real window, that the layout is usable, or that anything
-is legible. Those stay manual.
+`DESKTOP_STABILITY_MATRIX.md` triages all 144 cases — 138 automated, 6
+blocked — and says plainly what offscreen testing does not prove: that Qt
+dispatches events correctly in a real window, that the layout is usable, that
+anything is legible, or that a capture on real mixed-DPI hardware comes out
+the right size. Those stay manual.
 
 Executed on every push by `.github/workflows/python-tests.yml`.
 

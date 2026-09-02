@@ -1,7 +1,7 @@
 # 🔍 Test Assist — Desktop stability matrix
 
-**Version:** 1.0
-**Last updated:** 2026-08-31
+**Version:** 1.1
+**Last updated:** 2026-09-02
 **Applies to:** the PySide6 desktop build. The browser build has its own matrix
 in `STABILITY_MATRIX.md`.
 
@@ -25,13 +25,13 @@ This document is that check.
 
 | | Count |
 |---|---|
-| Cases in `DESKTOP_TEST_PLAN.md` v1.5 | 134 |
-| Automated and passing | 129 |
-| Blocked, documented as manual | 5 |
-| Automated tests | 177 collected — 177 pass everywhere, no skips |
+| Cases in `DESKTOP_TEST_PLAN.md` v1.6 | 144 |
+| Automated and passing | 138 |
+| Blocked, documented as manual | 6 |
+| Automated tests | 216 collected — 216 pass everywhere, no skips |
 | Wall clock | about 2-3 seconds warm; the first run is slower while the bundled ffmpeg loads |
 
-**A green run is `177 passed, 0 skipped`, everywhere.** MP4 assembly used to
+**A green run is `216 passed, 0 skipped`, everywhere.** MP4 assembly used to
 depend on `opencv-python`, an optional dependency the product deliberately
 shipped without, which made REC-05 skip itself on CI, the packaged build, and
 any clean checkout. It now shells out to a bundled `ffmpeg` binary via
@@ -46,8 +46,23 @@ listed as Blocked below. Be honest with yourself about the difference: this
 suite proves the update check's *logic* is correct, not that it will
 successfully reach GitHub from a real machine.
 
-Six defects were found by writing these tests. All are fixed and all have a
-regression test — see **Defects found** below.
+**Multi-display capture (issue #1) is now fixed and covered the same way.**
+Region capture, full-screen capture, recording, and all three launcher
+pinning sites read `primaryScreen()` unconditionally, so anything on a
+secondary monitor was silently wrong - a selection returned the matching area
+on the *primary* instead, and a recording started on a secondary monitor
+captured the primary with nothing to hint at it until playback. The geometry
+fix is pure functions taking `QRect` values rather than `QScreen` objects
+(`screen_geometry.py`), so negative-coordinate and mixed-DPI layouts are
+covered by literal test geometries without a second monitor. A selection
+spanning two screens is composited from both rather than clamped to one -
+returning less than the user selected is exactly the class of bug this
+removes. What is not provable here: the actual grabbed pixels coming out the
+right size from a real high-DPI secondary. That is CAP-12, listed below.
+
+Six defects were found by writing these tests, and a seventh was fixed
+following a user bug report rather than an internal test — see
+**Defects found** below.
 
 ---
 
@@ -65,7 +80,7 @@ Those are properties of a running desktop and remain manual.
 
 ---
 
-## The blocked five
+## The blocked six
 
 | ID | Case | Why it cannot be automated here |
 |----|------|--------------------------------|
@@ -73,9 +88,10 @@ Those are properties of a running desktop and remain manual.
 | PKG-03 | The pinned taskbar icon matches the tray icon | A property of the Windows shell, not of the process. |
 | PKG-04 | First launch on a machine without Python | Needs a clean Windows machine. The release workflow proves the exe runs on a runner, which is close but not the same as a machine that never had Python. |
 | PKG-05 | Windows file properties show product name and version | Readable only from a Windows build; the version resource is ignored on Linux, where the validation build runs. |
+| CAP-12 | A capture spanning or landing on a real high-DPI secondary monitor comes out the right size | Needs actual mixed-DPI hardware. The pure geometry functions are fully covered with literal mixed-size layouts (`test_screen_geometry.py`); what is not provable here is that `QScreen.grabWindow()`'s returned pixmap and the compositing `QPainter` produce correct pixels on a real scaled display, not just correct math on paper. |
 | UPD-12 | A real round-trip to the GitHub API | Would make the suite depend on the network and GitHub's rate limits - "a suite that reaches the internet is a suite that fails on a train." `build.ps1` and the release workflow separately prove the packaged build *can* do TLS at all (PKG-07); nothing proves the request itself succeeds. |
 
-These five are the manual pass to run against a release before trusting it.
+These six are the manual pass to run against a release before trusting it.
 
 ---
 
@@ -83,9 +99,9 @@ These five are the manual pass to run against a release before trusting it.
 
 | Area | Cases | Stability | Notes |
 |---|---|---|---|
-| 3.1 Capture | 4 | Moderate | The grab is deferred by a 120 ms timer so the overlay can vanish first; the test waits for it rather than assuming. Offscreen grabs return a blank pixmap, so these prove the mechanism, not the pixels. |
-| 3.2 Recording | 8 | Moderate | REC-05 shells out to a real bundled `ffmpeg` binary to assemble an mp4; the rest are deterministic. |
-| 3.3 Tools | 10 | Stable | Direct assertions on the annotation model. |
+| 3.1 Capture | 8 | Moderate | The grab is deferred by a 120 ms timer so the overlay can vanish first; the test waits for it rather than assuming. Offscreen grabs return a blank pixmap, so these prove the mechanism, not the pixels. CAP-10/11/13 substitute stub `QScreen` objects to prove `_grab()` picks the right screen(s) and composites correctly; CAP-12 (real mixed-DPI pixels) is Blocked. |
+| 3.2 Recording | 9 | Moderate | REC-05 shells out to a real bundled `ffmpeg` binary to assemble an mp4; REC-09 substitutes a stub screen to prove the recorder uses the screen pinned at `start()`, not `primaryScreen()`; the rest are deterministic. |
+| 3.3 Tools | 9 | Stable | Direct assertions on the annotation model. |
 | 3.4 Crop | 4 | Stable | |
 | 3.5 Blur | 3 | Stable | BLR-02 measures pixel variance in the exported image rather than trusting that a blur annotation exists. |
 | 3.6 Selection & layering | 33 | Stable | SEL-01f pins the ordering between grabbing a resize handle and hit-testing for a new selection. |
@@ -95,11 +111,12 @@ These five are the manual pass to run against a release before trusting it.
 | 3.9 Undo/redo | 6 | Stable | |
 | 3.10 Export | 9 | Stable | `QFileDialog` is substituted, so these prove what is written, not that the dialog appears. |
 | 3.11 History | 8 | Stable | HIS-05 back-dates a file's mtime rather than waiting. |
-| 3.12 Launcher | 7 | Stable | LCH-07 asserts the always-on-top flag is set, not that the window is actually on top. |
+| 3.12 Launcher | 8 | Stable | LCH-07 asserts the always-on-top flag is set, not that the window is actually on top. LCH-08 substitutes `QApplication.screenAt()` to prove docking and positioning measure the screen the widget is actually on. |
 | 3.13 Shortcuts | 5 | Stable | KEY-05 exercises the real signal path rather than calling the setter directly. |
 | 3.14 Lifecycle | 4 | Moderate | INS-01 binds a uniquely named local server so it cannot collide with a running app. |
 | 3.15 Packaging | 7 | Blocked (3) | PKG-01, PKG-02, PKG-06 and PKG-07 are automated. PKG-07's "True" assertion is also exercised for real, once, against an actual PyInstaller build - see below. |
 | 3.16 Update check | 12 | Stable (11) / Blocked (1) | UPD-01 through UPD-11 are pure-function and substituted-result tests, no network. UPD-12 (the real round-trip) is blocked. |
+| 3.17 Diagnostics | 4 | Stable | ABT-02's clipboard assertion is the same shape as issue #1's own diagnosis - proving a reporter's monitor layout is now visible without a code read. |
 
 ---
 
@@ -194,6 +211,27 @@ of REC-05 while verifying this suite is actually deterministic, not by a single
 failing run — flaky is easy to mistake for fine. `capture.py` now locates the
 bundled binary by path instead of going through that check.
 
+**7. Region capture, full-screen capture, recording and three launcher
+positioning sites all read `primaryScreen()` unconditionally.** Reported as
+GitHub issue #1, not found by writing these tests - the opposite direction
+from defects 1-6. On a laptop with an external monitor, a region selected on
+the secondary returned the matching area on the *primary* instead; the
+overlay is placed at the virtual desktop's origin, so widget coordinates are
+not global coordinates whenever a screen sits left of or above the primary,
+which is negative on Windows and was being treated as if it were (0, 0).
+Recording had the identical bug and was not in the original report — a
+tester recording a repro on a secondary monitor got footage of the primary
+with nothing to hint at it until playback. Fixed with pure geometry functions
+in `screen_geometry.py` that take `QRect` values instead of `QScreen`
+objects, so the fix is covered by literal negative-coordinate and mixed-size
+layouts without a second monitor (`test_screen_geometry.py`, CAP-10/11/13,
+REC-09, LCH-08). Decision made explicitly rather than left implicit: a
+selection spanning two screens is composited from every intersecting screen
+rather than clamped to the one holding the most of it, because silently
+returning less than the user selected is exactly the class of bug this
+removes. What is not covered: the actual pixel-level correctness of a grab on
+real mixed-DPI hardware - CAP-12, listed as Blocked above.
+
 ---
 
 ## The selection model
@@ -239,7 +277,7 @@ yet on the packaged build.
 ```bash
 cd python
 pip install -r requirements.txt
-QT_QPA_PLATFORM=offscreen pytest -q      # 177 passed, about 2-3 seconds warm;
+QT_QPA_PLATFORM=offscreen pytest -q      # 216 passed, about 2-3 seconds warm;
                                           # slower on the first run while the
                                           # bundled ffmpeg loads
 ```

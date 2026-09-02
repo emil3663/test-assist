@@ -1,7 +1,7 @@
 # 🔍 Test Assist — Desktop Test Plan
 
-**Version:** 1.5
-**Last updated:** 2026-08-31
+**Version:** 1.6
+**Last updated:** 2026-09-02
 **Status:** In active development
 **Applies to:** the PySide6 desktop build under `python/`. The browser build has
 its own plan in `TEST_PLAN.md`.
@@ -22,8 +22,8 @@ history that survives restarts.
 
 | Feature | Status | Notes |
 |---------|--------|-------|
-| Region screenshot overlay | ✅ Done | Drag to select; Esc cancels |
-| Screen recording | ✅ Done | Frames written as captured; 3-minute cap |
+| Region screenshot overlay | ✅ Done | Drag to select; Esc cancels; follows the screen the selection is actually on |
+| Screen recording | ✅ Done | Frames written as captured; 3-minute cap; follows the screen active when recording started |
 | MP4 assembly | ✅ Done | Via bundled `ffmpeg` (`imageio-ffmpeg`); works everywhere, packaged build included |
 | Select tool | ✅ Done | Click to select, drag to move |
 | Crop | ✅ Done | Undoable; restores original canvas size |
@@ -46,6 +46,9 @@ history that survives restarts.
 | Single-instance enforcement | ✅ Done | Second launch focuses the running app |
 | Packaged Windows executable | ✅ Done | Built by the tagged-release workflow |
 | Manual "Check for Updates" | ✅ Done | Button in the launcher; compares `__version__` against the latest GitHub release tag |
+| Multi-display capture | ✅ Done | Region capture, full-screen capture, recording and launcher pinning all follow the actual screen; a selection spanning two screens is composited rather than clamped |
+| Version in the window title | ✅ Done | `Test Assist <version> — Editor`, always visible |
+| About dialog / bug-report details | ✅ Done | Version, OS and full display layout (screen count, geometry, DPR), one click to copy |
 | Annotation numbering | ❌ Not done | Numbered callouts not supported |
 | PDF export | ❌ Not done | PNG and JSON only |
 | Frame-by-frame video annotation | ❌ Not done | |
@@ -57,9 +60,9 @@ history that survives restarts.
 **Status key:** ✅ covered by an automated test that passes · 🚫 blocked from
 automation, manual only.
 
-Every case that can be automated is. The four blocked ones need a built
-executable on real Windows and are listed as manual rather than quietly
-dropped.
+Every case that can be automated is. The blocked ones need either a built
+executable on real Windows, a real second monitor, or the real network, and
+are listed as manual rather than quietly dropped.
 
 `DESKTOP_STABILITY_MATRIX.md` records which cases are automated, which are not,
 and why — read it before treating a ✅ as proof of more than it is.
@@ -72,6 +75,10 @@ and why — read it before treating a ✅ as proof of more than it is.
 | CAP-02 | Press Esc during region select | Overlay closes; no capture; editor unchanged | ✅ |
 | CAP-03 | Click without dragging | No zero-size capture is produced | ✅ |
 | CAP-04 | Capture while the editor already holds an image | Previous image is replaced, annotations cleared | ✅ |
+| CAP-10 | Selection drawn entirely on a secondary screen | The secondary is grabbed, not the primary | ✅ |
+| CAP-11 | Secondary screen to the left of or above the primary (negative coordinates) | The overlay's virtual-desktop origin is translated correctly; no offset onto the wrong area | ✅ |
+| CAP-12 | Mixed-DPI layout (screens at different scale factors) | The right pixels come back at the right size from a real high-DPI secondary | 🚫 |
+| CAP-13 | Selection spanning two screens | Composited from both screens rather than clamped to one - no part of the selection is silently dropped | ✅ |
 
 ### 3.2 Screen Recording
 
@@ -85,6 +92,7 @@ and why — read it before treating a ✅ as proof of more than it is.
 | REC-06 | Stop with ffmpeg unavailable | The frame folder is kept and returned as the recording | ✅ |
 | REC-07 | Stop having captured nothing | Empty result, no crash, no stray folder | ✅ |
 | REC-08 | Frame files missing when saving | Finishes cleanly rather than raising | ✅ |
+| REC-09 | Recording started while the launcher is on a secondary screen | The recording follows that screen, not always the primary | ✅ |
 
 ### 3.3 Annotation Tools
 
@@ -237,6 +245,7 @@ inside changes the words.
 | LCH-05 | Keyboard shortcuts on the launcher | Documented keys trigger their actions | ✅ |
 | LCH-06 | Open the editor with no capture taken | Editor opens without an image and does not crash | ✅ |
 | LCH-07 | Launcher stays above other windows | Always-on-top flag is set | ✅ |
+| LCH-08 | Dock / position while on a secondary screen | Measures and docks against that screen, not always the primary | ✅ |
 
 ### 3.13 Keyboard Shortcuts
 
@@ -290,6 +299,19 @@ The real network round-trip to GitHub is not — see `DESKTOP_STABILITY_MATRIX.m
 | UPD-10 | Result: newer available | Dialog names the new version and explains how to update (close the app, download the zip, replace the folder contents) | ✅ |
 | UPD-11 | Result: network failure or unparseable response | A calm message, never a traceback | ✅ |
 | UPD-12 | An actual round-trip to the real GitHub API | Not provable here — see the stability matrix | 🚫 |
+
+### 3.17 Diagnostics
+
+Added so a bug report can say what it is running without a code read - GitHub
+issue #1 needed one because the report could not describe the reporter's
+monitor layout.
+
+| ID | Test | Expected Result | Status |
+|----|------|-----------------|--------|
+| WIN-01 | Editor window title | Includes the running version, taken from `main.__version__` | ✅ |
+| ABT-01 | Open the About dialog | Shows the running version and the OS name/version | ✅ |
+| ABT-02 | Click "Copy details for a bug report" | Clipboard holds the version, OS description, and every screen's geometry and DPR | ✅ |
+| ABT-03 | About button | Reachable from the toolbar, beside Help | ✅ |
 
 ---
 

@@ -9,7 +9,7 @@ from pathlib import Path
 import time
 import webbrowser
 
-from PySide6.QtCore import Qt, QSize, Signal
+from PySide6.QtCore import Qt, QSize, QSysInfo, Signal
 from PySide6.QtGui import QColor, QIcon, QImage, QKeySequence, QPixmap, QShortcut
 from PySide6.QtWidgets import (
     QApplication,
@@ -39,6 +39,41 @@ from theme import ACCENT, BG_800, LINE, MUTED, TEXT
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Display info for bug reports
+# ─────────────────────────────────────────────────────────────────────────────
+# Kept as plain-data functions, separate from the QScreen-reading glue in
+# _collect_screen_info(), so the formatting can be unit tested without a
+# display - the same split used for the multi-display capture fix (issue #1),
+# which is exactly the kind of question ("what does their monitor layout look
+# like?") this exists to answer without a code read.
+
+def _collect_screen_info() -> list[dict]:
+    info = []
+    for screen in QApplication.screens():
+        geom = screen.geometry()
+        info.append({
+            "x": geom.x(), "y": geom.y(),
+            "width": geom.width(), "height": geom.height(),
+            "dpr": screen.devicePixelRatio(),
+        })
+    return info
+
+
+def _format_screen_summary(screens: list[dict]) -> str:
+    lines = [f"{len(screens)} screen(s):"]
+    for index, screen in enumerate(screens):
+        lines.append(
+            f"  Screen {index}: {screen['width']}x{screen['height']}"
+            f" at ({screen['x']}, {screen['y']}), DPR {screen['dpr']}"
+        )
+    return "\n".join(lines)
+
+
+def _format_bug_report_details(version: str, os_description: str, screens: list[dict]) -> str:
+    return "\n".join([f"Test Assist {version}", os_description, _format_screen_summary(screens)])
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Editor window
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -50,9 +85,14 @@ class EditorWindow(QMainWindow):
     without stealing focus. Call bring_forward() to raise it.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, version: str = "0.0.0") -> None:
         super().__init__()
-        self.setWindowTitle("Test Assist — Editor")
+        self._version = version
+        # Always visible, shows up in any screenshot a reporter sends - the
+        # window title was the only piece of the app that never mentioned the
+        # version at all, so a bug report had no easy way to say what build
+        # it came from.
+        self.setWindowTitle(f"Test Assist {version} — Editor")
         self.setMinimumSize(960, 640)
         self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating)
 
@@ -187,6 +227,14 @@ class EditorWindow(QMainWindow):
             layout.addWidget(cell)
 
         layout.addStretch()
+
+        # About button — beside Help, far right of toolbar
+        self._about_btn = QPushButton("ⓘ")
+        self._about_btn.setObjectName("btn_about")
+        self._about_btn.setFixedSize(28, 28)
+        self._about_btn.setToolTip("About Test Assist")
+        self._about_btn.clicked.connect(self._open_about)
+        layout.addWidget(self._about_btn, 0, Qt.AlignmentFlag.AlignVCenter)
 
         # Help button — far right of toolbar
         help_btn = QPushButton("?")
@@ -486,6 +534,50 @@ class EditorWindow(QMainWindow):
         base = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent))
         help_file = base / "help.html"
         webbrowser.open(help_file.as_uri())
+
+    def _open_about(self) -> None:
+        dlg = QDialog(self)
+        dlg.setWindowTitle("About Test Assist")
+        dlg.setModal(True)
+
+        layout = QVBoxLayout(dlg)
+        layout.setContentsMargins(24, 22, 24, 22)
+        layout.setSpacing(10)
+
+        title = QLabel(f"Test Assist {self._version}")
+        title.setStyleSheet(f"font-size: 16px; font-weight: 700; color: {TEXT};")
+        layout.addWidget(title)
+
+        os_line = QLabel(QSysInfo.prettyProductName())
+        os_line.setStyleSheet(f"color: {MUTED};")
+        layout.addWidget(os_line)
+
+        screens_label = QLabel(_format_screen_summary(_collect_screen_info()))
+        screens_label.setWordWrap(True)
+        screens_label.setStyleSheet(
+            f"color: {MUTED}; font-family: Consolas, 'Cascadia Code', monospace; font-size: 12px;"
+        )
+        layout.addWidget(screens_label)
+
+        copy_btn = QPushButton("Copy details for a bug report")
+        copy_btn.clicked.connect(self._copy_bug_report_details)
+        layout.addWidget(copy_btn)
+
+        close_btn = QPushButton("Close")
+        close_btn.clicked.connect(dlg.accept)
+        layout.addWidget(close_btn)
+
+        dlg.exec()
+
+    def _copy_bug_report_details(self) -> None:
+        """A reporter cannot describe a monitor layout in a bug report as
+        well as pasting it can - issue #1 needed a code read to diagnose a
+        mixed-DPI question a pasted display list would have answered at once.
+        """
+        details = _format_bug_report_details(
+            self._version, QSysInfo.prettyProductName(), _collect_screen_info(),
+        )
+        QApplication.clipboard().setText(details)
 
     def _save_png(self) -> None:
         pixmap = self._canvas.export_pixmap()

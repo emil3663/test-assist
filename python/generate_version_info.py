@@ -1,10 +1,12 @@
-"""Generate version_info.txt from __version__ in main.py.
+"""Generate version_info.txt and stamp help.html from __version__ in main.py.
 
 __version__ is the one source of truth for the app's version. version_info.txt
-is checked into the repo so a plain `pyinstaller TestAssist.spec` still works
-without this script having run, but build.ps1 (and the release workflow) call
-it before PyInstaller so the two files cannot drift the way they did for
-v1.1.0, which shipped a binary whose Windows file properties still said 1.0.0.
+and the version lines in help.html are both checked into the repo so a plain
+`pyinstaller TestAssist.spec` or a source checkout still works without this
+script having run, but build.ps1 (and the release workflow) call it before
+PyInstaller so none of these can drift from __version__ the way version_info.txt
+once did for v1.1.0, which shipped a binary whose Windows file properties still
+said 1.0.0.
 """
 
 from __future__ import annotations
@@ -63,10 +65,34 @@ def render(version: str) -> str:
     return TEMPLATE.format(tup=tup, version=version)
 
 
+_HELP_VERSION_PATTERN = re.compile(r'(<span id="app-version(?:-footer)?">)[^<]*(</span>)')
+
+
+def stamp_help_html(version: str, html: str) -> str:
+    """Replace the version shown in help.html's header and footer.
+
+    help.html is opened as a static file:// URI via webbrowser.open(), so
+    nothing can stamp it at runtime the way a server-rendered page could -
+    this generator is what keeps it from becoming a third place, alongside
+    version_info.txt, for the version number to quietly drift.
+    """
+    new_html, count = _HELP_VERSION_PATTERN.subn(rf"\g<1>{version}\g<2>", html)
+    if count < 2:
+        raise RuntimeError(
+            f"expected 2 version placeholders in help.html (header + footer), found {count}"
+        )
+    return new_html
+
+
 def main() -> None:
     version = read_main_version()
     (HERE / "version_info.txt").write_text(render(version), encoding="utf-8", newline="\n")
     print(f"version_info.txt written for {version}")
+
+    help_path = HERE / "help.html"
+    help_html = help_path.read_text(encoding="utf-8")
+    help_path.write_text(stamp_help_html(version, help_html), encoding="utf-8", newline="\n")
+    print(f"help.html stamped with version {version}")
 
 
 if __name__ == "__main__":

@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import pytest
-from PySide6.QtCore import QEvent, QPointF, QSize, Qt
+from PySide6.QtCore import QEvent, QPointF, QRect, QSize, Qt
 from PySide6.QtGui import QColor, QImage, QKeyEvent, QPixmap
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication
@@ -1135,6 +1135,76 @@ def test_CAP_04_a_new_capture_replaces_the_previous_image(editor):
 
     assert editor._canvas._annotations == [], "a new capture starts a clean canvas"
     assert editor._canvas.export_pixmap().width() == 320
+
+
+class _StubScreen:
+    """A minimal QScreen substitute for exercising ScreenshotOverlay._grab()
+    against synthetic multi-monitor layouts without a second real monitor."""
+
+    def __init__(self, geometry: QRect, color: str) -> None:
+        self._geometry = geometry
+        self._color = color
+        self.grab_calls: list[tuple[int, int, int, int]] = []
+
+    def geometry(self) -> QRect:
+        return self._geometry
+
+    def grabWindow(self, _wid, x=0, y=0, w=-1, h=-1) -> QPixmap:
+        self.grab_calls.append((x, y, w, h))
+        pixmap = QPixmap(w, h)
+        pixmap.fill(QColor(self._color))
+        return pixmap
+
+
+def test_CAP_10_and_13_grab_composites_a_selection_spanning_two_screens(qapp, monkeypatch):
+    """Issue #1, the undecided half: a selection spanning two screens must be
+    composited from both, not clamped to whichever holds the most of it."""
+    from capture import ScreenshotOverlay
+
+    overlay = ScreenshotOverlay()
+    left = _StubScreen(QRect(0, 0, 1000, 800), "red")
+    right = _StubScreen(QRect(1000, 0, 1000, 800), "blue")
+    monkeypatch.setattr(QApplication, "screens", staticmethod(lambda: [left, right]))
+    monkeypatch.setattr(QApplication, "primaryScreen", staticmethod(lambda: left))
+    overlay.setGeometry(QRect(0, 0, 2000, 800))   # virtual origin (0, 0)
+
+    captured: list[QPixmap] = []
+    overlay.capture_ready.connect(captured.append)
+    overlay._grab(QRect(800, 100, 400, 200))      # spans the boundary at x=1000
+
+    assert len(captured) == 1
+    result = captured[0]
+    assert (result.width(), result.height()) == (400, 200)
+    assert left.grab_calls == [(800, 100, 200, 200)]
+    assert right.grab_calls == [(0, 100, 200, 200)]
+    overlay.close()
+
+
+def test_CAP_11_grab_translates_a_negative_coordinate_overlay_origin(qapp, monkeypatch):
+    """Issue #1, as reported: a secondary screen to the left of the primary
+    gives the overlay a negative-coordinate origin, which must be added back
+    in before grabbing, not treated as if it were global (0, 0)."""
+    from capture import ScreenshotOverlay
+
+    overlay = ScreenshotOverlay()
+    primary = _StubScreen(QRect(0, 0, 1920, 1080), "red")
+    secondary = _StubScreen(QRect(-1920, 0, 1920, 1080), "green")
+    monkeypatch.setattr(QApplication, "screens", staticmethod(lambda: [primary, secondary]))
+    monkeypatch.setattr(QApplication, "primaryScreen", staticmethod(lambda: primary))
+    # The overlay covers the whole virtual desktop, whose origin is the
+    # secondary screen's top-left - exactly what activate() would set.
+    overlay.setGeometry(QRect(-1920, 0, 3840, 1080))
+
+    captured: list[QPixmap] = []
+    overlay.capture_ready.connect(captured.append)
+    # Local (0, 100) is the overlay's own top-left plus 100 - global (-1920, 100).
+    overlay._grab(QRect(0, 100, 200, 150))
+
+    assert len(captured) == 1
+    assert secondary.grab_calls == [(0, 100, 200, 150)], \
+        "the selection should have been grabbed from the secondary, at its own local origin"
+    assert primary.grab_calls == [], "the primary must not be grabbed for a selection entirely on the secondary"
+    overlay.close()
 
 
 def test_REC_05_stopping_assembles_the_frames_into_a_single_mp4(qapp, monkeypatch, tmp_path):

@@ -7,8 +7,10 @@ import time
 from pathlib import Path
 
 from PySide6.QtCore import QObject, QPoint, QRect, QSize, Qt, QTimer, Signal
-from PySide6.QtGui import QColor, QImage, QPixmap
+from PySide6.QtGui import QColor, QImage, QPainter, QPixmap
 from PySide6.QtWidgets import QApplication, QRubberBand, QWidget
+
+from screen_geometry import overlay_local_to_global, plan_capture
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -133,10 +135,47 @@ class ScreenshotOverlay(QWidget):
     # ── Private ─────────────────────────────────────────────────────────────
 
     def _grab(self, rect: QRect) -> None:
-        pixmap = QApplication.primaryScreen().grabWindow(
-            0, rect.x(), rect.y(), rect.width(), rect.height()
-        )
-        self.capture_ready.emit(pixmap)
+        """Grab the selected region from whichever screen(s) it actually falls on.
+
+        `rect` is in overlay-widget coordinates; the overlay is placed at the
+        virtual desktop's origin (see activate()), so this has to be
+        translated to global coordinates - and then back to screen-local
+        coordinates for grabWindow() - before it means anything. A selection
+        spanning two screens is composited from every intersecting screen
+        rather than clamped to one, so a wide selection is never silently
+        truncated to whichever screen holds the most of it.
+        """
+        screens = QApplication.screens()
+        geometries = [screen.geometry() for screen in screens]
+        virtual_origin = self.geometry().topLeft()
+        global_rect = overlay_local_to_global(rect, virtual_origin)
+        pieces = plan_capture(global_rect, geometries)
+
+        if not pieces:
+            # The selection touched no known screen - should not happen for a
+            # real drag on a real overlay, but emit something rather than
+            # nothing.
+            pixmap = QApplication.primaryScreen().grabWindow(
+                0, rect.x(), rect.y(), rect.width(), rect.height()
+            )
+            self.capture_ready.emit(pixmap)
+            return
+
+        result = QPixmap(global_rect.size())
+        result.fill(Qt.GlobalColor.transparent)
+        painter = QPainter(result)
+        for piece in pieces:
+            screen = screens[piece.screen_index]
+            local = piece.screen_local_rect
+            grabbed = screen.grabWindow(0, local.x(), local.y(), local.width(), local.height())
+            # Drawing into a fixed logical-pixel destination rect - rather
+            # than at the grabbed pixmap's own size - is what accounts for
+            # that screen's devicePixelRatio: grabWindow() already tags the
+            # returned pixmap with it, and QPainter scales accordingly.
+            painter.drawPixmap(QRect(piece.dest, local.size()), grabbed, grabbed.rect())
+        painter.end()
+
+        self.capture_ready.emit(result)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -181,6 +220,7 @@ class FrameRecorder(QObject):
         self._count = 0
         self._dropped = 0
         self._stamp = 0
+        self._screen = None
 
     # ── Public ──────────────────────────────────────────────────────────────
 
@@ -198,7 +238,17 @@ class FrameRecorder(QObject):
     def seconds_recorded(self) -> float:
         return self._count / self._FPS
 
-    def start(self) -> None:
+    def start(self, screen=None) -> None:
+        """Begin recording `screen`, or the primary display if none is given.
+
+        Previously always recorded QApplication.primaryScreen(), so a tester
+        recording a repro on their secondary monitor silently got footage of
+        the primary instead - with nothing to hint at it until playback.
+        Recording pins the screen once at start rather than re-querying it
+        every frame, so a window dragged between screens mid-recording does
+        not make the recording jump displays underneath the user.
+        """
+        self._screen = screen if screen is not None else QApplication.primaryScreen()
         self._stamp = int(time.time())
         self._frames_dir = _recordings_dir() / f"test-recording-{self._stamp}_frames"
         self._frames_dir.mkdir(parents=True, exist_ok=True)
@@ -223,7 +273,7 @@ class FrameRecorder(QObject):
             self.stop()
             return
 
-        screen = QApplication.primaryScreen()
+        screen = self._screen
         if screen is None:
             return
 

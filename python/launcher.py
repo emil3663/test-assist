@@ -309,7 +309,7 @@ class FloatingLauncher(QWidget):
         QTimer.singleShot(220, self._grab_full_capture)
 
     def _grab_full_capture(self) -> None:
-        pixmap = QApplication.primaryScreen().grabWindow(0)
+        pixmap = self._current_screen().grabWindow(0)
         self._on_capture_ready(pixmap)
 
     def _on_capture_ready(self, pixmap: QPixmap) -> None:
@@ -330,7 +330,7 @@ class FloatingLauncher(QWidget):
             self._start_recording()
 
     def _start_recording(self) -> None:
-        self._recorder.start()
+        self._recorder.start(self._current_screen())
         self._rec_seconds = 0
         self._rec_timer.start(1000)
         self._btn_capture.setText("■  Stop Recording")
@@ -441,7 +441,7 @@ class FloatingLauncher(QWidget):
                 return
             self.move(event.globalPosition().toPoint() - self._drag_pos)
             # Auto-dock only when the window is dragged flush to the right screen edge
-            geom = QApplication.primaryScreen().availableGeometry()
+            geom = self._current_screen().availableGeometry()
             if self.x() + self.width() >= geom.right():
                 self._dock_right()
         super().mouseMoveEvent(event)
@@ -498,8 +498,21 @@ class FloatingLauncher(QWidget):
 
     # ── Positioning ──────────────────────────────────────────────────────────
 
+    def _current_screen(self):
+        """The screen this widget is actually on, not always the primary.
+
+        Positioning and full-screen capture used to measure/grab
+        primaryScreen() unconditionally, so docking, auto-dock and
+        full-screen capture all landed on the wrong display whenever the
+        launcher was on a secondary monitor. screenAt() returns None when
+        the point is off every screen (e.g. mid-drag before layout settles),
+        hence the primary fallback.
+        """
+        screen = QApplication.screenAt(self.frameGeometry().center())
+        return screen if screen is not None else QApplication.primaryScreen()
+
     def _position_top_right(self) -> None:
-        geom = QApplication.primaryScreen().availableGeometry()
+        geom = self._current_screen().availableGeometry()
         self.adjustSize()
         self.move(geom.right() - self.width() - 20, geom.top() + 20)
 
@@ -508,7 +521,7 @@ class FloatingLauncher(QWidget):
         self._dock_panel.show()
         self.setFixedWidth(50)
         self.adjustSize()
-        geom = QApplication.primaryScreen().availableGeometry()
+        geom = self._current_screen().availableGeometry()
         y = geom.top() + max(20, (geom.height() - self.height()) // 2)
         self.move(geom.right() - self.width(), y)
 
