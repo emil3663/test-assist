@@ -10,27 +10,11 @@ from __future__ import annotations
 from PySide6.QtCore import QPoint, QRect
 
 from screen_geometry import (
-    overlay_local_to_global,
     plan_capture,
     screen_for_rect,
     screens_intersecting,
     to_screen_local,
 )
-
-
-# ── overlay_local_to_global ──────────────────────────────────────────────────
-
-def test_overlay_local_to_global_with_zero_origin_is_unchanged():
-    local = QRect(10, 20, 100, 80)
-    assert overlay_local_to_global(local, QPoint(0, 0)) == local
-
-
-def test_overlay_local_to_global_adds_a_negative_origin():
-    """The overlay sits at the virtual desktop's origin, which is negative on
-    either axis whenever a screen sits left of or above the primary."""
-    local = QRect(50, 50, 100, 80)
-    global_rect = overlay_local_to_global(local, QPoint(-1920, 0))
-    assert global_rect == QRect(-1870, 50, 100, 80)
 
 
 # ── screens_intersecting ─────────────────────────────────────────────────────

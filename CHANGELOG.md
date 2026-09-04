@@ -26,6 +26,20 @@ release; only tagged versions appear as releases.
   coordinate and mixed-size layouts are covered without a second monitor —
   the one thing that still needs real mixed-DPI hardware is whether the
   grabbed pixels come out the right *size*, tracked as Blocked (CAP-12).
+  - **That fix was necessary but not sufficient.** Real two-monitor hardware
+    proved the region-capture overlay never covered a second screen at all:
+    `activate()` called `showFullScreen()` after `setGeometry()`, and
+    `showFullScreen()` silently discards the requested geometry and sizes
+    the window to fullscreen on *a* screen instead — a second screen was
+    physically uncovered, not merely mis-grabbed once shown. The same
+    diagnostic run confirmed the coordinate translation above was already
+    correct. Fixed with plain `show()` (the window needs no fullscreen state
+    to cover what it's told to), mouse positions read via `globalPosition()`
+    throughout so the capture rect no longer depends on window geometry at
+    all, `virtualGeometry()` instead of `availableVirtualGeometry()` so a
+    taskbar can be selected, and any gap between mismatched screens excluded
+    from the dimmed selection area rather than silently yielding nothing
+    there. CAP-14 is the regression test.
 
 ### Added
 

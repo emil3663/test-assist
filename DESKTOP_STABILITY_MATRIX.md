@@ -1,7 +1,7 @@
 # 🔍 Test Assist — Desktop stability matrix
 
-**Version:** 1.2
-**Last updated:** 2026-09-03
+**Version:** 1.3
+**Last updated:** 2026-09-04
 **Applies to:** the PySide6 desktop build. The browser build has its own matrix
 in `STABILITY_MATRIX.md`.
 
@@ -9,9 +9,9 @@ in `STABILITY_MATRIX.md`.
 
 ## Why this document exists
 
-`DESKTOP_TEST_PLAN.md` says 129 of 134 cases are automated. That number is only
-worth anything if you can check what it covers and what it quietly does not.
-This document is that check.
+`DESKTOP_TEST_PLAN.md` says most of its cases are automated. That number is
+only worth anything if you can check what it covers and what it quietly does
+not. This document is that check.
 
 | Stability | Meaning |
 |---|---|
@@ -25,13 +25,13 @@ This document is that check.
 
 | | Count |
 |---|---|
-| Cases in `DESKTOP_TEST_PLAN.md` v1.7 | 151 |
-| Automated and passing | 145 |
+| Cases in `DESKTOP_TEST_PLAN.md` v1.8 | 154 |
+| Automated and passing | 148 |
 | Blocked, documented as manual | 6 |
-| Automated tests | 229 collected — 229 pass everywhere, no skips |
+| Automated tests | 230 collected — 230 pass everywhere, no skips |
 | Wall clock | about 2-3 seconds warm; the first run is slower while the bundled ffmpeg loads |
 
-**A green run is `229 passed, 0 skipped`, everywhere.** MP4 assembly used to
+**A green run is `230 passed, 0 skipped`, everywhere.** MP4 assembly used to
 depend on `opencv-python`, an optional dependency the product deliberately
 shipped without, which made REC-05 skip itself on CI, the packaged build, and
 any clean checkout. It now shells out to a bundled `ffmpeg` binary via
@@ -72,8 +72,28 @@ never block startup. The test isolation this suite depends on moved onto the
 same seam — see **A safety fix the suite needed** below for what that means
 and why it is asserted rather than assumed.
 
-Six defects were found by writing these tests, and a seventh was fixed
-following a user bug report rather than an internal test — see
+**The first multi-display fix was necessary but not sufficient.** Real
+two-monitor hardware proved `ScreenshotOverlay.activate()` called
+`showFullScreen()` after `setGeometry()`, and `showFullScreen()` silently
+discards the requested geometry and sizes the window to fullscreen on *a*
+screen instead - the overlay never covered a second screen at all, rather
+than merely mis-grabbing it once shown. The same diagnostic run confirmed the
+coordinate translation `screen_geometry.py` provides was already correct
+(every drag reported zero disagreement), so that work was not wasted, just
+incomplete on its own. Fixed by using plain `show()` (the window is already
+frameless and always-on-top, so it needs no fullscreen state to cover what
+it is told to), reading mouse positions via `globalPosition()` throughout so
+the capture rect has no dependency on window geometry left to get wrong, and
+excluding any gap between mismatched screens from the dimmed selection area
+rather than letting it silently yield nothing. CAP-14 is the regression test,
+reproducible with the one real screen the offscreen platform provides by
+mocking `virtualGeometry()` to look like the reported hardware while the
+real platform integration sizes `showFullScreen()` to the real screen
+regardless; verified to fail against the old code and pass against the fix.
+
+Six defects were found by writing these tests, one following a user bug
+report rather than an internal test, and one following real-hardware
+verification that went beyond what these tests alone could prove — see
 **Defects found** below.
 
 ---
@@ -111,7 +131,7 @@ These six are the manual pass to run against a release before trusting it.
 
 | Area | Cases | Stability | Notes |
 |---|---|---|---|
-| 3.1 Capture | 8 | Moderate | The grab is deferred by a 120 ms timer so the overlay can vanish first; the test waits for it rather than assuming. Offscreen grabs return a blank pixmap, so these prove the mechanism, not the pixels. CAP-10/11/13 substitute stub `QScreen` objects to prove `_grab()` picks the right screen(s) and composites correctly; CAP-12 (real mixed-DPI pixels) is Blocked. |
+| 3.1 Capture | 11 | Moderate | The grab is deferred by a 120 ms timer so the overlay can vanish first; the test waits for it rather than assuming. Offscreen grabs return a blank pixmap, so these prove the mechanism, not the pixels. CAP-10/11/13 substitute stub `QScreen` objects to prove `_grab()` picks the right screen(s) and composites correctly; CAP-12 (real mixed-DPI pixels) is Blocked. CAP-14 mocks `virtualGeometry()` and requires an explicit `processEvents()` call to observe the platform-level effect of `showFullScreen()` at all - asserting immediately after `activate()` would pass against the buggy code too, for the wrong reason. |
 | 3.2 Recording | 9 | Moderate | REC-05 shells out to a real bundled `ffmpeg` binary to assemble an mp4; REC-09 substitutes a stub screen to prove the recorder uses the screen pinned at `start()`, not `primaryScreen()`; the rest are deterministic. |
 | 3.3 Tools | 9 | Stable | Direct assertions on the annotation model. |
 | 3.4 Crop | 4 | Stable | |
@@ -255,6 +275,26 @@ returning less than the user selected is exactly the class of bug this
 removes. What is not covered: the actual pixel-level correctness of a grab on
 real mixed-DPI hardware - CAP-12, listed as Blocked above.
 
+**8. The overlay never covered a second screen at all - defect 7 was
+necessary but not sufficient.** `ScreenshotOverlay.activate()` called
+`showFullScreen()` after `setGeometry()`; `showFullScreen()` is defined as
+fullscreen on *a* screen, so it silently discarded the requested virtual-
+desktop geometry and sized the window to one screen only. A second screen
+was not merely mis-grabbed, as defect 7's fix assumed - it was physically
+uncovered, unreachable to a click. Found by running a diagnostic overlay on
+real two-monitor hardware, which also confirmed the coordinate translation
+itself was already correct (every drag reported zero disagreement), so
+defect 7's fix was not wasted. Fixed by using plain `show()` instead - the
+window is already frameless and always-on-top, so no fullscreen state is
+needed to cover what it's told to - reading mouse positions via
+`globalPosition()` throughout so the capture rect no longer depends on
+window geometry at all, using `virtualGeometry()` rather than
+`availableVirtualGeometry()` so a taskbar can be selected, and excluding any
+gap between mismatched screens from the dimmed area rather than letting a
+selection there silently yield nothing. CAP-14 is the regression test,
+verified to fail against the old code and pass against the fix using only
+the one real screen the offscreen platform provides.
+
 ---
 
 ## The selection model
@@ -300,7 +340,7 @@ yet on the packaged build.
 ```bash
 cd python
 pip install -r requirements.txt
-QT_QPA_PLATFORM=offscreen pytest -q      # 229 passed, about 2-3 seconds warm;
+QT_QPA_PLATFORM=offscreen pytest -q      # 230 passed, about 2-3 seconds warm;
                                           # slower on the first run while the
                                           # bundled ffmpeg loads
 ```

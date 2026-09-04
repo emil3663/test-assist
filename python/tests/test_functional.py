@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import pytest
-from PySide6.QtCore import QEvent, QPointF, QRect, QSize, Qt
+from PySide6.QtCore import QEvent, QPoint, QPointF, QRect, QSize, Qt
 from PySide6.QtGui import QColor, QImage, QKeyEvent, QPixmap
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication
@@ -1063,7 +1063,98 @@ def test_HIS_03b_a_small_but_valid_capture_is_not_deleted(qapp, isolate_home):
 
 # ── 3.1 Capture overlay ──────────────────────────────────────────────────────
 
+def test_CAP_14_activate_keeps_the_geometry_it_was_given(qapp, monkeypatch):
+    """Regression test for the root cause behind issue #1's real-hardware
+    symptoms: showFullScreen() silently discards whatever geometry
+    setGeometry() just requested and sizes the window to fullscreen on *a*
+    screen instead - the real, single one the underlying platform actually
+    has, not the virtual desktop `virt` describes. On real two-monitor
+    hardware that left one screen not merely mis-grabbed but genuinely
+    unreachable - you could not even click on it.
+
+    Reproducible with the one real screen the offscreen platform provides:
+    virtualGeometry() is mocked to look like the reported two-monitor
+    hardware, while showFullScreen()'s platform integration sizes the window
+    to the real, unmocked screen regardless - exactly the divergence it
+    produces on genuine multi-monitor hardware. This fails against
+    showFullScreen() and passes against plain show()."""
+    from PySide6.QtGui import QScreen
+    from capture import ScreenshotOverlay
+
+    reported_hardware = QRect(-1920, 0, 3840, 1032)
+    monkeypatch.setattr(QScreen, "virtualGeometry", lambda self: reported_hardware)
+
+    overlay = ScreenshotOverlay()
+    overlay.activate()
+    # showFullScreen()'s platform-level override is applied while processing
+    # the resulting show/resize events, not synchronously inside the call -
+    # asserting immediately after activate() would pass against the buggy
+    # code too, for the wrong reason (the requested geometry hadn't been
+    # overridden *yet*, not because it was never overridden).
+    qapp.processEvents()
+
+    assert overlay.geometry() == reported_hardware, (
+        f"requested {reported_hardware} but the overlay reports "
+        f"{overlay.geometry()} - it is not covering the full virtual desktop"
+    )
+    overlay.hide()
+
+
+def test_CAP_14b_activate_stores_the_origin_and_hiding_does_not_change_it(qapp, monkeypatch):
+    """_grab's correctness depends on the mouse-event pipeline using the
+    origin captured at activate() time, not geometry read back from the
+    widget after it has been hidden - a hidden or restored window is not
+    guaranteed to still report the geometry it had while shown."""
+    from PySide6.QtGui import QScreen
+    from capture import ScreenshotOverlay
+
+    reported_hardware = QRect(-1920, 0, 3840, 1032)
+    monkeypatch.setattr(QScreen, "virtualGeometry", lambda self: reported_hardware)
+
+    overlay = ScreenshotOverlay()
+    overlay.activate()
+
+    assert overlay._virtual_origin == reported_hardware.topLeft()
+
+    overlay.hide()
+
+    assert overlay._virtual_origin == reported_hardware.topLeft(), \
+        "hiding the overlay must not change the origin the capture pipeline relies on"
+
+
+def test_CAP_15_the_dead_zone_between_mismatched_screens_is_not_dimmed(qapp, monkeypatch):
+    """A virtual-desktop rectangle can include gaps that belong to no screen
+    at all - e.g. a laptop panel and an external monitor of different
+    heights, top-aligned. Dimming that gap the same as a real, selectable
+    area invites a drag that silently yields nothing there; it must be
+    visibly excluded before the user commits to a selection."""
+    from capture import ScreenshotOverlay
+
+    laptop = QRect(-1920, 0, 1536, 864)      # logical x: -1920..-384
+    external = QRect(0, 0, 1920, 1080)       # logical x: 0..1920
+    monkeypatch.setattr(
+        QApplication, "screens", staticmethod(lambda: [_StubScreen(laptop, "black"), _StubScreen(external, "black")]),
+    )
+
+    overlay = ScreenshotOverlay()
+    overlay._virtual_origin = QPoint(-1920, 0)
+
+    region = overlay._covered_region()
+
+    dead_zone = overlay._to_local(QPoint(-300, 100))   # -384 < -300 < 0: no screen here
+    on_laptop = overlay._to_local(QPoint(-1000, 100))
+    on_external = overlay._to_local(QPoint(500, 100))
+
+    assert not region.contains(dead_zone), "the gap between the two screens must not be dimmed"
+    assert region.contains(on_laptop)
+    assert region.contains(on_external)
+    overlay.close()
+
+
 def _overlay_mouse(x, y, button=Qt.MouseButton.LeftButton):
+    """position() and globalPosition() coincide here because these simple
+    tests never call activate() - the overlay's virtual origin stays the
+    default (0, 0), same as a real single-screen desktop."""
     @dataclass
     class _E:
         _x: float
@@ -1072,10 +1163,36 @@ def _overlay_mouse(x, y, button=Qt.MouseButton.LeftButton):
         def position(self):
             return QPointF(self._x, self._y)
 
+        def globalPosition(self):
+            return QPointF(self._x, self._y)
+
         def button(self):
             return button
 
     return _E(x, y)
+
+
+def _overlay_drag_mouse(local_x, local_y, virtual_origin: QPoint, button=Qt.MouseButton.LeftButton):
+    """A mouse-event stub with independent local and global positions, as a
+    real drag reports them once the overlay's top-left sits away from
+    (0, 0) - exactly the case activate() produces on a real multi-monitor
+    desktop. Proves _grab is driven by globalPosition(), not derived from
+    window geometry read back out of the widget."""
+    global_x = local_x + virtual_origin.x()
+    global_y = local_y + virtual_origin.y()
+
+    @dataclass
+    class _E:
+        def position(self):
+            return QPointF(local_x, local_y)
+
+        def globalPosition(self):
+            return QPointF(global_x, global_y)
+
+        def button(self):
+            return button
+
+    return _E()
 
 
 def test_CAP_01_dragging_a_region_emits_a_capture(qapp):
@@ -1168,10 +1285,10 @@ def test_CAP_10_and_13_grab_composites_a_selection_spanning_two_screens(qapp, mo
     right = _StubScreen(QRect(1000, 0, 1000, 800), "blue")
     monkeypatch.setattr(QApplication, "screens", staticmethod(lambda: [left, right]))
     monkeypatch.setattr(QApplication, "primaryScreen", staticmethod(lambda: left))
-    overlay.setGeometry(QRect(0, 0, 2000, 800))   # virtual origin (0, 0)
 
     captured: list[QPixmap] = []
     overlay.capture_ready.connect(captured.append)
+    # _grab takes an already-global rect - no overlay geometry involved.
     overlay._grab(QRect(800, 100, 400, 200))      # spans the boundary at x=1000
 
     assert len(captured) == 1
@@ -1182,10 +1299,13 @@ def test_CAP_10_and_13_grab_composites_a_selection_spanning_two_screens(qapp, mo
     overlay.close()
 
 
-def test_CAP_11_grab_translates_a_negative_coordinate_overlay_origin(qapp, monkeypatch):
-    """Issue #1, as reported: a secondary screen to the left of the primary
-    gives the overlay a negative-coordinate origin, which must be added back
-    in before grabbing, not treated as if it were global (0, 0)."""
+def test_CAP_11_a_negative_origin_overlay_still_grabs_the_secondary(qapp, monkeypatch):
+    """Issue #1, as reported, exercised end-to-end through the real mouse
+    handlers rather than by calling _grab() directly: a secondary screen to
+    the left of the primary gives the overlay a negative-coordinate origin.
+    Drags are read via globalPosition(), so the rect _grab receives is
+    already correct regardless of that origin - proving the fix, not just
+    the arithmetic screen_geometry.py was already covering."""
     from capture import ScreenshotOverlay
 
     overlay = ScreenshotOverlay()
@@ -1193,17 +1313,24 @@ def test_CAP_11_grab_translates_a_negative_coordinate_overlay_origin(qapp, monke
     secondary = _StubScreen(QRect(-1920, 0, 1920, 1080), "green")
     monkeypatch.setattr(QApplication, "screens", staticmethod(lambda: [primary, secondary]))
     monkeypatch.setattr(QApplication, "primaryScreen", staticmethod(lambda: primary))
-    # The overlay covers the whole virtual desktop, whose origin is the
-    # secondary screen's top-left - exactly what activate() would set.
-    overlay.setGeometry(QRect(-1920, 0, 3840, 1080))
+
+    # As activate() would set on this layout: the virtual desktop's origin
+    # is the secondary screen's top-left.
+    origin = QPoint(-1920, 0)
+    overlay._virtual_origin = origin
 
     captured: list[QPixmap] = []
     overlay.capture_ready.connect(captured.append)
-    # Local (0, 100) is the overlay's own top-left plus 100 - global (-1920, 100).
-    overlay._grab(QRect(0, 100, 200, 150))
+
+    overlay.mousePressEvent(_overlay_drag_mouse(0, 100, origin))
+    overlay.mouseMoveEvent(_overlay_drag_mouse(200, 250, origin))
+    overlay.mouseReleaseEvent(_overlay_drag_mouse(200, 250, origin))
+    QTest.qWait(300)
 
     assert len(captured) == 1
-    assert secondary.grab_calls == [(0, 100, 200, 150)], \
+    # QRect(point, point) is Qt's inclusive-corner constructor, hence 201x151
+    # rather than 200x150 - pre-existing behaviour, not part of this fix.
+    assert secondary.grab_calls == [(0, 100, 201, 151)], \
         "the selection should have been grabbed from the secondary, at its own local origin"
     assert primary.grab_calls == [], "the primary must not be grabbed for a selection entirely on the secondary"
     overlay.close()

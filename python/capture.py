@@ -3,15 +3,16 @@
 from __future__ import annotations
 
 import os
+import sys
 import time
 from pathlib import Path
 
 from PySide6.QtCore import QObject, QPoint, QRect, QSize, Qt, QTimer, Signal
-from PySide6.QtGui import QColor, QImage, QPainter, QPixmap
+from PySide6.QtGui import QColor, QImage, QPainter, QPixmap, QRegion
 from PySide6.QtWidgets import QApplication, QRubberBand, QWidget
 
 import paths
-from screen_geometry import overlay_local_to_global, plan_capture
+from screen_geometry import plan_capture
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -80,36 +81,83 @@ class ScreenshotOverlay(QWidget):
         self._rubber  = QRubberBand(QRubberBand.Shape.Rectangle, self)
         self._origin  = QPoint()
         self._active  = False
+        # The overlay's own top-left in global desktop coordinates, captured
+        # once when activate() actually shows it - see activate() for why
+        # this must not be re-read from self.geometry() later.
+        self._virtual_origin = QPoint()
 
     # ── Public ──────────────────────────────────────────────────────────────
 
     def activate(self) -> None:
-        """Cover all screens and ask the user to drag a selection."""
-        virt = QApplication.primaryScreen().availableVirtualGeometry()
+        """Cover the whole virtual desktop and ask the user to drag a selection.
+
+        showFullScreen() is fullscreen on *a* screen: it silently discards
+        whatever geometry setGeometry() just requested and collapses the
+        window onto whichever single screen Qt picks. On real multi-monitor
+        hardware that left every screen but one not merely mis-grabbed but
+        genuinely uncovered - you could not even click on it. The window is
+        already frameless and always-on-top, so plain show() after
+        setGeometry() covers exactly what it is told to; no fullscreen state,
+        and none of its side effects, is needed.
+
+        virtualGeometry() rather than availableVirtualGeometry(): the
+        available variant excludes taskbars, so a taskbar or notification
+        could not be selected at all - wrong for an evidence-capture tool.
+        """
+        virt = QApplication.primaryScreen().virtualGeometry()
         self.setGeometry(virt)
-        self.showFullScreen()
-        self.activateWindow()
+        self.show()
         self.raise_()
+        self.activateWindow()
+        self.setFocus()
+
+        if self.geometry() != virt:
+            # Should never happen after the fix above - if it does, the
+            # overlay is silently not covering what it was asked to, which
+            # is exactly this defect. Surfaced rather than assumed away.
+            print(
+                f"ScreenshotOverlay: requested geometry {virt} but the "
+                f"window reports {self.geometry()} - it is not covering the "
+                f"full virtual desktop.",
+                file=sys.stderr,
+            )
+
+        # Captured now, while the window is actually showing its real
+        # geometry: _grab runs after hide(), and a hidden or restored window
+        # is not guaranteed to still report the geometry it had while shown.
+        self._virtual_origin = self.geometry().topLeft()
 
     # ── Mouse events ────────────────────────────────────────────────────────
+    #
+    # Positions are tracked via event.globalPosition() throughout, not
+    # event.position(): the rect this produces is then already in the same
+    # space as QScreen.geometry(), so _grab needs no translation step at all
+    # and has no dependency on window geometry left to get wrong. Local
+    # (widget-relative) coordinates are derived from it only where Qt
+    # requires them - positioning the rubber band, a child widget.
+
+    def _to_local(self, global_point: QPoint) -> QPoint:
+        return global_point - self._virtual_origin
 
     def mousePressEvent(self, event) -> None:
         if event.button() == Qt.MouseButton.LeftButton:
-            self._origin = event.position().toPoint()
-            self._rubber.setGeometry(QRect(self._origin, QSize()))
+            self._origin = event.globalPosition().toPoint()
+            self._rubber.setGeometry(QRect(self._to_local(self._origin), QSize()))
             self._rubber.show()
             self._active = True
 
     def mouseMoveEvent(self, event) -> None:
         if self._active:
+            current = event.globalPosition().toPoint()
             self._rubber.setGeometry(
-                QRect(self._origin, event.position().toPoint()).normalized()
+                QRect(self._to_local(self._origin), self._to_local(current)).normalized()
             )
 
     def mouseReleaseEvent(self, event) -> None:
         if event.button() == Qt.MouseButton.LeftButton and self._active:
             self._active = False
-            rect = QRect(self._origin, event.position().toPoint()).normalized()
+            current = event.globalPosition().toPoint()
+            rect = QRect(self._origin, current).normalized()   # already global
             self._rubber.hide()
             self.hide()
             if rect.width() > 5 and rect.height() > 5:
@@ -126,29 +174,43 @@ class ScreenshotOverlay(QWidget):
 
     # ── Paint ───────────────────────────────────────────────────────────────
 
+    def _covered_region(self) -> QRegion:
+        """The part of the overlay that actually sits over a real screen.
+
+        A virtual-desktop rectangle can include gaps that belong to no
+        screen at all - e.g. two monitors of different heights sitting
+        top-aligned leaves a strip at the bottom of the shorter one. Dimming
+        that strip the same as a real, selectable area invites a selection
+        that silently yields nothing there; excluding it from the dim makes
+        the boundary visible before the user commits to a drag, rather than
+        only as a surprise in the result.
+        """
+        region = QRegion()
+        for screen in QApplication.screens():
+            region += QRegion(screen.geometry().translated(-self._virtual_origin))
+        return region
+
     def paintEvent(self, _event) -> None:
-        from PySide6.QtGui import QPainter
-        p = QPainter(self)
-        p.fillRect(self.rect(), QColor(0, 0, 0, 80))
-        p.end()
+        painter = QPainter(self)
+        painter.setClipRegion(self._covered_region())
+        painter.fillRect(self.rect(), QColor(0, 0, 0, 80))
+        painter.end()
 
     # ── Private ─────────────────────────────────────────────────────────────
 
-    def _grab(self, rect: QRect) -> None:
+    def _grab(self, global_rect: QRect) -> None:
         """Grab the selected region from whichever screen(s) it actually falls on.
 
-        `rect` is in overlay-widget coordinates; the overlay is placed at the
-        virtual desktop's origin (see activate()), so this has to be
-        translated to global coordinates - and then back to screen-local
-        coordinates for grabWindow() - before it means anything. A selection
-        spanning two screens is composited from every intersecting screen
-        rather than clamped to one, so a wide selection is never silently
-        truncated to whichever screen holds the most of it.
+        `global_rect` already arrives in global desktop coordinates (mouse
+        events are read via globalPosition() - see the mouse-event handlers
+        above), so no translation from overlay-widget coordinates happens
+        here. A selection spanning two screens is composited from every
+        intersecting screen rather than clamped to one, so a wide selection
+        is never silently truncated to whichever screen holds the most of
+        it.
         """
         screens = QApplication.screens()
         geometries = [screen.geometry() for screen in screens]
-        virtual_origin = self.geometry().topLeft()
-        global_rect = overlay_local_to_global(rect, virtual_origin)
         pieces = plan_capture(global_rect, geometries)
 
         if not pieces:
@@ -156,7 +218,7 @@ class ScreenshotOverlay(QWidget):
             # real drag on a real overlay, but emit something rather than
             # nothing.
             pixmap = QApplication.primaryScreen().grabWindow(
-                0, rect.x(), rect.y(), rect.width(), rect.height()
+                0, global_rect.x(), global_rect.y(), global_rect.width(), global_rect.height()
             )
             self.capture_ready.emit(pixmap)
             return

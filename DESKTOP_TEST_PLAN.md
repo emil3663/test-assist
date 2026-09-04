@@ -1,7 +1,7 @@
 # 🔍 Test Assist — Desktop Test Plan
 
-**Version:** 1.7
-**Last updated:** 2026-09-03
+**Version:** 1.8
+**Last updated:** 2026-09-04
 **Status:** In active development
 **Applies to:** the PySide6 desktop build under `python/`. The browser build has
 its own plan in `TEST_PLAN.md`.
@@ -71,6 +71,13 @@ and why — read it before treating a ✅ as proof of more than it is.
 
 ### 3.1 Capture
 
+Real two-monitor hardware diagnosed a second, more severe root cause behind
+issue #1: `ScreenshotOverlay.activate()` called `showFullScreen()` after
+`setGeometry()`, and `showFullScreen()` silently discards the requested
+geometry and sizes the window to one screen only - the overlay never covered
+a second screen at all, rather than merely mis-grabbing it. CAP-14 is the
+regression test for that; see `docs/overlay-geometry-fix-brief.md`.
+
 | ID | Test | Expected Result | Status |
 |----|------|-----------------|--------|
 | CAP-01 | Drag a region on the capture overlay | Selected region is grabbed and opens in the editor | ✅ |
@@ -81,6 +88,9 @@ and why — read it before treating a ✅ as proof of more than it is.
 | CAP-11 | Secondary screen to the left of or above the primary (negative coordinates) | The overlay's virtual-desktop origin is translated correctly; no offset onto the wrong area | ✅ |
 | CAP-12 | Mixed-DPI layout (screens at different scale factors) | The right pixels come back at the right size from a real high-DPI secondary | 🚫 |
 | CAP-13 | Selection spanning two screens | Composited from both screens rather than clamped to one - no part of the selection is silently dropped | ✅ |
+| CAP-14 | `activate()` on a multi-screen virtual desktop | The overlay keeps the requested geometry - it does not collapse onto a single screen the way `showFullScreen()` does | ✅ |
+| CAP-14b | Overlay origin after `activate()`, then hide | Stored once at activate time; unchanged by hiding the window | ✅ |
+| CAP-15 | A gap between mismatched screens (e.g. different monitor heights) | Not dimmed as if it were selectable area | ✅ |
 
 ### 3.2 Screen Recording
 
