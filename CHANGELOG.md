@@ -34,6 +34,23 @@ release; only tagged versions appear as releases.
   `_grab()`. This also closes out CAP-12, previously Blocked pending real
   hardware — the DPI question it existed to test turned out fine; this was
   the actual defect underneath it.
+  - **That fix was itself incomplete: it only closed gaps along x.**
+    `plan_capture()` sorted pieces by `intersection.left()` and accumulated
+    x offsets unconditionally, which is right for screens side by side but
+    wrong for screens stacked one above the other — two screens sharing the
+    same x-range sort to an arbitrary order and still get packed
+    horizontally, reintroducing the same black-band failure on the other
+    axis. Reported with an exact repro: a selection across a screen at
+    `(0,-1080,1920,1080)` and one at `(0,0,1920,1080)` produced a 1600×1000
+    result half unpainted, instead of a fully-painted 800×1000 one.
+    `plan_capture()` now decides per-selection whether the intersecting
+    screens overlap in x (stacked, so it packs along y instead, preserving
+    x) or not (packs along x as before); `_grab()`'s result sizing was
+    generalized from a fixed `sum(widths)` to a `max(dest + size)` bounding
+    box on each axis so it stays correct regardless of which axis was
+    packed. Verified to fail against the prior code before the fix, and the
+    original four tests re-run unchanged to confirm the horizontal case was
+    untouched.
 - **Four small fixed-size editor buttons (About, zoom out, zoom in, Fit) drew
   as empty shapes.** The global `QPushButton` rule's 7px/14px padding left
   nowhere for a glyph to draw once a button was fixed at 24-28px square —

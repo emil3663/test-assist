@@ -94,19 +94,25 @@ def plan_capture(global_rect: QRect, screen_geometries: list[QRect]) -> list[Gra
     single-screen selection produces exactly one piece covering the whole
     rect, so nothing changes for the common case.
 
-    Pieces are placed adjacently along x, not at their true virtual-desktop
-    offset. A gap between screens (e.g. mismatched monitor heights leave a
-    band of virtual-desktop space belonging to no screen) would otherwise
-    show up in the result as an unpainted region, which every viewer renders
-    as a solid black band - the "math is right, output is unusable" failure
-    predicted when that gap was excluded from the overlay's dimmed region
-    rather than clamped (see ScreenshotOverlay._covered_region()). A tester
-    dragging a selection across two monitors is asking for both screens side
-    by side, not a coordinate-accurate map of a desktop with a hole in it.
+    Pieces are placed adjacently along whichever axis the screens are
+    actually separated on, not at their true virtual-desktop offset. A gap
+    between screens (e.g. mismatched monitor heights, or one stacked above
+    another) would otherwise show up in the result as an unpainted region,
+    which every viewer renders as a solid black band - the "math is right,
+    output is unusable" failure predicted when that gap was excluded from
+    the overlay's dimmed region rather than clamped (see
+    ScreenshotOverlay._covered_region()). A tester dragging a selection
+    across two monitors is asking for both screens side by side (or
+    stacked, if that is how they are arranged), not a coordinate-accurate
+    map of a desktop with a hole in it.
 
-    Vertical offsets keep their true relative position: screens at different
-    heights are a real relationship, not a gap, so the composite preserves
-    it rather than collapsing it the same way.
+    The axis choice: if every piece's x-range overlaps every other's, the
+    screens are stacked vertically relative to each other (or there is only
+    one), so the gap is closed in y and x keeps its true relative position.
+    Otherwise - separated in x, or separated on both axes (a genuinely
+    diagonal layout, where no single choice removes every gap) - the gap is
+    closed in x and y keeps its true relative position, as before. A single
+    piece is unaffected either way: both axes reduce to (0, 0) for it.
     """
     raw = []
     for index in screens_intersecting(global_rect, screen_geometries):
@@ -117,6 +123,20 @@ def plan_capture(global_rect: QRect, screen_geometries: list[QRect]) -> list[Gra
 
     if not raw:
         return []
+
+    stack_vertically = max(i.left() for _, _, i in raw) <= min(i.right() for _, _, i in raw)
+
+    if stack_vertically:
+        raw.sort(key=lambda item: item[2].top())
+        left_of_bounding_box = min(intersection.left() for _, _, intersection in raw)
+        pieces = []
+        y_cursor = 0
+        for index, geometry, intersection in raw:
+            local = to_screen_local(intersection, geometry)
+            dest = QPoint(intersection.left() - left_of_bounding_box, y_cursor)
+            pieces.append(GrabPiece(index, local, dest))
+            y_cursor += intersection.height()
+        return pieces
 
     raw.sort(key=lambda item: item[2].left())
     top_of_bounding_box = min(intersection.top() for _, _, intersection in raw)

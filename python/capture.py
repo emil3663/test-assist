@@ -224,10 +224,13 @@ class ScreenshotOverlay(QWidget):
             return
 
         # Sized from the pieces' own bounding box, not global_rect.size():
-        # plan_capture() places pieces adjacently rather than at their true
-        # virtual-desktop offset, so a gap between screens is closed rather
-        # than reappearing here as trailing unpainted (black) space.
-        result_width = sum(piece.screen_local_rect.width() for piece in pieces)
+        # plan_capture() places pieces adjacently along whichever axis the
+        # screens are separated on rather than at their true virtual-desktop
+        # offset, so a gap between screens is closed rather than reappearing
+        # here as unpainted (black) space. max(dest + size) per axis - not
+        # e.g. summing widths - is what stays correct regardless of which
+        # axis plan_capture chose to close.
+        result_width = max(piece.dest.x() + piece.screen_local_rect.width() for piece in pieces)
         result_height = max(piece.dest.y() + piece.screen_local_rect.height() for piece in pieces)
         result = QPixmap(result_width, result_height)
         result.fill(Qt.GlobalColor.transparent)

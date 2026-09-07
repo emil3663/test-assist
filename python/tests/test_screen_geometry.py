@@ -269,8 +269,10 @@ def test_plan_capture_single_screen_is_unaffected_by_the_gap_fix():
 
 
 def test_plan_capture_gap_fix_preserves_true_vertical_offset():
-    """The gap fix only collapses x. Screens at different heights - a real
-    relationship, not a gap - keep their true relative vertical position."""
+    """These two screens are separated in x (side by side, no shared
+    x-range) - the gap-closing axis - so y keeps its true relative
+    position: screens at different heights are a real relationship, not a
+    gap to collapse."""
     upper = QRect(0, 0, 1000, 600)            # shorter screen, top-aligned
     lower = QRect(1000, 200, 1000, 800)       # taller screen, starts 200px lower
     selection = QRect(800, 0, 400, 900)       # spans both, well past either's bottom
@@ -281,6 +283,81 @@ def test_plan_capture_gap_fix_preserves_true_vertical_offset():
     # The lower screen's piece starts 200px further down than the upper's,
     # matching their true geometry - not reset to a shared y=0.
     assert by_screen[1].dest.y() - by_screen[0].dest.y() == 200
+
+
+# ── plan_capture: packing along whichever axis screens are separated on ─────
+#
+# DSP-04 (secondary above), reported after e201cdb: two screens stacked
+# vertically (same x-range, separated in y) were still packed side by side,
+# because plan_capture always accumulated x regardless of which axis the
+# screens were actually separated on. That reintroduces the exact black band
+# the commit exists to remove, just on the other axis.
+
+def test_DSP_04_secondary_directly_above_with_a_gap_stacks_vertically():
+    """The exact reported repro: same x-range, secondary above with a gap."""
+    upper = QRect(0, -1080, 1920, 1080)
+    lower = QRect(0, 0, 1920, 1080)
+    selection = QRect(200, -500, 800, 1000)   # spans the boundary at y=0
+
+    pieces = plan_capture(selection, [upper, lower])
+
+    assert len(pieces) == 2
+    by_screen = {p.screen_index: p for p in pieces}
+    assert by_screen[0].dest == QPoint(0, 0)
+    # Stacked directly beneath the first piece - its own height, not a
+    # virtual-desktop offset that would leave a gap between them.
+    assert by_screen[1].dest == QPoint(0, by_screen[0].screen_local_rect.height())
+    assert by_screen[1].dest == QPoint(0, 500)
+
+
+def test_DSP_04b_secondary_directly_below_with_a_gap_stacks_vertically():
+    upper = QRect(0, 0, 1920, 1080)
+    lower = QRect(0, 1200, 1920, 1080)        # 120px gap: 1080..1200
+    selection = QRect(100, 900, 500, 500)     # x: 900..1399, spans the gap
+
+    pieces = plan_capture(selection, [upper, lower])
+
+    assert len(pieces) == 2
+    by_screen = {p.screen_index: p for p in pieces}
+    assert by_screen[0].dest == QPoint(0, 0)
+    assert by_screen[1].dest == QPoint(0, by_screen[0].screen_local_rect.height())
+
+
+def test_plan_capture_result_bounding_box_is_fully_painted_when_stacked():
+    """The failure mode DSP-04 actually looked like: capture.py sizes the
+    result from max(dest + size) per axis, so a vertically-packed result
+    must not be wider than a single piece - that width would be unpainted
+    space either side, invisible in a geometry-only assertion but visible
+    as a black margin in the real output."""
+    upper = QRect(0, -1080, 1920, 1080)
+    lower = QRect(0, 0, 1920, 1080)
+    selection = QRect(200, -500, 800, 1000)
+
+    pieces = plan_capture(selection, [upper, lower])
+
+    result_width = max(p.dest.x() + p.screen_local_rect.width() for p in pieces)
+    result_height = max(p.dest.y() + p.screen_local_rect.height() for p in pieces)
+    assert (result_width, result_height) == (800, 1000)
+
+
+def test_plan_capture_diagonal_layout_is_pinned_not_incidental():
+    """Screens separated on both axes have no single gap-free answer.
+    Decision: pack horizontally (as for the plain side-by-side case) rather
+    than leave the choice to sort-order incidence - a real relationship
+    (the vertical offset) is preserved on top, exactly as the purely
+    horizontal case already does."""
+    primary = QRect(0, 0, 1000, 800)
+    secondary = QRect(1200, 900, 1000, 800)   # gap in x (1000..1200) and y (800..900)
+    selection = QRect(800, 700, 600, 400)     # x: 800..1399, y: 700..1099 - spans both gaps
+
+    pieces = plan_capture(selection, [primary, secondary])
+
+    assert len(pieces) == 2
+    by_screen = {p.screen_index: p for p in pieces}
+    assert by_screen[0].screen_local_rect == QRect(800, 700, 200, 100)
+    assert by_screen[0].dest == QPoint(0, 0)
+    assert by_screen[1].screen_local_rect == QRect(0, 0, 200, 200)
+    assert by_screen[1].dest == QPoint(200, 200)
 
 
 # ── is_within_dock_band (DSP-12/13/14) ──────────────────────────────────────

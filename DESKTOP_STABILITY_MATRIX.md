@@ -1,6 +1,6 @@
 # 🔍 Test Assist — Desktop stability matrix
 
-**Version:** 1.11
+**Version:** 1.12
 **Last updated:** 2026-09-07
 **Applies to:** the PySide6 desktop build. The browser build has its own matrix
 in `STABILITY_MATRIX.md`.
@@ -25,13 +25,13 @@ not. This document is that check.
 
 | | Count |
 |---|---|
-| Cases in `DESKTOP_TEST_PLAN.md` v1.15 | 168 |
-| Automated and passing | 163 |
+| Cases in `DESKTOP_TEST_PLAN.md` v1.16 | 170 |
+| Automated and passing | 165 |
 | Blocked, documented as manual | 5 |
-| Automated tests | 257 collected — 257 pass everywhere, no skips |
+| Automated tests | 262 collected — 262 pass everywhere, no skips |
 | Wall clock | about 2-3 seconds warm; the first run is slower while the bundled ffmpeg loads |
 
-**A green run is `257 passed, 0 skipped`, everywhere.** MP4 assembly used to
+**A green run is `262 passed, 0 skipped`, everywhere.** MP4 assembly used to
 depend on `opencv-python`, an optional dependency the product deliberately
 shipped without, which made REC-05 skip itself on CI, the packaged build, and
 any clean checkout. It now shells out to a bundled `ffmpeg` binary via
@@ -92,7 +92,7 @@ mocking `virtualGeometry()` to look like the reported hardware while the
 real platform integration sizes `showFullScreen()` to the real screen
 regardless; verified to fail against the old code and pass against the fix.
 
-Eleven defects have been found so far: six by writing these tests, one
+Twelve defects have been found so far: six by writing these tests, two
 following a user bug report, and four following real-hardware verification
 that went beyond what these tests alone could prove — see **Defects found**
 below.
@@ -127,9 +127,10 @@ CAP-12 (a capture spanning or landing on a real high-DPI secondary monitor)
 was on this list until 2026-09-07: exercised on real hardware, it turned up
 one defect, the gap between screens (defect 10), not a DPI-scaling problem -
 the pixels and screen ordering were already correct. Fixed by compositing
-adjacently (CAP-16, item 8), which turned the remaining risk into pure
-geometry the suite can actually reach, so CAP-12 moved off this list rather
-than staying Blocked for a risk that no longer exists.
+adjacently (CAP-16/17/18, items 8 and its follow-up - see defect 12), which
+turned the remaining risk into pure geometry the suite can actually reach,
+so CAP-12 moved off this list rather than staying Blocked for a risk that no
+longer exists.
 
 These five are the manual pass to run against a release before trusting it.
 
@@ -139,7 +140,7 @@ These five are the manual pass to run against a release before trusting it.
 
 | Area | Cases | Stability | Notes |
 |---|---|---|---|
-| 3.1 Capture | 12 | Moderate | The grab is deferred by a 120 ms timer so the overlay can vanish first; the test waits for it rather than assuming. Offscreen grabs return a blank pixmap, so these prove the mechanism, not the pixels. CAP-10/11/13 substitute stub `QScreen` objects to prove `_grab()` picks the right screen(s) and composites correctly. CAP-12 was exercised once on real mixed-DPI hardware (2026-09-07) rather than automated directly; what it found (the gap, not a DPI defect) is now covered by CAP-16's literal-layout tests. CAP-14 mocks `virtualGeometry()` and requires an explicit `processEvents()` call to observe the platform-level effect of `showFullScreen()` at all - asserting immediately after `activate()` would pass against the buggy code too, for the wrong reason. CAP-16 was verified to fail against the pre-fix true-offset arithmetic, both at the pure-geometry level and end-to-end through `_grab()`. |
+| 3.1 Capture | 14 | Moderate | The grab is deferred by a 120 ms timer so the overlay can vanish first; the test waits for it rather than assuming. Offscreen grabs return a blank pixmap, so these prove the mechanism, not the pixels. CAP-10/11/13 substitute stub `QScreen` objects to prove `_grab()` picks the right screen(s) and composites correctly. CAP-12 was exercised once on real mixed-DPI hardware (2026-09-07) rather than automated directly; what it found (the gap, not a DPI defect) is now covered by CAP-16/17/18's literal-layout tests. CAP-14 mocks `virtualGeometry()` and requires an explicit `processEvents()` call to observe the platform-level effect of `showFullScreen()` at all - asserting immediately after `activate()` would pass against the buggy code too, for the wrong reason. CAP-16/17 were each verified to fail against the pre-fix arithmetic they superseded, both at the pure-geometry level and end-to-end through `_grab()`; CAP-18 (diagonal) is a pinning test, not a regression test - the old code produced the same output for that layout by incidence, not by design. |
 | 3.2 Recording | 9 | Moderate | REC-05 shells out to a real bundled `ffmpeg` binary to assemble an mp4; REC-09 substitutes a stub screen to prove the recorder uses the screen pinned at `start()`, not `primaryScreen()`; the rest are deterministic. |
 | 3.3 Tools | 9 | Stable | Direct assertions on the annotation model. |
 | 3.4 Crop | 4 | Stable | |
@@ -341,13 +342,13 @@ clamped. Fixed by compositing the pieces adjacently instead of at their true
 virtual-desktop offset (`plan_capture()`, `docs/PRE_BUILD_HANDOVER.md` item
 8) - pieces are sorted left-to-right and their x offsets accumulated, so a
 gap of any width collapses to zero rather than reappearing as unpainted
-space. Vertical offsets keep their true relative position deliberately:
-screens at different heights are a real relationship, not a gap, so only x
-is collapsed. This also means CAP-12 no longer needs to stay Blocked: the
-`dest` arithmetic is now pure geometry, covered by literal-layout tests
-(CAP-16, `test_screen_geometry.py`) like the rest of the module, verified to
-fail against the old true-offset code both at the pure-geometry level and
-end-to-end through `_grab()`.
+space. Vertical offsets keep their true relative position, on the
+(mistaken, see defect 12) assumption that screens separated in y were
+always laid out side by side in x. This also means CAP-12 no longer needs
+to stay Blocked: the `dest` arithmetic is now pure geometry, covered by
+literal-layout tests (CAP-16, `test_screen_geometry.py`) like the rest of
+the module, verified to fail against the old true-offset code both at the
+pure-geometry level and end-to-end through `_grab()`.
 
 **11. INS-02 was exercised and failed: the launcher's X quits the whole
 application.** `_close_launcher()` calls `QApplication.instance().quit()`, so
@@ -372,6 +373,43 @@ docked to a monitor since unplugged (DSP-15, INS-06). Both fixes were
 verified to fail against the pre-fix code: `test_INS_02_close_button_hides_
 instead_of_quitting` monkeypatches `QApplication.quit` at the class level
 (this suite shares one real `QApplication`) rather than calling it for real.
+
+**12. Defect 10's fix (item 8, e201cdb) was itself incomplete: it only closed
+gaps along x.** `plan_capture()` sorted every intersecting piece by
+`intersection.left()` and accumulated x offsets unconditionally, which is
+correct when screens are arranged side by side but wrong when they are
+stacked - two screens sharing the same x-range (`(0,-1080,1920,1080)` above
+`(0,0,1920,1080)`) have the same `left()` for any centered selection, so
+sorting by it left their relative order to Python's stable-sort incidence
+rather than their actual vertical relationship, and packing them along x
+anyway reintroduced the exact black-band failure defect 10 exists to
+remove, just rotated onto the other axis. Reported by the user with an
+exact repro: selecting `(200,-500,800,1000)` across that pair produced dest
+`(0,0)`/`(800,500)` and a 1600×1000 result pixmap, half of it unpainted,
+where `(0,0)`/`(0,500)` and a fully-painted 800×1000 pixmap was expected -
+found by inspection of the arithmetic, not by the suite, since e201cdb's
+own tests only ever exercised horizontally-separated layouts.
+
+Fixed by making the axis choice explicit rather than assumed:
+`plan_capture()` now checks whether every piece's x-range overlaps every
+other's (`max(lefts) <= min(rights)`); if so the screens are stacked
+relative to each other, so it sorts by `top()` and accumulates y instead,
+preserving x. Otherwise - separated in x, or genuinely diagonal - it packs
+along x exactly as e201cdb did, unchanged. `_grab()`'s result-pixmap sizing
+was generalized to match: a uniform `max(dest + size)` bounding box per
+axis replaces the old x-specific `sum(widths)` formula, since summing is
+only correct for the axis actually being packed and the packed axis can
+now be either one. Verified against defect 10's regression by hand-tracing
+e201cdb's exact code against the vertical-stack repro (confirming it does
+produce `(0,0)`/`(800,500)`) before writing the fix, then confirming the
+new tests (`test_DSP_04_secondary_directly_above_with_a_gap_stacks_
+vertically`, `..._directly_below_...`) fail the same way against a reverted
+copy; the four tests e201cdb added for the horizontal case were re-run
+unchanged to confirm the fix does not disturb that branch. A diagonal
+layout (screens separated on both axes) has no gap-free answer either way,
+so `test_plan_capture_diagonal_layout_is_pinned_not_incidental` exists to
+pin the horizontal-default choice as deliberate rather than leave it to
+sort-order incidence, the same trap defect 12 itself was.
 
 ---
 
@@ -418,7 +456,7 @@ yet on the packaged build.
 ```bash
 cd python
 pip install -r requirements.txt
-QT_QPA_PLATFORM=offscreen pytest -q      # 257 passed, about 2-3 seconds warm;
+QT_QPA_PLATFORM=offscreen pytest -q      # 262 passed, about 2-3 seconds warm;
                                           # slower on the first run while the
                                           # bundled ffmpeg loads
 ```

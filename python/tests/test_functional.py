@@ -1424,6 +1424,32 @@ def test_DSP_08_grab_closes_the_gap_between_two_screens(qapp, monkeypatch):
     overlay.close()
 
 
+def test_DSP_04_grab_stacks_vertically_without_a_band(qapp, monkeypatch):
+    """DSP-04, reported after e201cdb: two screens stacked vertically (same
+    x-range, separated in y) were still packed side by side, since _grab()
+    always sized the result by summing widths - correct only for the
+    horizontal case. Composited pixmap must come out 800x1000 (the true
+    spanned area), not 1600x1000 with half of it unpainted."""
+    from capture import ScreenshotOverlay
+
+    overlay = ScreenshotOverlay()
+    upper = _StubScreen(QRect(0, -1080, 1920, 1080), "red")
+    lower = _StubScreen(QRect(0, 0, 1920, 1080), "blue")
+    monkeypatch.setattr(QApplication, "screens", staticmethod(lambda: [upper, lower]))
+    monkeypatch.setattr(QApplication, "primaryScreen", staticmethod(lambda: upper))
+
+    captured: list[QPixmap] = []
+    overlay.capture_ready.connect(captured.append)
+    overlay._grab(QRect(200, -500, 800, 1000))   # spans the boundary at y=0
+
+    assert len(captured) == 1
+    result = captured[0]
+    assert (result.width(), result.height()) == (800, 1000)
+    assert upper.grab_calls == [(200, 580, 800, 500)]
+    assert lower.grab_calls == [(200, 0, 800, 500)]
+    overlay.close()
+
+
 def test_CAP_11_a_negative_origin_overlay_still_grabs_the_secondary(qapp, monkeypatch):
     """Issue #1, as reported, exercised end-to-end through the real mouse
     handlers rather than by calling _grab() directly: a secondary screen to
