@@ -712,7 +712,78 @@ def test_launcher_build_ui_header_controls_have_expected_tooltips(qapp) -> None:
     assert launcher._btn_open_editor.toolTip() == "Open Editor"
     assert launcher._btn_check_updates.toolTip() == "Check for Updates"
     assert launcher._btn_dock_right.toolTip() == "Dock to right side"
-    assert launcher._btn_close.toolTip() == "Close Test Assist"
+    assert launcher._btn_close.toolTip() == "Hide to tray"
+    launcher.close()
+
+
+def test_INS_02_close_button_hides_instead_of_quitting(qapp, monkeypatch) -> None:
+    """PRE_BUILD_HANDOVER item 9, the most serious of this batch: the X used
+    to call QApplication.instance().quit(), taking the tray icon down with
+    it - Show Launcher became unreachable and nothing short of relaunching
+    the exe brought the app back. quit() is monkeypatched at the class level
+    (the pattern already used for QApplication.screenAt/screens elsewhere in
+    this file) rather than called for real, since this test shares the
+    session's one real QApplication with everything else."""
+    launcher = FloatingLauncher(_EditorStub())
+    launcher.show()
+    qapp.processEvents()
+
+    quit_calls = []
+    monkeypatch.setattr(QApplication, "quit", staticmethod(lambda: quit_calls.append(True)))
+
+    launcher._btn_close.click()
+    qapp.processEvents()
+
+    assert quit_calls == [], "closing the launcher must not quit the application"
+    assert launcher.isHidden()
+
+
+def test_restore_repositions_a_floating_launcher_left_on_a_since_removed_screen(qapp, monkeypatch) -> None:
+    """DSP-15: hidden while on a screen that is since gone (e.g. an external
+    monitor unplugged), Show Launcher must not just re-show it at a position
+    that is no longer reachable."""
+    launcher = FloatingLauncher(_EditorStub())
+    launcher.show()
+    launcher.hide()
+
+    monkeypatch.setattr(QApplication, "screenAt", staticmethod(lambda point: None))
+    calls = []
+    monkeypatch.setattr(launcher, "_position_top_right", lambda: calls.append("float"))
+
+    launcher.restore()
+
+    assert calls == ["float"]
+    assert not launcher.isHidden()
+    launcher.close()
+
+
+def test_restore_repositions_a_docked_launcher_left_on_a_since_removed_screen(qapp, monkeypatch) -> None:
+    launcher = FloatingLauncher(_EditorStub())
+    launcher.show()
+    launcher._dock_right()
+    launcher.hide()
+
+    monkeypatch.setattr(QApplication, "screenAt", staticmethod(lambda point: None))
+    calls = []
+    monkeypatch.setattr(launcher, "_dock_right", lambda: calls.append("dock"))
+
+    launcher.restore()
+
+    assert calls == ["dock"]
+    launcher.close()
+
+
+def test_restore_does_not_reposition_a_launcher_still_on_a_real_screen(qapp) -> None:
+    launcher = FloatingLauncher(_EditorStub())
+    launcher.show()
+    launcher.move(120, 130)
+    launcher.hide()
+
+    launcher.restore()
+
+    assert (launcher.x(), launcher.y()) == (120, 130), \
+        "restore() must not move a launcher that is still on a real screen"
+    assert not launcher.isHidden()
     launcher.close()
 
 

@@ -7,6 +7,18 @@ release; only tagged versions appear as releases.
 
 ### Fixed
 
+- **The launcher's X quit the whole application, taking the tray icon down
+  with it.** `_close_launcher()` called `QApplication.instance().quit()`, so
+  closing the floating widget made `Show Launcher` unreachable and left
+  nothing short of relaunching the exe to bring the app back — found by a
+  manual pass on real hardware (INS-02), where it was also the reason a
+  full-screen capture couldn't be taken at all: the app was gone, not
+  hidden. The X now hides to the tray; `Exit` in the tray menu is the only
+  full quit. While in there, `Show Launcher` and a tray-icon click now go
+  through a new `restore()` rather than `show()`/`raise_()` directly, which
+  repositions the launcher — docked or floating, matching how it was left —
+  if the screen it was on is no longer there, e.g. hidden while docked to a
+  monitor since unplugged. Both verified to fail against the pre-fix code.
 - **A selection spanning two screens left a solid black band between them.**
   Real mixed-DPI hardware confirmed the composited pixels and screen
   ordering were already correct — the defect was specifically the gap: a

@@ -1,6 +1,6 @@
 # 🔍 Test Assist — Desktop Test Plan
 
-**Version:** 1.14
+**Version:** 1.15
 **Last updated:** 2026-09-07
 **Status:** In active development
 **Applies to:** the PySide6 desktop build under `python/`. The browser build has
@@ -295,9 +295,11 @@ launcher back to the wrong display on undock.
 | ID | Test | Expected Result | Status |
 |----|------|-----------------|--------|
 | INS-01 | Launch a second instance | The running instance is focused; the second exits | ✅ |
-| INS-02 | Close the last window | The app stays alive in the tray | 🚫 |
+| INS-02 | Close the last window | The app stays alive in the tray. Still Blocked - needs a real tray and window manager - but what the close button is wired to is now covered separately (INS-05) | 🚫 |
 | INS-03 | `--version` | Prints the version and exits without a UI | ✅ |
 | INS-04 | Help | `help.html` resolves from both a source checkout and a build | ✅ |
+| INS-05 | The launcher's X (`_btn_close`) | Hides the launcher; does not quit the application. Exit in the tray menu is the only full quit | ✅ |
+| INS-06 | `restore()` (Show Launcher / tray click) after the launcher's screen is gone | Repositions - docked or floating, matching how it was left - rather than reappearing at an unreachable stale position | ✅ |
 
 ### 3.15 Packaging (built executable only)
 

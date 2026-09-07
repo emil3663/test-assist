@@ -1,6 +1,6 @@
 # 🔍 Test Assist — Desktop stability matrix
 
-**Version:** 1.10
+**Version:** 1.11
 **Last updated:** 2026-09-07
 **Applies to:** the PySide6 desktop build. The browser build has its own matrix
 in `STABILITY_MATRIX.md`.
@@ -25,13 +25,13 @@ not. This document is that check.
 
 | | Count |
 |---|---|
-| Cases in `DESKTOP_TEST_PLAN.md` v1.14 | 166 |
-| Automated and passing | 161 |
+| Cases in `DESKTOP_TEST_PLAN.md` v1.15 | 168 |
+| Automated and passing | 163 |
 | Blocked, documented as manual | 5 |
-| Automated tests | 253 collected — 253 pass everywhere, no skips |
+| Automated tests | 257 collected — 257 pass everywhere, no skips |
 | Wall clock | about 2-3 seconds warm; the first run is slower while the bundled ffmpeg loads |
 
-**A green run is `253 passed, 0 skipped`, everywhere.** MP4 assembly used to
+**A green run is `257 passed, 0 skipped`, everywhere.** MP4 assembly used to
 depend on `opencv-python`, an optional dependency the product deliberately
 shipped without, which made REC-05 skip itself on CI, the packaged build, and
 any clean checkout. It now shells out to a bundled `ffmpeg` binary via
@@ -117,7 +117,7 @@ Those are properties of a running desktop and remain manual.
 
 | ID | Case | Why it cannot be automated here |
 |----|------|--------------------------------|
-| INS-02 | The app stays alive in the tray when the last window closes | Needs a real tray and a running event loop with a window manager. `QSystemTrayIcon` availability varies by desktop environment and is absent in the offscreen platform. **Exercised manually 2026-09-07 and FAILED** — see defect 11 below. The tray is Blocked; what the close button is wired to is not, and will be covered by a test. |
+| INS-02 | The app stays alive in the tray when the last window closes | Needs a real tray and a running event loop with a window manager. `QSystemTrayIcon` availability varies by desktop environment and is absent in the offscreen platform. **Exercised manually 2026-09-07 and FAILED** — see defect 11 below. The tray itself stays Blocked; what the close button is wired to is now covered separately by INS-05/INS-06. |
 | PKG-03 | The pinned taskbar icon matches the tray icon | A property of the Windows shell, not of the process. |
 | PKG-04 | First launch on a machine without Python | Needs a clean Windows machine. The release workflow proves the exe runs on a runner, which is close but not the same as a machine that never had Python. |
 | PKG-05 | Windows file properties show product name and version | Readable only from a Windows build; the version resource is ignored on Linux, where the validation build runs. |
@@ -153,7 +153,7 @@ These five are the manual pass to run against a release before trusting it.
 | 3.11 History | 13 | Stable | HIS-05 back-dates a file's mtime rather than waiting. HIS-08 through HIS-12 (item 4) prove recordings appear in the gallery, get their own widget rather than being fed through `_SnapshotThumb`'s `QPixmap(path)` call, open externally rather than loading into the canvas, and are never touched by history pruning. |
 | 3.12 Launcher | 11 | Stable | LCH-07 asserts the always-on-top flag is set, not that the window is actually on top. LCH-08 substitutes `QApplication.screenAt()` to prove docking and positioning measure the screen the widget is actually on. DSP-12/13/14 were each verified to genuinely fail against the pre-fix code (reverted locally, run, restored) rather than trusted to discriminate on the strength of the arithmetic alone. |
 | 3.13 Shortcuts | 6 | Stable | KEY-05 exercises the real signal path rather than calling the setter directly. KEY-06 (the `help.html` pin, PRE_BUILD_HANDOVER item 5) is a deliberately partial mechanical check: the 9 tool-letter and 4 editing rows are compared against the real `QShortcut` objects `EditorWindow` registers, but the 3 launcher-only rows (Alt+P, Alt+Shift+P, Alt+V) are not pinned the same way. Those are inline `keyPressEvent` conditionals in `launcher.py`, not `QShortcut` objects - there is no non-hardcoded source of truth to check them against without either regex-parsing source (brittle to any refactor) or a second hardcoded list (which just moves the manual-sync burden rather than removing it). Their behaviour, not their documentation, is what `test_launcher_keyPressEvent_*` covers instead. |
-| 3.14 Lifecycle | 4 | Moderate | INS-01 binds a uniquely named local server so it cannot collide with a running app. |
+| 3.14 Lifecycle | 6 | Moderate | INS-01 binds a uniquely named local server so it cannot collide with a running app. INS-05 monkeypatches `QApplication.quit` at the class level (this suite shares one real `QApplication`) rather than calling it for real, verified to fail against the pre-fix code. INS-06 covers `restore()`'s off-screen repositioning, also verified to fail without it. |
 | 3.15 Packaging | 7 | Blocked (3) | PKG-01, PKG-02, PKG-06 and PKG-07 are automated. PKG-07's "True" assertion is also exercised for real, once, against an actual PyInstaller build - see below. |
 | 3.16 Update check | 12 | Stable (11) / Blocked (1) | UPD-01 through UPD-11 are pure-function and substituted-result tests, no network. UPD-12 (the real round-trip) is blocked. |
 | 3.17 Diagnostics | 4 | Stable | ABT-02's clipboard assertion is the same shape as issue #1's own diagnosis - proving a reporter's monitor layout is now visible without a code read. |
@@ -362,6 +362,17 @@ test asserting that activating `_btn_close` leaves the application running.
 Blocked-ness of the surrounding feature was allowed to excuse leaving the
 adjacent, testable half uncovered, which is its own lesson.
 
+Fixed: `_close_launcher()` now hides rather than quitting, so the tray icon
+and `Show Launcher` survive it; `Exit` in the tray menu is the only full
+quit (INS-05). While in there, `Show Launcher` and a tray-icon click were
+also changed to go through a new `restore()` rather than `show()`/`raise_()`
+directly, which repositions the launcher - docked or floating, matching how
+it was left - if the screen it was on is no longer there, e.g. hidden while
+docked to a monitor since unplugged (DSP-15, INS-06). Both fixes were
+verified to fail against the pre-fix code: `test_INS_02_close_button_hides_
+instead_of_quitting` monkeypatches `QApplication.quit` at the class level
+(this suite shares one real `QApplication`) rather than calling it for real.
+
 ---
 
 ## The selection model
@@ -407,7 +418,7 @@ yet on the packaged build.
 ```bash
 cd python
 pip install -r requirements.txt
-QT_QPA_PLATFORM=offscreen pytest -q      # 253 passed, about 2-3 seconds warm;
+QT_QPA_PLATFORM=offscreen pytest -q      # 257 passed, about 2-3 seconds warm;
                                           # slower on the first run while the
                                           # bundled ffmpeg loads
 ```

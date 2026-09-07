@@ -56,8 +56,10 @@ def _setup_tray(app: QApplication, launcher: FloatingLauncher, editor: EditorWin
     open_editor = QAction("Open Editor", menu)
     quit_app = QAction("Exit", menu)
 
-    show_launcher.triggered.connect(launcher.show)
-    show_launcher.triggered.connect(launcher.raise_)
+    # restore(), not show()/raise_() directly: it repositions first if the
+    # launcher would otherwise reappear on a screen that is no longer there
+    # (hidden while docked, then that monitor unplugged - DSP-15).
+    show_launcher.triggered.connect(launcher.restore)
     open_editor.triggered.connect(editor.bring_forward)
     quit_app.triggered.connect(app.quit)
 
@@ -70,8 +72,7 @@ def _setup_tray(app: QApplication, launcher: FloatingLauncher, editor: EditorWin
 
     def _on_activate(reason):
         if reason == QSystemTrayIcon.ActivationReason.Trigger:
-            launcher.show()
-            launcher.raise_()
+            launcher.restore()
 
     tray.activated.connect(_on_activate)
     tray.show()

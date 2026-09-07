@@ -145,7 +145,7 @@ class FloatingLauncher(QWidget):
         self._btn_close.setFixedSize(26, 26)
         self._btn_close.setIcon(self._make_close_icon())
         self._btn_close.setIconSize(QSize(12, 12))
-        self._btn_close.setToolTip("Close Test Assist")
+        self._btn_close.setToolTip("Hide to tray")
         self._btn_close.setStyleSheet(self._style_icon_btn())
 
         header_row.addWidget(self._btn_open_editor)
@@ -447,7 +447,36 @@ class FloatingLauncher(QWidget):
         self._btn_video.setIconSize(QSize(18, 18))
 
     def _close_launcher(self) -> None:
-        QApplication.instance().quit()
+        """Hides to the tray rather than quitting.
+
+        This used to call QApplication.instance().quit(), which took the
+        tray icon down with it - Show Launcher became unreachable, and
+        nothing short of relaunching the exe brought the app back (INS-02).
+        Exit in the tray menu is the only full quit now.
+        """
+        self.hide()
+
+    def restore(self) -> None:
+        """Bring the launcher back from the tray - Show Launcher, and a
+        single click on the tray icon, both go through this rather than
+        show()/raise_() directly.
+
+        If the screen it was on is no longer there (hidden while docked to
+        a monitor since unplugged - DSP-15), reappearing at the stale
+        position would leave it genuinely unreachable, not just off the
+        visible edge of a screen that still exists. Reposition first in
+        that case, docked or floating according to how it was left.
+        """
+        if QApplication.screenAt(self.frameGeometry().center()) is None:
+            # isVisible() also reflects the (hidden) launcher's own
+            # visibility; isVisibleTo(self) checks _dock_panel's own state
+            # without that, which is what "docked or floating" needs here.
+            if self._dock_panel.isVisibleTo(self):
+                self._dock_right()
+            else:
+                self._position_top_right()
+        self.show()
+        self.raise_()
 
     # ── Drag-to-move ──────────────────────────────────────────────────────────
 
