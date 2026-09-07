@@ -1212,6 +1212,70 @@ def test_small_fixed_size_buttons_opt_into_the_shared_zero_padding_rule(qapp) ->
     editor.close()
 
 
+def _relative_luminance(hex_color: str) -> float:
+    hex_color = hex_color.lstrip("#")
+    r, g, b = (int(hex_color[i:i + 2], 16) / 255 for i in (0, 2, 4))
+
+    def linearise(channel: float) -> float:
+        return channel / 12.92 if channel <= 0.03928 else ((channel + 0.055) / 1.055) ** 2.4
+
+    r, g, b = linearise(r), linearise(g), linearise(b)
+    return 0.2126 * r + 0.7152 * g + 0.0722 * b
+
+
+def _contrast_ratio(hex_a: str, hex_b: str) -> float:
+    """WCAG 2.x contrast ratio between two colours, 1:1 (none) to 21:1 (max)."""
+    lighter, darker = sorted((_relative_luminance(hex_a), _relative_luminance(hex_b)), reverse=True)
+    return (lighter + 0.05) / (darker + 0.05)
+
+
+def _color_background_pairs(stylesheet: str) -> list[tuple[str, str, str]]:
+    """Every {...} rule block that sets both `color` and `background-color`
+    as literal hex values in the same block - the pairs a contrast check can
+    verify without a full CSS cascade resolver.
+
+    Declarations are matched by their exact property name (split on `;`),
+    not by a `color:` substring search - `border-color:` and
+    `background-color:` both contain that substring too.
+    """
+    import re
+
+    pairs = []
+    for selector, body in re.findall(r"([^{}]+)\{([^{}]*)\}", stylesheet):
+        color = background = None
+        for declaration in body.split(";"):
+            declaration = declaration.strip()
+            match = re.match(r"(color|background-color):\s*(#[0-9a-fA-F]{6})", declaration)
+            if not match:
+                continue
+            if match.group(1) == "color":
+                color = match.group(2)
+            else:
+                background = match.group(2)
+        if color and background:
+            pairs.append((selector.strip(), color, background))
+    return pairs
+
+
+def test_no_stylesheet_rule_sets_text_below_minimum_contrast() -> None:
+    """PRE_BUILD_HANDOVER item 3: QPushButton:disabled used a border token
+    (LINE_STRONG) as a text colour - measured 1.79:1 against its own
+    background, well under WCAG's 3:1 floor for large text/icons. A contrast
+    function catches the whole class of this mistake, not just the one rule
+    that happened to be reported."""
+    from theme import EDITOR_STYLE
+
+    pairs = _color_background_pairs(EDITOR_STYLE)
+    assert pairs, "test setup: expected at least one rule with both color and background-color"
+
+    failures = [
+        f"{selector}: {color} on {background} = {_contrast_ratio(color, background):.2f}:1"
+        for selector, color, background in pairs
+        if _contrast_ratio(color, background) < 3.0
+    ]
+    assert not failures, "contrast below the 3:1 minimum:\n" + "\n".join(failures)
+
+
 def test_theme_has_exactly_one_shared_rule_for_small_icon_buttons() -> None:
     import re
 

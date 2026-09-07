@@ -14,6 +14,14 @@ release; only tagged versions appear as releases.
   to set `padding: 0`, an accident rather than a pattern. Fixed as one
   shared rule via a dynamic property (`smallIconButton`) rather than four
   separate `#id` overrides.
+- **Disabled button text was unreadable.** `QPushButton:disabled` used a
+  border token (`LINE_STRONG`) as a text colour — 1.79:1 contrast against
+  its own background, well under WCAG's 3:1 floor for large text/icons.
+  Became visible once the layer buttons started disabling themselves
+  correctly when nothing is selected. Switched to `MUTED` (6.14:1). A new
+  contrast-checking test then caught a second, previously unreported
+  instance in the same class: `#btn_primary:hover`'s lighter background
+  dropped its white text to 2.59:1; toned down to keep it above 3:1.
 - **Region capture, full-screen capture, recording and the launcher's own
   positioning all read `primaryScreen()` unconditionally** (GitHub issue #1).
   On a laptop with an external monitor, dragging a selection on the secondary

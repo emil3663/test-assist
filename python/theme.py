@@ -57,7 +57,10 @@ QPushButton:checked {{
     background-color: rgba(124, 131, 253, 0.12);
 }}
 QPushButton:disabled {{
-    color: {LINE_STRONG};
+    /* LINE_STRONG is a border token, not a text colour - against BG_900 it
+    measured 1.79:1, well under WCAG's 3:1 floor for large text/icons.
+    MUTED is the token already used for regular body text and gives 6.14:1. */
+    color: {MUTED};
     border-color: {LINE};
     background-color: {BG_900};
 }}
@@ -67,8 +70,11 @@ QPushButton#btn_primary {{
     border-color: {ACCENT};
 }}
 QPushButton#btn_primary:hover {{
-    background-color: #9098fe;
-    border-color: #9098fe;
+    /* #9098fe (a bigger lighten) dropped white text to 2.59:1, below the
+    3:1 floor - found by the contrast test added for item 3, not reported
+    separately. This lighten is smaller specifically to stay above it. */
+    background-color: #7f86fd;
+    border-color: #7f86fd;
     color: #ffffff;
 }}
 QPushButton#btn_danger {{
