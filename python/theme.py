@@ -90,6 +90,16 @@ QPushButton#btn_help {{
     font-size: 15px;
     font-weight: 700;
 }}
+QPushButton[smallIconButton="true"] {{
+    /* The global QPushButton rule's 7px/14px padding leaves nowhere for a
+    glyph to draw once a button is fixed-size and small - e.g. 24-28px
+    square. #btn_help worked only because its own rule happens to set
+    padding: 0, which was an accident, not a pattern; every small icon
+    button now opts into this one shared rule via a dynamic property
+    instead of needing its own #id override. */
+    padding: 0;
+    font-size: 12px;
+}}
 QPushButton#btn_help:hover {{
     background-color: #2585e0;
     color: #ffffff;

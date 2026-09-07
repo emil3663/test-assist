@@ -7,6 +7,13 @@ release; only tagged versions appear as releases.
 
 ### Fixed
 
+- **Four small fixed-size editor buttons (About, zoom out, zoom in, Fit) drew
+  as empty shapes.** The global `QPushButton` rule's 7px/14px padding left
+  nowhere for a glyph to draw once a button was fixed at 24-28px square —
+  `#btn_help` was the only one that rendered, because its own rule happens
+  to set `padding: 0`, an accident rather than a pattern. Fixed as one
+  shared rule via a dynamic property (`smallIconButton`) rather than four
+  separate `#id` overrides.
 - **Region capture, full-screen capture, recording and the launcher's own
   positioning all read `primaryScreen()` unconditionally** (GitHub issue #1).
   On a laptop with an external monitor, dragging a selection on the secondary

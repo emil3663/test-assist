@@ -1196,6 +1196,32 @@ def test_ABT_03_about_button_is_reachable_from_the_toolbar(qapp) -> None:
     editor.close()
 
 
+def test_small_fixed_size_buttons_opt_into_the_shared_zero_padding_rule(qapp) -> None:
+    """PRE_BUILD_HANDOVER item 2: the global QPushButton rule's 7px/14px
+    padding leaves nowhere for a glyph to draw on a small fixed-size button -
+    About (28x28), zoom out/in (24x24 each) and Fit (24px tall) all drew as
+    empty shapes. Fixed as one systemic rule via a dynamic property, not four
+    separate #id overrides."""
+    editor = EditorWindow()
+    editor.show()
+    qapp.processEvents()
+
+    for button in (editor._about_btn, editor._btn_zoom_out, editor._btn_zoom_in, editor._btn_fit):
+        assert button.property("smallIconButton") is True, \
+            f"{button.objectName() or button.text()!r} does not opt into the shared small-icon-button rule"
+    editor.close()
+
+
+def test_theme_has_exactly_one_shared_rule_for_small_icon_buttons() -> None:
+    import re
+
+    from theme import EDITOR_STYLE
+
+    matches = re.findall(r'QPushButton\[smallIconButton="true"\]\s*\{([^}]*)\}', EDITOR_STYLE)
+    assert len(matches) == 1, "expected one shared rule, not one per button"
+    assert "padding: 0" in matches[0]
+
+
 def test_packaged_icon_exists_and_is_a_real_ico():
     """The taskbar icon ships with the build; a missing file falls back silently."""
     icon = Path(__file__).resolve().parents[2] / "assets" / "icon.ico"

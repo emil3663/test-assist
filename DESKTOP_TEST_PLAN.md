@@ -1,6 +1,6 @@
 # 🔍 Test Assist — Desktop Test Plan
 
-**Version:** 1.9
+**Version:** 1.10
 **Last updated:** 2026-09-07
 **Status:** In active development
 **Applies to:** the PySide6 desktop build under `python/`. The browser build has
@@ -353,6 +353,12 @@ install folder would be deleted by the documented update procedure. See
 | DAT-05 | Migration with no (or an empty) legacy folder | No-op | ✅ |
 | DAT-06 | Migration hits a permission or filesystem error | Swallowed; does not block startup; the item is left where it was | ✅ |
 | DAT-07 | "Open folder" after a recording finishes | Opens the actual containing folder — the mp4's parent, or the frame folder itself if encoding fell back | ✅ |
+
+### 3.19 Editor Chrome
+
+| ID | Test | Expected Result | Status |
+|----|------|-----------------|--------|
+| UI-01 | Small fixed-size buttons (About, zoom out/in, Fit) | Opt into a shared zero-padding rule rather than drawing as empty shapes | ✅ |
 
 ---
 
