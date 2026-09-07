@@ -213,6 +213,76 @@ def test_plan_capture_ignores_a_selection_touching_no_screen():
     assert plan_capture(QRect(5000, 5000, 100, 100), geometries) == []
 
 
+# ── plan_capture: closing the gap (PRE_BUILD_HANDOVER item 8) ───────────────
+#
+# DSP-08 (real hardware): a selection spanning laptop and external produced
+# a correct composite either side, but a solid black band ~384px wide sat
+# between them - virtual-desktop coordinate space belonging to no screen,
+# left unpainted. Decision: composite pieces adjacently (no gap), keeping
+# vertical offsets true, since screens at different heights are a real
+# relationship rather than an artefact to collapse.
+
+def test_DSP_08_a_gap_between_screens_is_closed_not_left_as_a_band():
+    primary = QRect(0, 0, 1000, 800)
+    secondary = QRect(1200, 0, 1000, 800)      # a 200px gap: 1000..1200 belongs to no screen
+    selection = QRect(800, 100, 600, 200)      # x: 800..1400, spans the gap
+
+    pieces = plan_capture(selection, [primary, secondary])
+
+    assert len(pieces) == 2
+    by_screen = {p.screen_index: p for p in pieces}
+    left, right = by_screen[0], by_screen[1]
+
+    assert left.screen_local_rect == QRect(800, 100, 200, 200)
+    assert left.dest == QPoint(0, 0)
+
+    # The second piece butts against the first - its own width, not the true
+    # 400px virtual-desktop offset that would leave the 200px gap unpainted.
+    assert right.screen_local_rect == QRect(0, 100, 200, 200)
+    assert right.dest == QPoint(left.screen_local_rect.width(), 0)
+    assert right.dest.x() == 200
+
+
+def test_plan_capture_abutting_screens_are_unaffected_by_the_gap_fix():
+    """Two screens with zero gap must produce the same result the true-offset
+    approach already gave - the gap-closing logic changes nothing when there
+    is no gap to close."""
+    primary = QRect(0, 0, 1000, 800)
+    secondary = QRect(1000, 0, 1000, 800)      # abuts exactly, no gap
+    selection = QRect(800, 100, 400, 200)
+
+    pieces = plan_capture(selection, [primary, secondary])
+
+    by_screen = {p.screen_index: p for p in pieces}
+    assert by_screen[0].dest == QPoint(0, 0)
+    assert by_screen[1].dest == QPoint(200, 0)
+
+
+def test_plan_capture_single_screen_is_unaffected_by_the_gap_fix():
+    geometries = [QRect(0, 0, 1920, 1080)]
+    selection = QRect(100, 100, 300, 200)
+
+    pieces = plan_capture(selection, geometries)
+
+    assert len(pieces) == 1
+    assert pieces[0].dest == QPoint(0, 0)
+
+
+def test_plan_capture_gap_fix_preserves_true_vertical_offset():
+    """The gap fix only collapses x. Screens at different heights - a real
+    relationship, not a gap - keep their true relative vertical position."""
+    upper = QRect(0, 0, 1000, 600)            # shorter screen, top-aligned
+    lower = QRect(1000, 200, 1000, 800)       # taller screen, starts 200px lower
+    selection = QRect(800, 0, 400, 900)       # spans both, well past either's bottom
+
+    pieces = plan_capture(selection, [upper, lower])
+
+    by_screen = {p.screen_index: p for p in pieces}
+    # The lower screen's piece starts 200px further down than the upper's,
+    # matching their true geometry - not reset to a shared y=0.
+    assert by_screen[1].dest.y() - by_screen[0].dest.y() == 200
+
+
 # ── is_within_dock_band (DSP-12/13/14) ──────────────────────────────────────
 #
 # Reported-hardware layout: laptop -1920..-384, external 0..1920. Dragging the

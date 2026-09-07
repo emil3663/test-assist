@@ -7,6 +7,21 @@ release; only tagged versions appear as releases.
 
 ### Fixed
 
+- **A selection spanning two screens left a solid black band between them.**
+  Real mixed-DPI hardware confirmed the composited pixels and screen
+  ordering were already correct — the defect was specifically the gap: a
+  laptop and external monitor of different sizes leave virtual-desktop
+  coordinate space that belongs to no screen, which was allocated into the
+  result and never painted, and every viewer renders unpainted as black.
+  `plan_capture()` now places pieces adjacently — sorted left to right, x
+  offsets accumulated — instead of at their true virtual-desktop offset, so
+  a gap of any width collapses to zero. Vertical offsets keep their true
+  relative position deliberately: screens at different heights are a real
+  relationship, not a gap. Verified to fail against the old true-offset
+  arithmetic both at the pure-geometry level and end-to-end through
+  `_grab()`. This also closes out CAP-12, previously Blocked pending real
+  hardware — the DPI question it existed to test turned out fine; this was
+  the actual defect underneath it.
 - **Four small fixed-size editor buttons (About, zoom out, zoom in, Fit) drew
   as empty shapes.** The global `QPushButton` rule's 7px/14px padding left
   nowhere for a glyph to draw once a button was fixed at 24-28px square —

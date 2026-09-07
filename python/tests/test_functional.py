@@ -1395,6 +1395,35 @@ def test_CAP_10_and_13_grab_composites_a_selection_spanning_two_screens(qapp, mo
     overlay.close()
 
 
+def test_DSP_08_grab_closes_the_gap_between_two_screens(qapp, monkeypatch):
+    """DSP-08, real hardware: a selection spanning laptop and external
+    composited correctly either side but left a solid black band, ~384px
+    wide, between them - virtual-desktop space belonging to no screen,
+    allocated into the result and never painted. The composited pixmap must
+    be sized from the two pieces alone, not from the wider true span that
+    includes the gap."""
+    from capture import ScreenshotOverlay
+
+    overlay = ScreenshotOverlay()
+    left = _StubScreen(QRect(0, 0, 1000, 800), "red")
+    right = _StubScreen(QRect(1200, 0, 1000, 800), "blue")   # 200px gap: 1000..1200
+    monkeypatch.setattr(QApplication, "screens", staticmethod(lambda: [left, right]))
+    monkeypatch.setattr(QApplication, "primaryScreen", staticmethod(lambda: left))
+
+    captured: list[QPixmap] = []
+    overlay.capture_ready.connect(captured.append)
+    overlay._grab(QRect(800, 100, 600, 200))   # x: 800..1400, spans the gap
+
+    assert len(captured) == 1
+    result = captured[0]
+    # Two 200px-wide pieces, adjacent - not 600px, which would leave the
+    # 200px gap as trailing unpainted (black) space.
+    assert (result.width(), result.height()) == (400, 200)
+    assert left.grab_calls == [(800, 100, 200, 200)]
+    assert right.grab_calls == [(0, 100, 200, 200)]
+    overlay.close()
+
+
 def test_CAP_11_a_negative_origin_overlay_still_grabs_the_secondary(qapp, monkeypatch):
     """Issue #1, as reported, exercised end-to-end through the real mouse
     handlers rather than by calling _grab() directly: a secondary screen to

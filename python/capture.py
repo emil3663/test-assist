@@ -223,7 +223,13 @@ class ScreenshotOverlay(QWidget):
             self.capture_ready.emit(pixmap)
             return
 
-        result = QPixmap(global_rect.size())
+        # Sized from the pieces' own bounding box, not global_rect.size():
+        # plan_capture() places pieces adjacently rather than at their true
+        # virtual-desktop offset, so a gap between screens is closed rather
+        # than reappearing here as trailing unpainted (black) space.
+        result_width = sum(piece.screen_local_rect.width() for piece in pieces)
+        result_height = max(piece.dest.y() + piece.screen_local_rect.height() for piece in pieces)
+        result = QPixmap(result_width, result_height)
         result.fill(Qt.GlobalColor.transparent)
         painter = QPainter(result)
         for piece in pieces:

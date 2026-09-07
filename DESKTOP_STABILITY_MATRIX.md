@@ -1,6 +1,6 @@
 # 🔍 Test Assist — Desktop stability matrix
 
-**Version:** 1.9
+**Version:** 1.10
 **Last updated:** 2026-09-07
 **Applies to:** the PySide6 desktop build. The browser build has its own matrix
 in `STABILITY_MATRIX.md`.
@@ -25,13 +25,13 @@ not. This document is that check.
 
 | | Count |
 |---|---|
-| Cases in `DESKTOP_TEST_PLAN.md` v1.13 | 165 |
-| Automated and passing | 159 |
-| Blocked, documented as manual | 6 |
-| Automated tests | 248 collected — 248 pass everywhere, no skips |
+| Cases in `DESKTOP_TEST_PLAN.md` v1.14 | 166 |
+| Automated and passing | 161 |
+| Blocked, documented as manual | 5 |
+| Automated tests | 253 collected — 253 pass everywhere, no skips |
 | Wall clock | about 2-3 seconds warm; the first run is slower while the bundled ffmpeg loads |
 
-**A green run is `248 passed, 0 skipped`, everywhere.** MP4 assembly used to
+**A green run is `253 passed, 0 skipped`, everywhere.** MP4 assembly used to
 depend on `opencv-python`, an optional dependency the product deliberately
 shipped without, which made REC-05 skip itself on CI, the packaged build, and
 any clean checkout. It now shells out to a bundled `ffmpeg` binary via
@@ -57,8 +57,9 @@ fix is pure functions taking `QRect` values rather than `QScreen` objects
 covered by literal test geometries without a second monitor. A selection
 spanning two screens is composited from both rather than clamped to one -
 returning less than the user selected is exactly the class of bug this
-removes. What is not provable here: the actual grabbed pixels coming out the
-right size from a real high-DPI secondary. That is CAP-12, listed below.
+removes. Real mixed-DPI hardware later confirmed the pixels come out the
+right size (CAP-12, exercised 2026-09-07 - see **Defects found** below for
+what it actually turned up).
 
 **Data now lives somewhere update-safe, and the isolation moved with it
 (TA-202).** `~/.test-assist` was undiscoverable on Windows and, worse, the
@@ -91,10 +92,10 @@ mocking `virtualGeometry()` to look like the reported hardware while the
 real platform integration sizes `showFullScreen()` to the real screen
 regardless; verified to fail against the old code and pass against the fix.
 
-Six defects were found by writing these tests, one following a user bug
-report rather than an internal test, and one following real-hardware
-verification that went beyond what these tests alone could prove — see
-**Defects found** below.
+Eleven defects have been found so far: six by writing these tests, one
+following a user bug report, and four following real-hardware verification
+that went beyond what these tests alone could prove — see **Defects found**
+below.
 
 ---
 
@@ -112,7 +113,7 @@ Those are properties of a running desktop and remain manual.
 
 ---
 
-## The blocked six
+## The blocked five
 
 | ID | Case | Why it cannot be automated here |
 |----|------|--------------------------------|
@@ -120,10 +121,17 @@ Those are properties of a running desktop and remain manual.
 | PKG-03 | The pinned taskbar icon matches the tray icon | A property of the Windows shell, not of the process. |
 | PKG-04 | First launch on a machine without Python | Needs a clean Windows machine. The release workflow proves the exe runs on a runner, which is close but not the same as a machine that never had Python. |
 | PKG-05 | Windows file properties show product name and version | Readable only from a Windows build; the version resource is ignored on Linux, where the validation build runs. |
-| CAP-12 | A capture spanning or landing on a real high-DPI secondary monitor comes out the right size | Needs actual mixed-DPI hardware. The pure geometry functions are fully covered with literal mixed-size layouts (`test_screen_geometry.py`); what is not provable here is that `QScreen.grabWindow()`'s returned pixmap and the compositing `QPainter` produce correct pixels on a real scaled display, not just correct math on paper. **Exercised manually 2026-09-07:** the pixels and the ordering are correct; the unoccupied gap between the two screens is not — see defect 10 below. |
 | UPD-12 | A real round-trip to the GitHub API | Would make the suite depend on the network and GitHub's rate limits - "a suite that reaches the internet is a suite that fails on a train." `build.ps1` and the release workflow separately prove the packaged build *can* do TLS at all (PKG-07); nothing proves the request itself succeeds. |
 
-These six are the manual pass to run against a release before trusting it.
+CAP-12 (a capture spanning or landing on a real high-DPI secondary monitor)
+was on this list until 2026-09-07: exercised on real hardware, it turned up
+one defect, the gap between screens (defect 10), not a DPI-scaling problem -
+the pixels and screen ordering were already correct. Fixed by compositing
+adjacently (CAP-16, item 8), which turned the remaining risk into pure
+geometry the suite can actually reach, so CAP-12 moved off this list rather
+than staying Blocked for a risk that no longer exists.
+
+These five are the manual pass to run against a release before trusting it.
 
 ---
 
@@ -131,7 +139,7 @@ These six are the manual pass to run against a release before trusting it.
 
 | Area | Cases | Stability | Notes |
 |---|---|---|---|
-| 3.1 Capture | 11 | Moderate | The grab is deferred by a 120 ms timer so the overlay can vanish first; the test waits for it rather than assuming. Offscreen grabs return a blank pixmap, so these prove the mechanism, not the pixels. CAP-10/11/13 substitute stub `QScreen` objects to prove `_grab()` picks the right screen(s) and composites correctly; CAP-12 (real mixed-DPI pixels) is Blocked. CAP-14 mocks `virtualGeometry()` and requires an explicit `processEvents()` call to observe the platform-level effect of `showFullScreen()` at all - asserting immediately after `activate()` would pass against the buggy code too, for the wrong reason. |
+| 3.1 Capture | 12 | Moderate | The grab is deferred by a 120 ms timer so the overlay can vanish first; the test waits for it rather than assuming. Offscreen grabs return a blank pixmap, so these prove the mechanism, not the pixels. CAP-10/11/13 substitute stub `QScreen` objects to prove `_grab()` picks the right screen(s) and composites correctly. CAP-12 was exercised once on real mixed-DPI hardware (2026-09-07) rather than automated directly; what it found (the gap, not a DPI defect) is now covered by CAP-16's literal-layout tests. CAP-14 mocks `virtualGeometry()` and requires an explicit `processEvents()` call to observe the platform-level effect of `showFullScreen()` at all - asserting immediately after `activate()` would pass against the buggy code too, for the wrong reason. CAP-16 was verified to fail against the pre-fix true-offset arithmetic, both at the pure-geometry level and end-to-end through `_grab()`. |
 | 3.2 Recording | 9 | Moderate | REC-05 shells out to a real bundled `ffmpeg` binary to assemble an mp4; REC-09 substitutes a stub screen to prove the recorder uses the screen pinned at `start()`, not `primaryScreen()`; the rest are deterministic. |
 | 3.3 Tools | 9 | Stable | Direct assertions on the annotation model. |
 | 3.4 Crop | 4 | Stable | |
@@ -142,7 +150,7 @@ These six are the manual pass to run against a release before trusting it.
 | 3.8 Zoom | 6 | Stable | ZOM-05 asserts that coordinates are in image space, not widget space. |
 | 3.9 Undo/redo | 6 | Stable | |
 | 3.10 Export | 9 | Stable | `QFileDialog` is substituted, so these prove what is written, not that the dialog appears. |
-| 3.11 History | 8 | Stable | HIS-05 back-dates a file's mtime rather than waiting. |
+| 3.11 History | 13 | Stable | HIS-05 back-dates a file's mtime rather than waiting. HIS-08 through HIS-12 (item 4) prove recordings appear in the gallery, get their own widget rather than being fed through `_SnapshotThumb`'s `QPixmap(path)` call, open externally rather than loading into the canvas, and are never touched by history pruning. |
 | 3.12 Launcher | 11 | Stable | LCH-07 asserts the always-on-top flag is set, not that the window is actually on top. LCH-08 substitutes `QApplication.screenAt()` to prove docking and positioning measure the screen the widget is actually on. DSP-12/13/14 were each verified to genuinely fail against the pre-fix code (reverted locally, run, restored) rather than trusted to discriminate on the strength of the arithmetic alone. |
 | 3.13 Shortcuts | 6 | Stable | KEY-05 exercises the real signal path rather than calling the setter directly. KEY-06 (the `help.html` pin, PRE_BUILD_HANDOVER item 5) is a deliberately partial mechanical check: the 9 tool-letter and 4 editing rows are compared against the real `QShortcut` objects `EditorWindow` registers, but the 3 launcher-only rows (Alt+P, Alt+Shift+P, Alt+V) are not pinned the same way. Those are inline `keyPressEvent` conditionals in `launcher.py`, not `QShortcut` objects - there is no non-hardcoded source of truth to check them against without either regex-parsing source (brittle to any refactor) or a second hardcoded list (which just moves the manual-sync burden rather than removing it). Their behaviour, not their documentation, is what `test_launcher_keyPressEvent_*` covers instead. |
 | 3.14 Lifecycle | 4 | Moderate | INS-01 binds a uniquely named local server so it cannot collide with a running app. |
@@ -150,6 +158,7 @@ These six are the manual pass to run against a release before trusting it.
 | 3.16 Update check | 12 | Stable (11) / Blocked (1) | UPD-01 through UPD-11 are pure-function and substituted-result tests, no network. UPD-12 (the real round-trip) is blocked. |
 | 3.17 Diagnostics | 4 | Stable | ABT-02's clipboard assertion is the same shape as issue #1's own diagnosis - proving a reporter's monitor layout is now visible without a code read. |
 | 3.18 Data Locations | 7 | Stable | `QStandardPaths.writableLocation` is substituted, not the real Windows API, so these prove the resolution and migration logic; they do not prove `Documents\Test Assist\` looks right in actual Windows Explorer. |
+| 3.19 Editor Chrome | 2 | Stable | UI-01/UI-02 (items 2-3) check the stylesheet's own text, not rendered pixels - they prove no rule sets a sub-3:1-contrast colour or omits the shared small-icon-button rule, not that a button looks right on screen. |
 
 ---
 
@@ -328,10 +337,17 @@ coordinate space belonging to no screen. `_grab()` allocates the result at
 emits no piece for the dead zone, and every viewer renders transparent as
 black. The math is right and the output is unusable — the failure mode
 predicted when the dead zone was excluded from the dimmed region rather than
-clamped. Being fixed by compositing the pieces adjacently (see
-`docs/PRE_BUILD_HANDOVER.md` item 8), which also means CAP-12 stops being a
-case the suite cannot reach: the new `dest` arithmetic is pure geometry and
-gets literal-layout tests like the rest of `screen_geometry.py`.
+clamped. Fixed by compositing the pieces adjacently instead of at their true
+virtual-desktop offset (`plan_capture()`, `docs/PRE_BUILD_HANDOVER.md` item
+8) - pieces are sorted left-to-right and their x offsets accumulated, so a
+gap of any width collapses to zero rather than reappearing as unpainted
+space. Vertical offsets keep their true relative position deliberately:
+screens at different heights are a real relationship, not a gap, so only x
+is collapsed. This also means CAP-12 no longer needs to stay Blocked: the
+`dest` arithmetic is now pure geometry, covered by literal-layout tests
+(CAP-16, `test_screen_geometry.py`) like the rest of the module, verified to
+fail against the old true-offset code both at the pure-geometry level and
+end-to-end through `_grab()`.
 
 **11. INS-02 was exercised and failed: the launcher's X quits the whole
 application.** `_close_launcher()` calls `QApplication.instance().quit()`, so
@@ -391,7 +407,7 @@ yet on the packaged build.
 ```bash
 cd python
 pip install -r requirements.txt
-QT_QPA_PLATFORM=offscreen pytest -q      # 248 passed, about 2-3 seconds warm;
+QT_QPA_PLATFORM=offscreen pytest -q      # 253 passed, about 2-3 seconds warm;
                                           # slower on the first run while the
                                           # bundled ffmpeg loads
 ```

@@ -1,6 +1,6 @@
 # 🔍 Test Assist — Desktop Test Plan
 
-**Version:** 1.13
+**Version:** 1.14
 **Last updated:** 2026-09-07
 **Status:** In active development
 **Applies to:** the PySide6 desktop build under `python/`. The browser build has
@@ -87,11 +87,12 @@ regression test for that; see `docs/overlay-geometry-fix-brief.md`.
 | CAP-04 | Capture while the editor already holds an image | Previous image is replaced, annotations cleared | ✅ |
 | CAP-10 | Selection drawn entirely on a secondary screen | The secondary is grabbed, not the primary | ✅ |
 | CAP-11 | Secondary screen to the left of or above the primary (negative coordinates) | The overlay's virtual-desktop origin is translated correctly; no offset onto the wrong area | ✅ |
-| CAP-12 | Mixed-DPI layout (screens at different scale factors) | The right pixels come back at the right size from a real high-DPI secondary | 🚫 |
+| CAP-12 | Mixed-DPI layout (screens at different scale factors) | Exercised on real hardware 2026-09-07: the pixels and screen ordering were already correct; the only defect was the gap between screens (CAP-16), now fixed and covered by pure-geometry tests like the rest of `screen_geometry.py` | ✅ |
 | CAP-13 | Selection spanning two screens | Composited from both screens rather than clamped to one - no part of the selection is silently dropped | ✅ |
 | CAP-14 | `activate()` on a multi-screen virtual desktop | The overlay keeps the requested geometry - it does not collapse onto a single screen the way `showFullScreen()` does | ✅ |
 | CAP-14b | Overlay origin after `activate()`, then hide | Stored once at activate time; unchanged by hiding the window | ✅ |
 | CAP-15 | A gap between mismatched screens (e.g. different monitor heights) | Not dimmed as if it were selectable area | ✅ |
+| CAP-16 | A selection spanning a gap between two screens (DSP-08) | Composited adjacently, no black band; vertical offsets between screens stay true | ✅ |
 
 ### 3.2 Screen Recording
 

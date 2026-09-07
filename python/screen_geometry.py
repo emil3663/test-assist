@@ -93,14 +93,39 @@ def plan_capture(global_rect: QRect, screen_geometries: list[QRect]) -> list[Gra
     user selected is exactly the class of bug this exists to remove. A
     single-screen selection produces exactly one piece covering the whole
     rect, so nothing changes for the common case.
+
+    Pieces are placed adjacently along x, not at their true virtual-desktop
+    offset. A gap between screens (e.g. mismatched monitor heights leave a
+    band of virtual-desktop space belonging to no screen) would otherwise
+    show up in the result as an unpainted region, which every viewer renders
+    as a solid black band - the "math is right, output is unusable" failure
+    predicted when that gap was excluded from the overlay's dimmed region
+    rather than clamped (see ScreenshotOverlay._covered_region()). A tester
+    dragging a selection across two monitors is asking for both screens side
+    by side, not a coordinate-accurate map of a desktop with a hole in it.
+
+    Vertical offsets keep their true relative position: screens at different
+    heights are a real relationship, not a gap, so the composite preserves
+    it rather than collapsing it the same way.
     """
-    pieces = []
+    raw = []
     for index in screens_intersecting(global_rect, screen_geometries):
         geometry = screen_geometries[index]
         intersection = geometry.intersected(global_rect)
-        if intersection.isEmpty():
-            continue
+        if not intersection.isEmpty():
+            raw.append((index, geometry, intersection))
+
+    if not raw:
+        return []
+
+    raw.sort(key=lambda item: item[2].left())
+    top_of_bounding_box = min(intersection.top() for _, _, intersection in raw)
+
+    pieces = []
+    x_cursor = 0
+    for index, geometry, intersection in raw:
         local = to_screen_local(intersection, geometry)
-        dest = intersection.topLeft() - global_rect.topLeft()
+        dest = QPoint(x_cursor, intersection.top() - top_of_bounding_box)
         pieces.append(GrabPiece(index, local, dest))
+        x_cursor += intersection.width()
     return pieces
