@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
-from PySide6.QtCore import QEvent, QPointF, QRect, Qt
+from PySide6.QtCore import QEvent, QPoint, QPointF, QRect, Qt
 from PySide6.QtGui import QColor, QKeyEvent, QPixmap
 from PySide6.QtWidgets import QApplication, QDialog, QFrame, QLabel, QMessageBox, QPushButton, QTabWidget, QWidget
 
@@ -447,9 +447,12 @@ def test_launcher_position_top_right_uses_the_screen_the_widget_is_on(qapp, monk
     launcher.close()
 
 
-def test_launcher_current_screen_falls_back_to_primary_when_off_every_screen(qapp, monkeypatch) -> None:
+def test_launcher_current_screen_falls_back_to_the_only_screen_when_off_every_screen(qapp, monkeypatch) -> None:
     """screenAt() returns None for a point off every screen - a real case,
-    not a hypothetical one, e.g. mid-drag before layout settles."""
+    not a hypothetical one, e.g. mid-drag before layout settles. With only
+    one real screen the largest-overlap fallback and "the primary" happen to
+    be the same screen; test_DSP_13_current_screen_resolves_a_gap_to_the_
+    overlapping_screen below is what actually distinguishes them."""
     monkeypatch.setattr(QApplication, "screenAt", staticmethod(lambda point: None))
 
     launcher = FloatingLauncher(_EditorStub())
@@ -457,6 +460,128 @@ def test_launcher_current_screen_falls_back_to_primary_when_off_every_screen(qap
     qapp.processEvents()
 
     assert launcher._current_screen() is QApplication.primaryScreen()
+    launcher.close()
+
+
+class _FakeScreenGeometry:
+    """A minimal QScreen substitute. availableGeometry() is what
+    positioning/docking actually use; geometry() is what the gap-resolution
+    fallback and screenAt() substitutes use - kept equal here since none of
+    these tests are about taskbar exclusion."""
+
+    def __init__(self, geometry: QRect) -> None:
+        self._geometry = geometry
+
+    def geometry(self) -> QRect:
+        return self._geometry
+
+    def availableGeometry(self) -> QRect:
+        return self._geometry
+
+
+def test_DSP_13_current_screen_resolves_a_gap_to_the_overlapping_screen(qapp, monkeypatch) -> None:
+    """The reported hardware: laptop -1920..-384, external 0..1920, leaving a
+    384px gap belonging to no screen. screenAt() returns None there, and
+    falling back to the primary (the external) is exactly why undocking sent
+    the launcher back to the external instead of the laptop it was on."""
+    laptop = _FakeScreenGeometry(QRect(-1920, 0, 1536, 864))
+    external = _FakeScreenGeometry(QRect(0, 0, 1920, 1080))
+    monkeypatch.setattr(QApplication, "screenAt", staticmethod(lambda point: None))
+    monkeypatch.setattr(QApplication, "screens", staticmethod(lambda: [laptop, external]))
+
+    launcher = FloatingLauncher(_EditorStub())
+    launcher.show()
+    qapp.processEvents()
+
+    # Frame's centre lands in the gap, but it mostly overlaps the laptop.
+    launcher.move(-450, 100)
+    qapp.processEvents()
+    frame_centre_x = launcher.frameGeometry().center().x()
+    assert -384 <= frame_centre_x <= 0, "test setup: the centre must actually be in the gap"
+
+    assert launcher._current_screen() is laptop
+    launcher.close()
+
+
+def test_DSP_14_auto_dock_does_not_fire_when_dragged_in_from_the_right(qapp, monkeypatch) -> None:
+    """End-to-end reproduction of the reported regression: dragging the
+    launcher from the external onto the laptop, which sits to its left,
+    must not auto-dock the instant it arrives."""
+    laptop = _FakeScreenGeometry(QRect(-1920, 0, 1536, 864))
+
+    launcher = FloatingLauncher(_EditorStub())
+    launcher.show()
+    qapp.processEvents()
+    monkeypatch.setattr(launcher, "_current_screen", lambda: laptop)
+
+    # Comfortably inside the laptop, nowhere near ITS OWN right edge -
+    # exactly what "just arrived from the screen to the right" looks like.
+    pointer = QPoint(-500, 100)
+    launcher.move(pointer.x() - 10, pointer.y() - 10)
+    launcher._maybe_auto_dock(pointer)
+
+    assert not launcher._dock_panel.isVisible(), "auto-dock fired on arrival, not proximity to the edge"
+    launcher.close()
+
+
+def test_DSP_auto_dock_fires_once_genuinely_flush_with_the_edge(qapp, monkeypatch) -> None:
+    laptop = _FakeScreenGeometry(QRect(-1920, 0, 1536, 864))
+
+    launcher = FloatingLauncher(_EditorStub())
+    launcher.show()
+    qapp.processEvents()
+    monkeypatch.setattr(launcher, "_current_screen", lambda: laptop)
+
+    target_x = laptop.geometry().right() - launcher.width() - 5   # 5px inside the edge
+    pointer = QPoint(target_x, 100)
+    launcher.move(target_x, 100)
+    launcher._maybe_auto_dock(pointer)
+
+    assert launcher._dock_panel.isVisible(), "did not auto-dock once flush with the screen's own edge"
+    launcher.close()
+
+
+def test_DSP_dock_then_undock_returns_to_the_screen_it_docked_on(qapp, monkeypatch) -> None:
+    """Docking and undocking must not disagree about which display they are
+    on. _undock() used to widen the frame back to its floating width
+    *before* re-resolving the current screen; if that widened-but-not-yet-
+    repositioned frame reaches into a neighbouring screen, the widget snaps
+    there instead of back to the screen it was actually docked on.
+
+    The geometries below are deliberately small, not representative of real
+    monitors: they exist to make the widened frame's centre of overlap cross
+    into "external" if (and only if) the screen is re-resolved after
+    widening rather than before - the numeric proof that the ordering in
+    _undock() matters, not a hardware simulation.
+    """
+    laptop = _FakeScreenGeometry(QRect(-200, 0, 100, 864))     # right() = -101
+    external = _FakeScreenGeometry(QRect(0, 0, 1920, 1080))
+    screens = [laptop, external]
+    monkeypatch.setattr(
+        QApplication, "screenAt",
+        staticmethod(lambda point: next((s for s in screens if s.geometry().contains(point)), None)),
+    )
+    monkeypatch.setattr(QApplication, "screens", staticmethod(lambda: screens))
+
+    launcher = FloatingLauncher(_EditorStub())
+    launcher.show()
+    qapp.processEvents()
+
+    # Floating (width 280), centred well inside the laptop.
+    launcher.move(-290, 100)
+    qapp.processEvents()
+    assert launcher._current_screen() is laptop, "test setup: must start out resolved to the laptop"
+
+    launcher._dock_right()
+    qapp.processEvents()
+    assert launcher.x() == laptop.geometry().right() - launcher.width()
+
+    launcher._undock()
+    qapp.processEvents()
+
+    expected = laptop.geometry()
+    assert launcher.x() == expected.right() - launcher.width() - 20, \
+        "undocking landed on a different screen than the one it docked on"
     launcher.close()
 
 

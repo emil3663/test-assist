@@ -10,6 +10,7 @@ from __future__ import annotations
 from PySide6.QtCore import QPoint, QRect
 
 from screen_geometry import (
+    is_within_dock_band,
     plan_capture,
     screen_for_rect,
     screens_intersecting,
@@ -210,3 +211,51 @@ def test_plan_capture_negative_coordinate_layout_secondary_to_the_left():
 def test_plan_capture_ignores_a_selection_touching_no_screen():
     geometries = [QRect(0, 0, 1920, 1080)]
     assert plan_capture(QRect(5000, 5000, 100, 100), geometries) == []
+
+
+# ── is_within_dock_band (DSP-12/13/14) ──────────────────────────────────────
+#
+# Reported-hardware layout: laptop -1920..-384, external 0..1920. Dragging the
+# launcher from the external onto the laptop, which sits to its LEFT, used to
+# auto-dock the instant it arrived and undocking sent it back to the external.
+
+_LAPTOP = QRect(-1920, 0, 1536, 864)     # right() = -385
+_EXTERNAL = QRect(0, 0, 1920, 1080)      # right() = 1919
+
+
+def test_DSP_12_a_widget_entering_a_screen_from_the_right_does_not_auto_dock():
+    """The old half-plane test ("right edge at or past the screen's right
+    edge") was satisfied by almost any position reachable by dragging in
+    from a screen to the right - reproducing exactly this."""
+    widget_right = -500                        # comfortably inside the laptop,
+    pointer = QPoint(-500, 100)                 # nowhere near ITS OWN right edge
+    assert not is_within_dock_band(widget_right, pointer, _LAPTOP, threshold=12)
+
+
+def test_DSP_widget_genuinely_flush_with_the_right_edge_does_auto_dock():
+    widget_right = _LAPTOP.right() - 5          # 5px inside the edge
+    pointer = QPoint(-500, 100)
+    assert is_within_dock_band(widget_right, pointer, _LAPTOP, threshold=12)
+
+
+def test_DSP_the_band_has_a_far_boundary_too():
+    just_outside = _LAPTOP.right() - 13         # 1px past the threshold
+    pointer = QPoint(-500, 100)
+    assert not is_within_dock_band(just_outside, pointer, _LAPTOP, threshold=12)
+
+
+def test_DSP_a_widget_past_the_right_edge_does_not_auto_dock():
+    """The band only opens *inside* the edge - a widget already past it
+    (distance negative) is not "flush", it has overshot."""
+    past_the_edge = _LAPTOP.right() + 5
+    pointer = QPoint(-500, 100)
+    assert not is_within_dock_band(past_the_edge, pointer, _LAPTOP, threshold=12)
+
+
+def test_DSP_13_dock_band_requires_the_pointer_on_the_same_screen():
+    """A widget's frame can be flush with one screen's edge while the
+    pointer driving the drag is still over a different screen - docking
+    must not fire on the geometry alone."""
+    widget_right = _LAPTOP.right() - 5
+    pointer_on_external = QPoint(500, 100)
+    assert not is_within_dock_band(widget_right, pointer_on_external, _LAPTOP, threshold=12)

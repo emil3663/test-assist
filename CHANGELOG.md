@@ -40,6 +40,22 @@ release; only tagged versions appear as releases.
     taskbar can be selected, and any gap between mismatched screens excluded
     from the dimmed selection area rather than silently yielding nothing
     there. CAP-14 is the regression test.
+  - **Fixing the launcher's screen-tracking (above) exposed a bug in its
+    auto-dock and undock, found on a manual pass on real two-monitor
+    hardware (DSP-12/13/14).** Auto-dock used a half-plane test ("right edge
+    at or past the screen's right edge"); it never fired wrongly before
+    because the launcher's screen was always measured as the primary, so
+    correcting that is what exposed it — a widget entering a screen from its
+    right side satisfies a half-plane instantly, so dragging the launcher
+    onto a screen to the left of another auto-docked on arrival. The same
+    gap between mismatched screens that motivated CAP-12 also made
+    `screenAt()` return `None` mid-drag; falling back to the primary there is
+    why undocking sent the launcher back to the wrong screen. Fixed with a
+    narrow proximity band instead of a half-plane, requiring the pointer to
+    also be on the resolved screen; a largest-overlap fallback instead of
+    defaulting to the primary; and resolving the screen once before docking
+    or undocking mutates the frame a second resolution would otherwise
+    re-read mid-call.
 
 ### Added
 

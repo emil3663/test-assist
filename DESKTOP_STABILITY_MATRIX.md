@@ -1,7 +1,7 @@
 # 🔍 Test Assist — Desktop stability matrix
 
-**Version:** 1.3
-**Last updated:** 2026-09-04
+**Version:** 1.5
+**Last updated:** 2026-09-07
 **Applies to:** the PySide6 desktop build. The browser build has its own matrix
 in `STABILITY_MATRIX.md`.
 
@@ -25,13 +25,13 @@ not. This document is that check.
 
 | | Count |
 |---|---|
-| Cases in `DESKTOP_TEST_PLAN.md` v1.8 | 154 |
-| Automated and passing | 148 |
+| Cases in `DESKTOP_TEST_PLAN.md` v1.9 | 157 |
+| Automated and passing | 151 |
 | Blocked, documented as manual | 6 |
-| Automated tests | 230 collected — 230 pass everywhere, no skips |
+| Automated tests | 239 collected — 239 pass everywhere, no skips |
 | Wall clock | about 2-3 seconds warm; the first run is slower while the bundled ffmpeg loads |
 
-**A green run is `230 passed, 0 skipped`, everywhere.** MP4 assembly used to
+**A green run is `239 passed, 0 skipped`, everywhere.** MP4 assembly used to
 depend on `opencv-python`, an optional dependency the product deliberately
 shipped without, which made REC-05 skip itself on CI, the packaged build, and
 any clean checkout. It now shells out to a bundled `ffmpeg` binary via
@@ -116,11 +116,11 @@ Those are properties of a running desktop and remain manual.
 
 | ID | Case | Why it cannot be automated here |
 |----|------|--------------------------------|
-| INS-02 | The app stays alive in the tray when the last window closes | Needs a real tray and a running event loop with a window manager. `QSystemTrayIcon` availability varies by desktop environment and is absent in the offscreen platform. |
+| INS-02 | The app stays alive in the tray when the last window closes | Needs a real tray and a running event loop with a window manager. `QSystemTrayIcon` availability varies by desktop environment and is absent in the offscreen platform. **Exercised manually 2026-09-07 and FAILED** — see defect 11 below. The tray is Blocked; what the close button is wired to is not, and will be covered by a test. |
 | PKG-03 | The pinned taskbar icon matches the tray icon | A property of the Windows shell, not of the process. |
 | PKG-04 | First launch on a machine without Python | Needs a clean Windows machine. The release workflow proves the exe runs on a runner, which is close but not the same as a machine that never had Python. |
 | PKG-05 | Windows file properties show product name and version | Readable only from a Windows build; the version resource is ignored on Linux, where the validation build runs. |
-| CAP-12 | A capture spanning or landing on a real high-DPI secondary monitor comes out the right size | Needs actual mixed-DPI hardware. The pure geometry functions are fully covered with literal mixed-size layouts (`test_screen_geometry.py`); what is not provable here is that `QScreen.grabWindow()`'s returned pixmap and the compositing `QPainter` produce correct pixels on a real scaled display, not just correct math on paper. |
+| CAP-12 | A capture spanning or landing on a real high-DPI secondary monitor comes out the right size | Needs actual mixed-DPI hardware. The pure geometry functions are fully covered with literal mixed-size layouts (`test_screen_geometry.py`); what is not provable here is that `QScreen.grabWindow()`'s returned pixmap and the compositing `QPainter` produce correct pixels on a real scaled display, not just correct math on paper. **Exercised manually 2026-09-07:** the pixels and the ordering are correct; the unoccupied gap between the two screens is not — see defect 10 below. |
 | UPD-12 | A real round-trip to the GitHub API | Would make the suite depend on the network and GitHub's rate limits - "a suite that reaches the internet is a suite that fails on a train." `build.ps1` and the release workflow separately prove the packaged build *can* do TLS at all (PKG-07); nothing proves the request itself succeeds. |
 
 These six are the manual pass to run against a release before trusting it.
@@ -143,7 +143,7 @@ These six are the manual pass to run against a release before trusting it.
 | 3.9 Undo/redo | 6 | Stable | |
 | 3.10 Export | 9 | Stable | `QFileDialog` is substituted, so these prove what is written, not that the dialog appears. |
 | 3.11 History | 8 | Stable | HIS-05 back-dates a file's mtime rather than waiting. |
-| 3.12 Launcher | 8 | Stable | LCH-07 asserts the always-on-top flag is set, not that the window is actually on top. LCH-08 substitutes `QApplication.screenAt()` to prove docking and positioning measure the screen the widget is actually on. |
+| 3.12 Launcher | 11 | Stable | LCH-07 asserts the always-on-top flag is set, not that the window is actually on top. LCH-08 substitutes `QApplication.screenAt()` to prove docking and positioning measure the screen the widget is actually on. DSP-12/13/14 were each verified to genuinely fail against the pre-fix code (reverted locally, run, restored) rather than trusted to discriminate on the strength of the arithmetic alone. |
 | 3.13 Shortcuts | 5 | Stable | KEY-05 exercises the real signal path rather than calling the setter directly. |
 | 3.14 Lifecycle | 4 | Moderate | INS-01 binds a uniquely named local server so it cannot collide with a running app. |
 | 3.15 Packaging | 7 | Blocked (3) | PKG-01, PKG-02, PKG-06 and PKG-07 are automated. PKG-07's "True" assertion is also exercised for real, once, against an actual PyInstaller build - see below. |
@@ -295,6 +295,57 @@ selection there silently yield nothing. CAP-14 is the regression test,
 verified to fail against the old code and pass against the fix using only
 the one real screen the offscreen platform provides.
 
+**9. Fixing LCH-08 correctly exposed a fresh bug in the launcher's auto-dock
+and undock (DSP-12/13/14).** Found by a manual pass on real two-monitor
+hardware, not by these tests - the opposite direction from defects 1-6.
+Auto-dock used a half-plane test ("right edge at or past the screen's right
+edge"); it never fired incorrectly before because the launcher's screen was
+always (wrongly) measured as the primary, so making `_current_screen()`
+correct is what exposed it - a widget entering a screen from its right side
+satisfies a half-plane the instant it arrives, so dragging the launcher onto
+the laptop (to the left of the external) auto-docked on arrival. Separately,
+the same 384px gap between the two monitors that motivated CAP-12 made
+`screenAt()` return `None` mid-drag; falling back to the primary there is
+why undocking sent the launcher back to the external instead of the laptop
+it had been docked on. Fixed with a narrow proximity band instead of a
+half-plane (`is_within_dock_band()`, requiring the pointer to also be on the
+resolved screen), a largest-overlap fallback reusing `screen_for_rect()`
+instead of defaulting to the primary, and resolving the screen once in
+`_dock_right()`/`_undock()` before either mutates the frame a second
+resolution would otherwise re-read mid-call. All three fixes were verified
+to genuinely fail against the pre-fix code (reverted locally, run, restored)
+rather than trusted to discriminate on the strength of the arithmetic alone,
+the same lesson learned while building CAP-14.
+
+**10. CAP-12 was finally exercised on real mixed-DPI hardware, and the
+compositing is correct — but the gap between the screens is not.** A
+selection dragged from the 125% laptop across to the 100% external produced
+both screens' content, in the right order, at the right sizes. Between them
+sat a solid black band. It is not wrong content: the layout is laptop
+`-1920..-384` and external `0..1920`, so `-384..0` is virtual-desktop
+coordinate space belonging to no screen. `_grab()` allocates the result at
+`global_rect.size()` and fills it transparent, `plan_capture()` correctly
+emits no piece for the dead zone, and every viewer renders transparent as
+black. The math is right and the output is unusable — the failure mode
+predicted when the dead zone was excluded from the dimmed region rather than
+clamped. Being fixed by compositing the pieces adjacently (see
+`docs/PRE_BUILD_HANDOVER.md` item 8), which also means CAP-12 stops being a
+case the suite cannot reach: the new `dest` arithmetic is pure geometry and
+gets literal-layout tests like the rest of `screen_geometry.py`.
+
+**11. INS-02 was exercised and failed: the launcher's X quits the whole
+application.** `_close_launcher()` calls `QApplication.instance().quit()`, so
+closing the floating widget takes the tray icon with it and `Show Launcher`
+is unreachable — nothing short of relaunching the exe brings the app back.
+This is the reason the same manual pass could not take a full-screen capture
+("unable to get the floating widget to display"): the app was not hidden, it
+was gone. Worth noting what the suite could and could not have caught here.
+The tray itself is genuinely Blocked — `QSystemTrayIcon` needs a real desktop
+environment. But *what the X button is wired to* is not: nothing prevented a
+test asserting that activating `_btn_close` leaves the application running.
+Blocked-ness of the surrounding feature was allowed to excuse leaving the
+adjacent, testable half uncovered, which is its own lesson.
+
 ---
 
 ## The selection model
@@ -340,7 +391,7 @@ yet on the packaged build.
 ```bash
 cd python
 pip install -r requirements.txt
-QT_QPA_PLATFORM=offscreen pytest -q      # 230 passed, about 2-3 seconds warm;
+QT_QPA_PLATFORM=offscreen pytest -q      # 239 passed, about 2-3 seconds warm;
                                           # slower on the first run while the
                                           # bundled ffmpeg loads
 ```

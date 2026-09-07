@@ -28,6 +28,7 @@ from PySide6.QtWidgets import (
 )
 
 from capture import FrameRecorder, ScreenshotOverlay
+from screen_geometry import is_within_dock_band, screen_for_rect
 from update_check import UpdateChecker
 
 
@@ -457,6 +458,8 @@ class FloatingLauncher(QWidget):
             )
         super().mousePressEvent(event)
 
+    _AUTO_DOCK_THRESHOLD_PX = 12
+
     def mouseMoveEvent(self, event) -> None:
         if event.buttons() == Qt.MouseButton.LeftButton and self._drag_pos is not None:
             # Docked strip is anchored — never allow dragging while docked
@@ -464,10 +467,7 @@ class FloatingLauncher(QWidget):
                 super().mouseMoveEvent(event)
                 return
             self.move(event.globalPosition().toPoint() - self._drag_pos)
-            # Auto-dock only when the window is dragged flush to the right screen edge
-            geom = self._current_screen().availableGeometry()
-            if self.x() + self.width() >= geom.right():
-                self._dock_right()
+            self._maybe_auto_dock(event.globalPosition().toPoint())
         super().mouseMoveEvent(event)
 
     def mouseReleaseEvent(self, event) -> None:
@@ -520,40 +520,67 @@ class FloatingLauncher(QWidget):
         p.drawRoundedRect(self.rect().adjusted(1, 1, -1, -1), 20, 20)
         p.end()
 
+    def _maybe_auto_dock(self, pointer: QPoint) -> None:
+        """Dock only within a narrow band of the current screen's own right
+        edge - see is_within_dock_band() for why a half-plane test (the old
+        "x() + width() >= geom.right()") auto-docked the instant a drag
+        arrived from a screen to the right (DSP-12/13/14)."""
+        geom = self._current_screen().availableGeometry()
+        if is_within_dock_band(self.x() + self.width(), pointer, geom, self._AUTO_DOCK_THRESHOLD_PX):
+            self._dock_right()
+
     # ── Positioning ──────────────────────────────────────────────────────────
 
     def _current_screen(self):
         """The screen this widget is actually on, not always the primary.
 
-        Positioning and full-screen capture used to measure/grab
-        primaryScreen() unconditionally, so docking, auto-dock and
-        full-screen capture all landed on the wrong display whenever the
-        launcher was on a secondary monitor. screenAt() returns None when
-        the point is off every screen (e.g. mid-drag before layout settles),
-        hence the primary fallback.
+        screenAt() returns None when the widget's centre falls in a
+        virtual-desktop gap belonging to no screen - mismatched monitor
+        heights leave exactly this kind of band, and a drag reaches it, not
+        just a hypothetical edge case (DSP-13/14). Falling back to the
+        primary there silently snapped the widget back to the wrong screen.
+        Falling back instead to whichever screen the widget's frame mostly
+        overlaps - screen_for_rect(), already covered for the capture
+        overlay - answers correctly even when the anchor point itself is in
+        the gap.
         """
         screen = QApplication.screenAt(self.frameGeometry().center())
-        return screen if screen is not None else QApplication.primaryScreen()
+        if screen is not None:
+            return screen
+        screens = QApplication.screens()
+        if not screens:
+            return QApplication.primaryScreen()
+        geometries = [candidate.geometry() for candidate in screens]
+        return screens[screen_for_rect(self.frameGeometry(), geometries)]
 
-    def _position_top_right(self) -> None:
-        geom = self._current_screen().availableGeometry()
+    def _position_top_right(self, screen=None) -> None:
+        if screen is None:
+            screen = self._current_screen()
+        geom = screen.availableGeometry()
         self.adjustSize()
         self.move(geom.right() - self.width() - 20, geom.top() + 20)
 
     def _dock_right(self) -> None:
+        # Resolved once, before anything below changes the frame that
+        # _current_screen() would otherwise re-read mid-call.
+        screen = self._current_screen()
         self._float_panel.hide()
         self._dock_panel.show()
         self.setFixedWidth(50)
         self.adjustSize()
-        geom = self._current_screen().availableGeometry()
+        geom = screen.availableGeometry()
         y = geom.top() + max(20, (geom.height() - self.height()) // 2)
         self.move(geom.right() - self.width(), y)
 
     def _undock(self) -> None:
+        # Resolved while still correctly docked, before widening the frame
+        # back to the floating width changes what _current_screen() would
+        # see - so undocking cannot disagree with the screen it docked on.
+        screen = self._current_screen()
         self._dock_panel.hide()
         self._float_panel.show()
         self.setFixedWidth(280)
-        self._position_top_right()
+        self._position_top_right(screen)
 
     # ── Button stylesheets ────────────────────────────────────────────────────
 

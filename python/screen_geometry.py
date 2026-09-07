@@ -52,6 +52,26 @@ def to_screen_local(global_rect: QRect, screen_geometry: QRect) -> QRect:
     return global_rect.translated(-screen_geometry.topLeft())
 
 
+def is_within_dock_band(widget_right: int, pointer: QPoint, screen_geometry: QRect, threshold: int) -> bool:
+    """Whether a drag has brought a widget's right edge close enough to
+    screen_geometry's own right edge to auto-dock - a narrow band just
+    inside the edge, not a half-plane test.
+
+    DSP-12/13/14: "right edge at or past the screen's right edge" is
+    satisfied by almost any position reachable by dragging in from a screen
+    to the right, so a widget entering a screen from its right side
+    auto-docked the instant it arrived rather than only once flush with
+    that screen's own edge. Requiring the pointer itself to still be on
+    screen_geometry - not just the widget's separately-resolved "current"
+    screen - stops a docking decision being made while the two disagree,
+    e.g. mid-crossing.
+    """
+    if not screen_geometry.contains(pointer):
+        return False
+    distance_from_right_edge = screen_geometry.right() - widget_right
+    return 0 <= distance_from_right_edge <= threshold
+
+
 @dataclass(frozen=True)
 class GrabPiece:
     """One screen's contribution to a capture.

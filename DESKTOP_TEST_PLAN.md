@@ -1,7 +1,7 @@
 # 🔍 Test Assist — Desktop Test Plan
 
-**Version:** 1.8
-**Last updated:** 2026-09-04
+**Version:** 1.9
+**Last updated:** 2026-09-07
 **Status:** In active development
 **Applies to:** the PySide6 desktop build under `python/`. The browser build has
 its own plan in `TEST_PLAN.md`.
@@ -258,6 +258,19 @@ inside changes the words.
 | LCH-06 | Open the editor with no capture taken | Editor opens without an image and does not crash | ✅ |
 | LCH-07 | Launcher stays above other windows | Always-on-top flag is set | ✅ |
 | LCH-08 | Dock / position while on a secondary screen | Measures and docks against that screen, not always the primary | ✅ |
+| DSP-12 | Drag onto a screen from its right side | Does not auto-dock on arrival - only within a narrow band of that screen's own right edge | ✅ |
+| DSP-13 | Widget's centre in a gap belonging to no screen | Resolves to the screen the widget's frame mostly overlaps, not the primary | ✅ |
+| DSP-14 | Dock, then undock | Returns to the same screen it was docked on | ✅ |
+
+Manual verification (`DSP-12`/`DSP-13`/`DSP-14` in `MULTI_DISPLAY_MANUAL_PASS.md`)
+found that the LCH-08 fix, correct in isolation, exposed a second bug: the
+auto-dock trigger was a half-plane test ("right edge at or past the screen's
+right edge"), so once `_current_screen()` correctly followed the launcher
+onto whichever screen it was on, a widget entering that screen *from its
+right side* satisfied the half-plane instantly and auto-docked on arrival. A
+384px gap between the two monitors, belonging to no screen, also made
+`screenAt()` return `None` mid-drag; falling back to the primary snapped the
+launcher back to the wrong display on undock.
 
 ### 3.13 Keyboard Shortcuts
 
