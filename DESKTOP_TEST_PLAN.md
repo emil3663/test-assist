@@ -1,6 +1,6 @@
 # 🔍 Test Assist — Desktop Test Plan
 
-**Version:** 1.11
+**Version:** 1.12
 **Last updated:** 2026-09-07
 **Status:** In active development
 **Applies to:** the PySide6 desktop build under `python/`. The browser build has
@@ -39,6 +39,7 @@ history that survives restarts.
 | Export JSON | ✅ Done | Annotation list plus timestamp |
 | Copy to clipboard | ✅ Done | Also written to history |
 | Capture history | ✅ Done | Persists in `%LOCALAPPDATA%\Test Assist\history`, auto-pruned on launch |
+| Recordings in the gallery | ✅ Done | Listed alongside snapshots, visually distinct; opens externally (no in-app playback) |
 | History filters | ✅ Done | Recent 5 / Today / This Week / This Month |
 | Floating launcher | ✅ Done | Always on top; drag to reposition |
 | Edge docking | ✅ Done | Compact vertical strip |
@@ -245,6 +246,11 @@ inside changes the words.
 | HIS-05 | Filter: Today / This Week / This Month | Only snapshots within the window are listed | ✅ |
 | HIS-06 | Click a history thumbnail | That snapshot loads onto the canvas | ✅ |
 | HIS-07 | History overlay opens | Gallery shows all categories | ✅ |
+| HIS-08 | A recording alongside PNG snapshots | Both appear together in the same date-filtered gallery list | ✅ |
+| HIS-09 | A recording's gallery entry | A distinct card, never decoded as a QPixmap | ✅ |
+| HIS-10 | Click a recording | Opens externally (system player); the canvas is untouched | ✅ |
+| HIS-11 | Click a kept frame sequence (ffmpeg unavailable) | Opens its containing folder, since there is no single file to play | ✅ |
+| HIS-12 | History pruning vs. a recording | Never touches it, even one that would fail the same readability check a corrupt PNG would | ✅ |
 
 ### 3.12 Floating Launcher
 

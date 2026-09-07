@@ -85,6 +85,15 @@ release; only tagged versions appear as releases.
   ratio. Issue #1 took a code read to diagnose because the report could not
   describe the reporter's monitor layout; pasting this would have answered
   the mixed-DPI question immediately.
+- **Recordings now appear in the history gallery.** Previously the app made
+  a recording and never mentioned it again — the gallery only ever globbed
+  PNGs. Recordings (an `.mp4`, or a kept frame sequence if encoding fell
+  back) now list alongside snapshots, visually distinct, and clicking one
+  opens it in the system's own video player (or its containing folder, for
+  a kept frame sequence) rather than attempting any in-app playback, frame
+  extraction or annotation — discoverability only. Recordings are read from
+  `recordings_dir()`, never `history_dir()`, so the auto-pruning that
+  removes unreadable snapshots on launch can never reach one.
 
 ### Changed
 

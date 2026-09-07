@@ -1,6 +1,6 @@
 # 🔍 Test Assist — Desktop stability matrix
 
-**Version:** 1.7
+**Version:** 1.8
 **Last updated:** 2026-09-07
 **Applies to:** the PySide6 desktop build. The browser build has its own matrix
 in `STABILITY_MATRIX.md`.
@@ -25,13 +25,13 @@ not. This document is that check.
 
 | | Count |
 |---|---|
-| Cases in `DESKTOP_TEST_PLAN.md` v1.11 | 159 |
-| Automated and passing | 153 |
+| Cases in `DESKTOP_TEST_PLAN.md` v1.12 | 164 |
+| Automated and passing | 158 |
 | Blocked, documented as manual | 6 |
-| Automated tests | 242 collected — 242 pass everywhere, no skips |
+| Automated tests | 247 collected — 247 pass everywhere, no skips |
 | Wall clock | about 2-3 seconds warm; the first run is slower while the bundled ffmpeg loads |
 
-**A green run is `242 passed, 0 skipped`, everywhere.** MP4 assembly used to
+**A green run is `247 passed, 0 skipped`, everywhere.** MP4 assembly used to
 depend on `opencv-python`, an optional dependency the product deliberately
 shipped without, which made REC-05 skip itself on CI, the packaged build, and
 any clean checkout. It now shells out to a bundled `ffmpeg` binary via
@@ -391,7 +391,7 @@ yet on the packaged build.
 ```bash
 cd python
 pip install -r requirements.txt
-QT_QPA_PLATFORM=offscreen pytest -q      # 242 passed, about 2-3 seconds warm;
+QT_QPA_PLATFORM=offscreen pytest -q      # 247 passed, about 2-3 seconds warm;
                                           # slower on the first run while the
                                           # bundled ffmpeg loads
 ```

@@ -9,8 +9,8 @@ from pathlib import Path
 import time
 import webbrowser
 
-from PySide6.QtCore import Qt, QSize, QSysInfo, Signal
-from PySide6.QtGui import QColor, QIcon, QImage, QKeySequence, QPixmap, QShortcut
+from PySide6.QtCore import Qt, QSize, QSysInfo, QUrl, Signal
+from PySide6.QtGui import QColor, QDesktopServices, QIcon, QImage, QKeySequence, QPixmap, QShortcut
 from PySide6.QtWidgets import (
     QApplication,
     QButtonGroup,
@@ -664,12 +664,25 @@ class EditorWindow(QMainWindow):
             return
 
         for index, path in enumerate(files, start=1):
-            thumb = _SnapshotThumb(path, index)
-            thumb.load_requested.connect(self._load_history_snapshot)
+            if path.suffix == ".png":
+                thumb = _SnapshotThumb(path, index)
+                thumb.load_requested.connect(self._load_history_snapshot)
+            else:
+                thumb = _RecordingThumb(path, index)
+                thumb.open_requested.connect(self._open_recording)
             self._snap_layout.insertWidget(self._snap_layout.count() - 1, thumb)
 
+    def _recording_entries(self) -> list[Path]:
+        """Recordings live in recordings_dir(), never history_dir() - so
+        _prune_unreadable_history() (which only ever globs history_dir())
+        can never delete one. A finished recording is either a single .mp4,
+        or - if encoding fell back - the kept *_frames folder."""
+        directory = paths.recordings_dir()
+        return list(directory.glob("*.mp4")) + [p for p in directory.glob("*_frames") if p.is_dir()]
+
     def _history_files_for_mode(self, mode: str | None) -> list[Path]:
-        files = sorted(self._history_dir.glob("*.png"), key=lambda item: item.stat().st_mtime, reverse=True)
+        files = self._recording_entries() + list(self._history_dir.glob("*.png"))
+        files.sort(key=lambda item: item.stat().st_mtime, reverse=True)
         now = datetime.now()
 
         if mode == "all":
@@ -690,6 +703,13 @@ class EditorWindow(QMainWindow):
         self._canvas.set_pixmap(pixmap)
         if self._fit_mode:
             self._fit_image()
+
+    def _open_recording(self, path: Path) -> None:
+        """Opens a recording externally - the system video player for an
+        mp4, or the containing folder for a kept frame sequence, since there
+        is no single file to hand a player. Never decoded, extracted or
+        played in-app - discoverability only."""
+        QDesktopServices.openUrl(QUrl.fromLocalFile(str(path)))
 
     def _show_history_overlay(self) -> None:
         dlg = QDialog(self)
@@ -735,9 +755,14 @@ class EditorWindow(QMainWindow):
                 grid.addWidget(empty, 0, 0)
             else:
                 for idx, path in enumerate(files, start=1):
-                    thumb = _SnapshotThumb(path, idx, thumb_width=250)
-                    thumb.load_requested.connect(self._load_history_snapshot)
-                    thumb.load_requested.connect(lambda _p, d=dlg: d.accept())
+                    if path.suffix == ".png":
+                        thumb = _SnapshotThumb(path, idx, thumb_width=250)
+                        thumb.load_requested.connect(self._load_history_snapshot)
+                        thumb.load_requested.connect(lambda _p, d=dlg: d.accept())
+                    else:
+                        thumb = _RecordingThumb(path, idx, thumb_width=250)
+                        thumb.open_requested.connect(self._open_recording)
+                        thumb.open_requested.connect(lambda _p, d=dlg: d.accept())
                     row = (idx - 1) // 3
                     col = (idx - 1) % 3
                     grid.addWidget(thumb, row, col)
@@ -884,4 +909,64 @@ class _SnapshotThumb(QFrame):
     def mousePressEvent(self, event) -> None:
         if event.button() == Qt.MouseButton.LeftButton:
             self.load_requested.emit(self._pixmap)
+        super().mousePressEvent(event)
+
+
+class _RecordingThumb(QFrame):
+    """Clickable card representing a recording in the gallery.
+
+    Deliberately never a decoded frame: the gallery used to assume every
+    entry was a loadable QPixmap, which a video is not. Clicking opens it in
+    the system's own player (or its containing folder, for a kept frame
+    sequence) rather than attempting any in-app playback, frame extraction
+    or annotation - discoverability only.
+    """
+
+    open_requested = Signal(Path)
+
+    def __init__(
+        self,
+        recording_path: Path,
+        index: int,
+        parent: QWidget | None = None,
+        thumb_width: int = 168,
+    ) -> None:
+        super().__init__(parent)
+        self._recording_path = recording_path
+        self._is_kept_frames = recording_path.is_dir()
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setToolTip(
+            (f"Click to open the containing folder\n{recording_path.name}")
+            if self._is_kept_frames
+            else (f"Click to open in your video player\n{recording_path.name}")
+        )
+        self.setStyleSheet("""
+            QFrame {
+                border: 1px solid #4a3a2a;
+                border-radius: 8px;
+                background: rgba(200,120,60,0.06);
+            }
+            QFrame:hover { border-color: #c8763a; }
+        """)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(4, 4, 4, 4)
+        layout.setSpacing(2)
+
+        icon = QLabel("🎞" if self._is_kept_frames else "🎥")
+        icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        icon.setFixedHeight(max(60, thumb_width // 2))
+        icon.setStyleSheet("font-size: 28px; background: transparent;")
+        layout.addWidget(icon)
+
+        stamp = datetime.fromtimestamp(recording_path.stat().st_mtime).strftime("%d %b %H:%M")
+        kind = "Recording (frames)" if self._is_kept_frames else "Recording"
+        label = QLabel(f"{kind} {index} · {stamp}")
+        label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        label.setWordWrap(True)
+        layout.addWidget(label)
+
+    def mousePressEvent(self, event) -> None:
+        if event.button() == Qt.MouseButton.LeftButton:
+            self.open_requested.emit(self._recording_path)
         super().mousePressEvent(event)

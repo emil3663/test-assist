@@ -975,6 +975,102 @@ def test_HIS_06_loading_a_snapshot_puts_it_on_the_canvas(editor):
     assert editor._canvas.has_image()
 
 
+def test_HIS_08_a_recording_appears_in_the_gallery_alongside_snapshots(editor, isolate_home):
+    """PRE_BUILD_HANDOVER item 4: the editor made a recording and never
+    mentioned it again. Recordings are read from recordings_dir(), never
+    history_dir(), so history pruning can never reach one."""
+    import paths
+
+    draw(editor._canvas, "rect", 20, 20, 140, 110)
+    editor._copy_to_clipboard()   # one png in history_dir()
+
+    video = paths.recordings_dir() / "test-recording-1.mp4"
+    video.write_bytes(b"fake mp4")
+
+    files = editor._history_files_for_mode("all")
+
+    assert video in files
+    assert any(f.suffix == ".png" for f in files)
+
+
+def test_HIS_09_a_recording_thumb_is_never_decoded_as_a_pixmap(editor):
+    """The gallery used to assume every entry was a loadable QPixmap - a
+    video is not one. A recording gets its own widget class instead of
+    _SnapshotThumb, which would try QPixmap(path) on it."""
+    import paths
+    from editor import _RecordingThumb, _SnapshotThumb
+
+    video = paths.recordings_dir() / "test-recording-2.mp4"
+    video.write_bytes(b"fake mp4")
+
+    editor._refresh_history()
+
+    thumbs = [
+        w for i in range(editor._snap_layout.count())
+        if (w := editor._snap_layout.itemAt(i).widget()) is not None
+    ]
+    recording_thumbs = [t for t in thumbs if isinstance(t, _RecordingThumb)]
+    assert recording_thumbs, "no _RecordingThumb was created for the recording"
+    assert not any(isinstance(t, _SnapshotThumb) and t.toolTip().endswith(video.name) for t in thumbs)
+
+
+def test_HIS_10_clicking_a_recording_opens_it_externally_not_into_the_canvas(editor, monkeypatch) -> None:
+    import editor as editor_module
+    import paths
+
+    video = paths.recordings_dir() / "test-recording-3.mp4"
+    video.write_bytes(b"fake mp4")
+
+    opened = []
+    monkeypatch.setattr(
+        editor_module.QDesktopServices, "openUrl", staticmethod(lambda url: opened.append(url.toLocalFile())),
+    )
+
+    before = editor._canvas.export_pixmap().size()
+
+    thumb = editor_module._RecordingThumb(video, 1)
+    thumb.open_requested.connect(editor._open_recording)
+    thumb.open_requested.emit(video)
+
+    assert [Path(p) for p in opened] == [video]
+    assert editor._canvas.export_pixmap().size() == before, \
+        "a recording must never be loaded into the canvas"
+
+
+def test_HIS_11_opening_a_kept_frame_sequence_opens_its_folder(editor, monkeypatch, tmp_path) -> None:
+    """When ffmpeg was unavailable, the "recording" is the frame folder
+    itself - there is no single video file to hand a player, so the folder
+    is what opens."""
+    import editor as editor_module
+
+    frames_dir = tmp_path / "test-recording-4_frames"
+    frames_dir.mkdir()
+
+    opened = []
+    monkeypatch.setattr(
+        editor_module.QDesktopServices, "openUrl", staticmethod(lambda url: opened.append(url.toLocalFile())),
+    )
+
+    editor._open_recording(frames_dir)
+
+    assert [Path(p) for p in opened] == [frames_dir]
+
+
+def test_HIS_12_history_pruning_never_touches_a_recording(editor) -> None:
+    """Trap 2 from PRE_BUILD_HANDOVER item 4: recordings must be read from
+    recordings_dir(), never history_dir(), so _prune_unreadable_history()
+    (which deletes unreadable files) can never reach one - even one that
+    looks exactly like the corrupt files it exists to prune."""
+    import paths
+
+    corrupt_looking = paths.recordings_dir() / "test-recording-5.mp4"
+    corrupt_looking.write_bytes(b"not a real video, just like a corrupt png would not be a real image")
+
+    editor._prune_unreadable_history()
+
+    assert corrupt_looking.exists(), "a recording was deleted by history pruning"
+
+
 # ── 3.12 Floating launcher ───────────────────────────────────────────────────
 
 def test_LCH_03_04_docking_and_undocking(qapp, editor):
