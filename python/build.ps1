@@ -108,10 +108,13 @@ if ($sslSupported -ne "True") {
 Write-Host "SSL supported at runtime, backend: $sslBackend" -ForegroundColor Green
 
 if ($Zip) {
-    $zip = Join-Path $here "dist\TestAssist-$version-win64.zip"
-    if (Test-Path $zip) { Remove-Item $zip }
-    Compress-Archive -Path (Join-Path $here "dist\TestAssist\*") -DestinationPath $zip
-    Write-Host "Packaged: $zip" -ForegroundColor Green
+    # Not $zip: PowerShell variable names are case-insensitive, so that would
+    # be the same variable as the -Zip switch parameter above and assigning
+    # this string to it throws ("Cannot convert ... to type SwitchParameter").
+    $zipPath = Join-Path $here "dist\TestAssist-$version-win64.zip"
+    if (Test-Path $zipPath) { Remove-Item $zipPath }
+    Compress-Archive -Path (Join-Path $here "dist\TestAssist\*") -DestinationPath $zipPath
+    Write-Host "Packaged: $zipPath" -ForegroundColor Green
 }
 
 if ($Shortcut) {
