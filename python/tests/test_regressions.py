@@ -1108,6 +1108,49 @@ def test_help_html_matches_main_version():
     assert footer_version and footer_version.group(1) == main.__version__
 
 
+def test_help_html_shortcuts_table_matches_the_editor_registered_shortcuts(qapp) -> None:
+    """PRE_BUILD_HANDOVER item 5's shortcuts-table judgement call.
+
+    The 9 tool-letter and 4 editing shortcuts are pinned mechanically against
+    the QShortcut objects EditorWindow actually registers - the same
+    introspection test_KEY_01/test_KEY_02_03_04 already rely on, extended to
+    also check help.html's documented set matches. Deliberately NOT pinned:
+    the 3 launcher-only rows (Alt+P, Alt+Shift+P, Alt+V). Those are inline
+    keyPressEvent conditionals, not QShortcut objects, so there is no
+    non-hardcoded source of truth to check them against here - a test that
+    regex-parsed launcher.py's source would be brittle to any refactor of
+    that method's shape, and a second hardcoded expectation would just move
+    the manual-sync burden rather than remove it. Their *behaviour* is
+    already covered separately by test_launcher_keyPressEvent_* below.
+    """
+    import re
+
+    from PySide6.QtGui import QShortcut
+
+    editor = EditorWindow()
+    registered = {s.key().toString().lower() for s in editor.findChildren(QShortcut)}
+    editor.close()
+
+    html = (Path(__file__).resolve().parents[1] / "help.html").read_text(encoding="utf-8")
+    table = re.search(r'<table class="shortcut-table">.*?</table>', html, re.DOTALL).group(0)
+    documented = {key.lower() for key in re.findall(r"<code>([^<]+)</code></td>", table)}
+
+    # QKeySequence("Delete").toString() is "Del" - the same key, a different
+    # spelling. Aliased here rather than changing what the table says to a
+    # user, since "Delete" is the name printed on the actual keyboard key.
+    documented_normalised = {("del" if key == "delete" else key) for key in documented}
+
+    launcher_only = {"alt+p", "alt+shift+p", "alt+v"}
+    documented_editor_rows = documented_normalised - launcher_only
+
+    assert documented_editor_rows == registered, (
+        "help.html's shortcut table has drifted from what EditorWindow actually registers.\n"
+        f"Documented (editor-scope): {sorted(documented_editor_rows)}\n"
+        f"Registered:                {sorted(registered)}"
+    )
+    assert launcher_only <= documented, "the launcher-only shortcuts should still be documented, just not pinned here"
+
+
 def test_WIN_01_editor_window_title_includes_the_running_version(qapp) -> None:
     """Zero new UI, always visible, and it shows up in any screenshot a
     reporter sends - the only way to learn the version in-app used to be

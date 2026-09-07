@@ -302,8 +302,17 @@
   <div class="card">
     <div class="card-title">Video mode <code>Alt+V</code></div>
     Click <strong>Start Recording</strong> to begin a full-screen recording. A timer shows
-    elapsed time. Click <strong>Stop Recording</strong> to finish — the file is saved
-    automatically to your home folder.
+    elapsed time. Click <strong>Stop Recording</strong> to finish — the recording is
+    assembled into a single <code>.mp4</code> and saved to <code>Documents\Test Assist\</code>.
+    An <strong>Open folder</strong> button appears once it's done, so finding the file
+    doesn't mean remembering where it went.
+    <br><br>
+    If MP4 assembly is ever unavailable, nothing is lost: the captured frames are kept
+    on disk instead of the video.
+    <br><br>
+    Recordings are capped at <strong>three minutes</strong>, and frames are scaled to
+    <strong>1280px wide</strong> — a repro that needs longer or full resolution should be
+    split into more than one recording.
   </div>
 
   <div class="diagram-box" style="flex:0 1 120px">
@@ -343,6 +352,22 @@
       <li><strong>Camera</strong> — triggers a Quick Capture</li>
       <li><strong>← |</strong> — restores the full floating panel</li>
     </ul>
+  </div>
+
+  <div class="card">
+    <div class="card-title">Check for Updates</div>
+    Click the update icon in the header row to check whether a newer version is available.
+    This is manual only — nothing is checked automatically, and nothing contacts GitHub
+    unless you click it. If a newer version exists, the dialog links to its release page;
+    to actually install it, close Test Assist, download the new zip, and replace the
+    contents of the folder you run it from — the app is installed by unzipping, so that's
+    the whole update.
+  </div>
+
+  <div class="tip">
+    <strong>Multiple monitors</strong> — region capture, full-screen capture, and recording
+    all follow whichever screen you're actually using or working on, not always the main
+    display. A selection that spans two screens is captured from both, side by side.
   </div>
 
   <!-- ─── Editor ─── -->
@@ -460,6 +485,16 @@
       </ul>
     </div>
 
+  <div class="card">
+    <div class="card-title">About &amp; bug reports <code>ⓘ</code></div>
+    Click the ⓘ button beside Help to open the About dialog. It shows the running version and
+    your Windows version, and its <strong>Copy details for a bug report</strong> button copies
+    all of that plus your full display layout — screen count, each screen's geometry, and its
+    scaling (device pixel ratio) — to the clipboard in one click. Pasting this into a bug report
+    is the fastest way to get a defect diagnosed, especially anything to do with multiple
+    monitors or mixed scaling.
+  </div>
+
   <!-- ─── Tools ─── -->
   <h2>Annotation Tools</h2>
   <div class="tool-grid">
@@ -569,13 +604,15 @@
   <!-- ─── History ─── -->
   <h2>History</h2>
   <p>
-    Every time you save or copy an image, a thumbnail snapshot is saved automatically to
-    <code>~/.test-assist/history/</code>. The History sidebar shows your recent snapshots.
+    Every time you save or copy an image, a thumbnail snapshot is added automatically to the
+    History sidebar. Recordings appear there too, shown as a distinct video card rather than a
+    thumbnail — clicking one opens it in your video player instead of loading it into the canvas.
   </p>
   <p>
     Use the <strong>Show</strong> dropdown to filter: Recent 5, Today, This Week, or This Month.
     Click the <strong>HISTORY</strong> header to open a full gallery overlay with all category
-    tabs. Clicking any thumbnail loads that image back into the editor.
+    tabs. Clicking a snapshot loads it back into the editor; clicking a recording opens it
+    externally.
   </p>
 
   <!-- ─── Keyboard shortcuts ─── -->

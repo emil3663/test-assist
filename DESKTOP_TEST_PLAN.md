@@ -1,6 +1,6 @@
 # 🔍 Test Assist — Desktop Test Plan
 
-**Version:** 1.12
+**Version:** 1.13
 **Last updated:** 2026-09-07
 **Status:** In active development
 **Applies to:** the PySide6 desktop build under `python/`. The browser build has
@@ -287,6 +287,7 @@ launcher back to the wrong display on undock.
 | KEY-03 | Ctrl+S | Save PNG | ✅ |
 | KEY-04 | Delete | Delete the selected annotation | ✅ |
 | KEY-05 | Shortcuts while typing a text annotation | Tool shortcuts are suppressed | ✅ |
+| KEY-06 | `help.html`'s shortcuts table vs. registered `QShortcut`s | The 13 editor-scope rows match exactly; the 3 launcher-only rows are documented but not mechanically pinned (see DESKTOP_STABILITY_MATRIX.md) | ✅ |
 
 ### 3.14 Application Lifecycle
 

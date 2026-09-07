@@ -97,6 +97,22 @@ release; only tagged versions appear as releases.
 
 ### Changed
 
+- **`help.html` brought back in line with what the app actually does.** It
+  had drifted behind three releases and, since v1.3.0, contained a false
+  statement: recordings were described as saved "to your home folder" when
+  they are in a named subfolder of it (and, as of the change above, in
+  Documents instead). Added: MP4 assembly and the frame-sequence fallback;
+  the three-minute cap and 1280px scaling; Check for Updates (manual,
+  contacts nothing unless pressed, and how to install an update); About /
+  Copy details for a bug report; multi-display behaviour; recordings now
+  appearing in the History gallery. The History section no longer names
+  where snapshots are stored — it's an auto-pruned cache, and naming the
+  folder would invite putting things in it that would then be deleted.
+  The keyboard-shortcuts table is now pinned by a test against the
+  `QShortcut`s `EditorWindow` actually registers, for the 13 rows that are
+  real `QShortcut` objects; the 3 launcher-only rows (inline `keyPressEvent`
+  conditionals, not `QShortcut`s) are documented but deliberately not
+  pinned the same way — see `DESKTOP_STABILITY_MATRIX.md` for why.
 - **Recordings and capture history moved out of `~/.test-assist`.**
   `~/.test-assist/recordings` was undiscoverable on Windows — a dot-prefixed
   folder is a Unix convention Windows users do not look in — and moving it
