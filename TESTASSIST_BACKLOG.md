@@ -308,6 +308,105 @@ that will actually ship.
 
 ## Suggested Milestone Gates
 
+### TA-211 — Alt+P, Alt+Shift+P and Alt+V are advertised everywhere and bound to nothing
+
+- **Phase:** 1
+- **Priority:** P1
+- **Suggested labels:** `bug`, `launcher`, `docs-integrity`
+- **Problem it solves:** The launcher's photo button tooltip says
+  "capture screenshot (Alt+P)", the video button says "(Alt+V)", the full-capture
+  button says "(Alt+Shift+P)", the launcher shows an on-screen hint reading
+  "Alt+P · capture   ·   Alt+V · record", and `help.html`'s Keyboard Shortcuts
+  table lists all three. **None of them is bound to anything.** A repository-wide
+  search finds `Alt+` only in those tooltip strings, that hint label, the help
+  table, and three tests asserting the tooltip text. There is no `QShortcut`, no
+  key handler and no hotkey registration for any of them. The only shortcuts that
+  exist are `Ctrl+Z`, `Ctrl+Y`, `Ctrl+S`, `Delete` and the single-letter tool keys,
+  all in `editor.py` and all editor-scoped.
+  - Found by a user pressing Alt+P while working in a browser and nothing
+    happening. It would not have worked with the app focused either.
+  - `test_regressions.py` asserts the tooltips *contain* those strings, so the
+    suite is actively protecting the advertisement of a feature that does not
+    exist. Any fix must replace those assertions with ones that exercise the
+    binding, not the label.
+  - This violates the project's standing rule that every claim on the page or in
+    the docs is true of the code as committed — here the false claim is on the
+    app's own face.
+- **Scope:**
+  - Bind the three advertised shortcuts for real.
+  - They must be **system-wide hotkeys**, not `QShortcut`. The entire point of an
+    always-on-top capture widget is capturing whatever else has focus; a shortcut
+    that only fires when Test Assist is focused is useless for the stated purpose.
+    Qt has no cross-platform global hotkey API — on Windows this is `RegisterHotKey`
+    via `ctypes` plus a `QAbstractNativeEventFilter` handling `WM_HOTKEY`. No new
+    dependency.
+  - Handle registration failure explicitly. `RegisterHotKey` fails when another
+    application already owns the combination. A failed registration must be
+    surfaced, and the corresponding tooltip and help entry must not claim a
+    shortcut that did not register.
+  - Release the hotkeys on exit.
+- **Deliverables:**
+  - Working global Alt+P / Alt+Shift+P / Alt+V, or — if global registration is
+    deferred — every one of those five claim sites removed in the same commit.
+    Shipping the claims unbound again is not an option.
+- **Acceptance criteria:**
+  - Pressing Alt+P with a browser focused captures, with Test Assist unfocused.
+  - A combination that fails to register is reported and no longer advertised.
+  - No test asserts a shortcut string in a tooltip without a corresponding test
+    that the binding exists.
+- **Dependencies:** None. Blocks the 1.4.0 release — the app currently makes three
+  false claims about itself in its own UI.
+
+### TA-212 — PrintScreen as an opt-in capture shortcut
+
+- **Phase:** 2
+- **Priority:** P2
+- **Suggested labels:** `enhancement`, `launcher`
+- **Problem it solves:** PrintScreen is what a tester's hand reaches for. Test
+  Assist can own it via `RegisterHotKey` with `VK_SNAPSHOT` (0x2C).
+- **Scope:**
+  - Off by default and opt-in from a setting. Claiming PrintScreen globally takes
+    it away from every other application on the machine, including the user's
+    existing habits, and must never happen without the user asking.
+  - Windows 11 can map PrintScreen to the Snipping Tool
+    (Settings → Accessibility → Keyboard → "Use the Print screen key to open screen
+    capture"). When that is on, registration fails. Detect it, say so plainly, and
+    point at that setting rather than failing silently.
+- **Deliverables:**
+  - A setting, a registration path, and an honest failure message.
+- **Acceptance criteria:**
+  - Default install does not claim PrintScreen.
+  - With the setting on and registration successful, PrintScreen captures.
+  - With registration refused, the user is told why and where to change it.
+- **Dependencies:** TA-211 — the hotkey mechanism it needs is built there.
+
+### TA-213 — Rework help.html for the current UI, screenshots included
+
+- **Phase:** 2
+- **Priority:** P1
+- **Suggested labels:** `docs`, `editor`
+- **Problem it solves:** The editor's layout changed materially in `19bbf0c`
+  (settings and export controls moved to a full-width second toolbar row, the
+  right panel reduced to Edit and History), `734dfe7` (Show Launcher button),
+  `a7a465f` (recording thumbnails with a play badge) and `6468591` (open a file
+  from Explorer). Help's screenshots and diagrams show the previous layout, so a
+  user following it is looking for controls where they no longer are.
+- **Scope:**
+  - Retake every screenshot and redraw the inline SVG diagrams against the built
+    1.4.0 UI.
+  - Cover what is new: the second toolbar row, the Show Launcher button, recording
+    thumbnails, opening an image from Explorer, and the X-hides-to-tray behaviour.
+  - Reconcile the Keyboard Shortcuts table with whatever TA-211 actually lands.
+    The help table and the launcher tooltips currently disagree with each other as
+    well as with the code.
+- **Deliverables:**
+  - Updated `help.html` with current imagery and an accurate shortcut table.
+- **Acceptance criteria:**
+  - Every control shown in help exists, in the position shown.
+  - No shortcut appears in help that is not bound in the code.
+- **Dependencies:** TA-211. Do this after the shortcut work, not before, or the
+  table is rewritten twice.
+
 ### Gate A — Code complete
 - TA-201, TA-202, TA-203 merged
 - Suite green, no skips, no test opens a socket

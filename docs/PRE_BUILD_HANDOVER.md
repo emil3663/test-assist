@@ -1,5 +1,8 @@
 # Before the next build — outstanding work
 
+> **SUPERSEDED 2026-09-09** by `docs/SESSION_HANDOVER_2026-09-09.md`.
+> Every item below is complete. Kept for the reasoning, not as a task list.
+
 **Date:** 2026-09-07
 **HEAD:** `136be0d` (overlay geometry fix) — pushed
 **Uncommitted:** the docking fix, the help.html pass, plus untracked reference docs

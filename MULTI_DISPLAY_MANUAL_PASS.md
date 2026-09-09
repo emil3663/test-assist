@@ -53,7 +53,7 @@ you already have it: negative coordinates *and* mixed DPI at once.
 | DSP-14 | Drag flush to the laptop's right edge | Auto-docks against that screen | ⬜ |
 | DSP-17 | About → Copy details for a bug report | Clipboard has version, OS, both screens with geometry and DPR | ⬜ |
 | DSP-18 | Help page header and footer | Version shown, matches the window title | ⬜ |
-| INS-02 | Close the last window | App stays alive in the tray | ⬜ |
+| INS-02 | Close the last window | App stays alive in the tray | ✅ 2026-09-08 — X hides the launcher, tray survives, Show Launcher restores it. Run against build md5 `85e1556d`; an earlier run against `12fade5b` (the 2 Sep binary, unzipped by mistake) failed and does not count. |
 | PKG-03 | Pin to taskbar | Pinned icon matches the tray icon | ⬜ |
 | PKG-05 | Right-click exe → Properties → Details | Product name and version populated | ⬜ |
 | UPD-12 | Check for Updates | Reaches GitHub and reports correctly | ⬜ |
