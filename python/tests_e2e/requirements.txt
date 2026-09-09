@@ -1,0 +1,6 @@
+# Windows-only, dev/test-only dependency for the TA-228 black-box smoke
+# lane (tests_e2e/). Never imported by anything under python/ that ships -
+# not bundled into the built exe, and deliberately kept out of
+# python/requirements.txt so installing it (and its own pywin32/comtypes
+# dependencies) is never a cost the main suite or a normal build pays.
+pywinauto>=0.6.9

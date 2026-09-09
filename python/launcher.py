@@ -157,6 +157,12 @@ class FloatingLauncher(QWidget):
         self._btn_open_editor.setIcon(self._make_ta_icon())
         self._btn_open_editor.setIconSize(QSize(14, 14))
         self._btn_open_editor.setToolTip("Open Editor")
+        # setAccessibleName(), not just the tooltip (TA-228): this is an
+        # icon-only button, indistinguishable from its unlabeled siblings
+        # to UI Automation without one - the black-box e2e lane needs a
+        # reliable way to find it from outside the process, and a real
+        # accessible name is also what a screen reader would announce.
+        self._btn_open_editor.setAccessibleName("Open Editor")
         self._btn_open_editor.setStyleSheet(self._style_icon_btn())
         self._btn_open_editor.setEnabled(True)
 
