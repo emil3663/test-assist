@@ -1311,6 +1311,41 @@ that will actually ship.
   rebuild to include; not a new numbered `rc`, since nothing else
   app-facing changed.
 
+  **Re-run on real hardware, 2026-09-09 — the "needs a real interactive
+  machine" theory above is disproven, not confirmed.** Run twice on
+  Emil's own desktop, both times freshly (no stale instance in the tray
+  either run): check 1 passes, checks 2 and 3 fail identically both
+  times, same failure shape as the cloud/CI environment.
+  Disambiguated directly rather than assumed: with the automated run
+  finished, Emil opened Test Assist and clicked Quick Capture and Open
+  Editor **with his own mouse** — both work exactly as expected (floating
+  widget hides, capture-area targeting icon appears; Editor opens from
+  both the floating and docked widget). The app is not regressed. What's
+  actually failing is narrower and more specific than "no synthetic
+  input reaches the app in this class of environment": `pywinauto`'s
+  `click_input()` (real OS `SendInput`) does not register with this
+  specific Qt application even from a real, logged-in, interactive
+  desktop session — every cause the original investigation ruled out
+  (DPI awareness, click coordinates, session/desktop attachment, UIPI
+  integrity level) was already eliminated there, and none of those
+  explanations depended on the session being non-interactive, so their
+  being ruled out again here isn't new information — what's new is that
+  the "will just work on real hardware" part of the theory is now
+  falsified by a direct test.
+  Not yet investigated: whether this is specific to `pywinauto`'s default
+  UI Automation backend against a `PySide6`/Qt window (Qt's own input
+  handling may not treat OS-level synthetic `SendInput` the same as a
+  physically-generated one for reasons unrelated to focus/DPI/session),
+  whether `pywinauto`'s `win32` backend (direct `PostMessage`, already
+  tried once during the original investigation but not re-tried on an
+  interactive session where the message pump behaves differently) fares
+  any better, or whether third-party security software on this specific
+  machine is intercepting synthetic input to this one process. Checks 2
+  and 3 remain correctly designed and this ticket's acceptance criteria
+  are still not met — the next step is investigating *why Qt specifically
+  ignores this* on a session that accepts real mouse input from Windows
+  itself, not another "try it somewhere more interactive" attempt.
+
 ### Gate A — Code complete
 - TA-201, TA-202, TA-203 merged
 - Suite green, no skips, no test opens a socket
