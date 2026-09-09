@@ -1163,6 +1163,43 @@ that will actually ship.
   corresponding retrofitted test fail — not just a function-call assertion,
   a real observed absence of the overlay.
 - **Dependencies:** None.
+- **Verified:** ✅ 2026-09-09, per `docs/ta227-228-e2e-testing-brief.md`.
+  Both named tests retrofitted: `_start_capture` no longer stubbed, real
+  end state asserted (`launcher._overlay.isVisible()`, then a real
+  press/move/release drag through the real overlay confirmed via a real
+  `capture_ready` emission with a non-null pixmap) instead of a
+  function-call assertion; button-path test now triggers
+  `launcher._btn_capture.click()` instead of calling `_on_action_click`
+  directly. Verified to fail two ways, each restored after: (1) removing
+  the `_dismiss_active_modal_dialog()` call reintroduces the original
+  rc4 regression and fails on the pre-existing dismiss assertion; (2)
+  keeping that call but removing `_start_capture()` itself fails
+  specifically on the *new* `isVisible()` assertion, confirming the
+  retrofit adds real, independent detection power, not just riding on
+  the older check. Full suite: `320 passed, 0 skipped` (2 deselected),
+  unaffected.
+  **Grep for the same shape, repo-wide:** every other
+  `lambda: ...append(...)` stub in both test files checked against the
+  ticket's own rule (stub only what's downstream of the action under
+  test, or a method with its own independently-verified real-effect
+  test elsewhere, or a real signal-spy — never the action's own
+  immediate effect). Found no other instance of the flawed shape:
+  TA-211's hotkey-routing test stubs `_start_capture` etc. but its own
+  claim is narrowly "routes to the right handler," not "capture
+  works," and that broader claim is now covered by TA-217's retrofit
+  above; the DSP-15 restore-repositioning tests stub
+  `_position_top_right`/`_dock_right` but each has its own real,
+  unstubbed correctness test elsewhere
+  (`test_launcher_position_top_right_uses_the_screen_the_widget_is_on`,
+  `test_launcher_dock_right_moves_to_expected_x_position`); the TA-218
+  Editor-button test stubs `_check_for_updates` but its own claim is
+  narrowly "reaches the launcher's checker," with the checker's own
+  logic covered by UPD-01 through UPD-11; `QApplication.quit`/
+  `primaryScreen` stubs are system-API-boundary substitutions, not
+  app-logic shortcuts; every `signal.connect(lambda: ...)` found is a
+  spy on a real signal, not a stand-in for a mechanism. Convention note
+  added to `DESKTOP_STABILITY_MATRIX.md`. Full findings in
+  `docs/BUILD_LOG.md`'s TA-227 entry.
 
 ### TA-228 — No test drives the actual packaged app from outside the process
 
