@@ -133,6 +133,29 @@ tests. `continue-on-error: true` on the job means a failure here cannot
 block anything gating on the workflow's overall conclusion; only the main
 `test` job's own status does that.
 
+**A dispatch/wiring test convention, since TA-227.** Two tests (TA-217's
+hotkey- and button-path dispatch tests) used to replace `_start_capture`
+with a call-recording lambda, then assert only that the lambda was
+called - proving the function ran, not that a real, interactive capture
+overlay ever resulted, which is the actual thing those tests exist to
+claim. The rule going forward: a dispatch/wiring test may stub the side
+effects *downstream of* the action under test - file I/O, the network, an
+OS API (`QApplication.quit`, `RegisterHotKey`), or another method whose
+*own* correctness is independently verified elsewhere unstubbed (e.g.
+`_position_top_right()`/`_dock_right()`'s real geometry effect is proven
+by `test_launcher_position_top_right_uses_the_screen_the_widget_is_on`/
+`test_launcher_dock_right_moves_to_expected_x_position`, so a test whose
+own narrow claim is just "restore() calls the right one of these when the
+screen is gone" may legitimately stub them) - but never the action's own
+immediate, in-process effect, which is the one thing the test exists to
+check. A signal-spy (`some_signal.connect(lambda: calls.append(...))`
+observing a real signal a real operation actually emits) is not this
+shape either - it is an observer, not a stand-in for the mechanism.
+Checked every other `lambda: ...append(...)` stub in both test files
+against this rule while writing the fix; found none beyond the two named
+tests - see `docs/BUILD_LOG.md`'s TA-227 entry for the full list checked
+and why each one is fine.
+
 ---
 
 ## The blocked six

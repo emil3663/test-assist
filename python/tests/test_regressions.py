@@ -26,6 +26,25 @@ class _MouseEventStub:
         return QPointF(self.x, self.y)
 
 
+@dataclass
+class _OverlayMouseStub:
+    """A mouse-event stub for ScreenshotOverlay's handlers specifically -
+    they read button() and globalPosition(), not position() like
+    _MouseEventStub above (used for AnnotationCanvas/QKeyEvent-driven
+    tests). Matches test_functional.py's own _overlay_mouse() helper;
+    kept as a separate, local definition rather than importing a
+    leading-underscore name across test modules."""
+    x: float
+    y: float
+    btn: Qt.MouseButton = Qt.MouseButton.LeftButton
+
+    def globalPosition(self) -> QPointF:
+        return QPointF(self.x, self.y)
+
+    def button(self) -> Qt.MouseButton:
+        return self.btn
+
+
 def _typed_event(char: str) -> QKeyEvent:
     return QKeyEvent(QEvent.Type.KeyPress, 0, Qt.KeyboardModifier.NoModifier, char)
 
@@ -593,14 +612,20 @@ def test_TA217_global_hotkey_closes_an_open_about_dialog_before_capturing(qapp, 
     needed to drag a selection. The hotkey path must close the dialog
     before dispatching, not leave the user with a silently
     non-interactive overlay.
+
+    TA-227: _start_capture() is not stubbed here (it used to be, replaced
+    with a call-recording lambda) - that proved the function was called,
+    not that a real, interactive overlay ever resulted, which is exactly
+    the gap TA-217's own ticket flagged about this test by name. Letting
+    the real chain run and asserting the overlay is actually shown *and*
+    can complete a real capture is what would have caught either
+    direction of that gap regressing.
     """
     from PySide6.QtCore import QTimer
+    from PySide6.QtTest import QTest
 
     editor = EditorWindow()
     launcher = FloatingLauncher(editor)
-
-    calls: list[str] = []
-    launcher._start_capture = lambda: calls.append("start_capture")
 
     # Spied rather than only checked by end state: without this, a
     # regression would still eventually "pass" once the safety net below
@@ -628,10 +653,31 @@ def test_TA217_global_hotkey_closes_an_open_about_dialog_before_capturing(qapp, 
     editor._open_about()  # blocks until the dialog closes
 
     assert dismiss_calls, "the hotkey path must actually attempt to dismiss an open modal dialog"
-    assert calls == ["start_capture"], \
-        "the hotkey must still dispatch to a capture while the About dialog is open"
     assert QApplication.activeModalWidget() is None, \
         "the About dialog must be closed, not left open and still input-blocking"
+
+    # _start_capture()'s own 220ms singleShot is what actually shows the
+    # overlay - give it time to fire for real.
+    QTest.qWait(400)
+    assert launcher._overlay.isVisible(), (
+        "the hotkey path must produce a real, visible capture overlay - "
+        "a stubbed _start_capture() could never catch this regressing"
+    )
+
+    # Not just visible - actually able to receive input and complete a
+    # capture, which is the "interactive" half of the real end state.
+    grabbed: list = []
+    launcher._overlay.capture_ready.connect(grabbed.append)
+    launcher._overlay.mousePressEvent(_OverlayMouseStub(40, 40))
+    launcher._overlay.mouseMoveEvent(_OverlayMouseStub(200, 160))
+    launcher._overlay.mouseReleaseEvent(_OverlayMouseStub(200, 160))
+    QTest.qWait(300)
+
+    assert grabbed and not grabbed[0].isNull(), (
+        "the overlay shown after the hotkey path must actually be able to "
+        "receive input and complete a capture, not just appear on screen"
+    )
+
     editor.close()
     launcher.close()
 
@@ -641,14 +687,19 @@ def test_TA217_quick_capture_button_closes_an_open_about_dialog_before_capturing
     _dismiss_active_modal_dialog() was called only from
     _on_global_hotkey(), so clicking the Quick Capture *button* itself
     while About was open was still silently swallowed by Qt's
-    application-modal block, exactly as before the ticket's rc4 fix."""
+    application-modal block, exactly as before the ticket's rc4 fix.
+
+    TA-227: two retrofits. _start_capture() is no longer stubbed, same
+    reasoning as the hotkey-path test above. And the trigger is now a
+    real `_btn_capture.click()` rather than calling `_on_action_click`
+    directly, so Qt's own signal/slot wiring between the button and its
+    handler is exercised too, not just the handler body.
+    """
     from PySide6.QtCore import QTimer
+    from PySide6.QtTest import QTest
 
     editor = EditorWindow()
     launcher = FloatingLauncher(editor)
-
-    calls: list[str] = []
-    launcher._start_capture = lambda: calls.append("start_capture")
 
     dismiss_calls: list[bool] = []
     real_dismiss = FloatingLauncher._dismiss_active_modal_dialog
@@ -657,14 +708,31 @@ def test_TA217_quick_capture_button_closes_an_open_about_dialog_before_capturing
         real_dismiss()
     monkeypatch.setattr(FloatingLauncher, "_dismiss_active_modal_dialog", staticmethod(_spy_dismiss))
 
-    QTimer.singleShot(0, launcher._on_action_click)
+    QTimer.singleShot(0, launcher._btn_capture.click)
     QTimer.singleShot(2000, lambda: QApplication.activeModalWidget() and QApplication.activeModalWidget().close())
     editor._open_about()  # blocks until the dialog closes
 
     assert dismiss_calls, "the button path must also attempt to dismiss an open modal dialog"
-    assert calls == ["start_capture"], \
-        "the button must still dispatch to a capture while the About dialog is open"
     assert QApplication.activeModalWidget() is None
+
+    QTest.qWait(400)
+    assert launcher._overlay.isVisible(), (
+        "the button path must produce a real, visible capture overlay - "
+        "a stubbed _start_capture() could never catch this regressing"
+    )
+
+    grabbed: list = []
+    launcher._overlay.capture_ready.connect(grabbed.append)
+    launcher._overlay.mousePressEvent(_OverlayMouseStub(40, 40))
+    launcher._overlay.mouseMoveEvent(_OverlayMouseStub(200, 160))
+    launcher._overlay.mouseReleaseEvent(_OverlayMouseStub(200, 160))
+    QTest.qWait(300)
+
+    assert grabbed and not grabbed[0].isNull(), (
+        "the overlay shown after the button path must actually be able to "
+        "receive input and complete a capture, not just appear on screen"
+    )
+
     editor.close()
     launcher.close()
 
