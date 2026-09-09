@@ -196,3 +196,139 @@ after it was never reached). 1 passed (the crash case), 1 skipped (the
 guarded case) — confirms the mechanism, not just the syntax.
 
 **Commit:** `7bf77ee` (test-only change, on top of `8aed866`).
+
+---
+
+## rc5 — 2026-09-09
+
+Built per `docs/ta215-225-fix-brief.md`, executed in full (TA-215, TA-217,
+TA-220 through TA-225 — eight tickets, three confirmed fixes reopened from
+rc4, two small layout fixes, four investigate-first items instrumented
+with logging, one deferred).
+
+**Source:** `origin/main` at `5783f8dc2e32390fa778307d2cfc3d37c428ef1d`
+(`5783f8d`) — pushed this session (`77029f2..5783f8d`). `git rev-parse HEAD`
+matches `5783f8d` exactly, working tree clean. CI (`Python Tests`,
+`.github/workflows/python-tests.yml`) confirmed **green** on this exact
+commit before building —
+[run 34337047970](https://github.com/emil3663/test-assist/actions/runs/34337047970),
+conclusion `success`, `headSha` `5783f8dc2e32390fa778307d2cfc3d37c428ef1d`.
+
+**Build command:** `.\build.ps1 -Zip -Shortcut` from `python\`, venv active.
+The build's own self-check passed (`Built and verified: Test Assist 1.3.0`,
+ffmpeg resolved, SSL backend `schannel`).
+
+**Hash verification — this build genuinely differs from rc4:**
+
+| | rc4 (stale, predates this batch) | rc5 (this entry) |
+|---|---|---|
+| md5 | `3f040048c6fdd3a466f1359d9678cfb5` | `94124e37bdc2eed2444b3b83ae3ea88e` |
+| size (bytes) | 2,281,414 | 2,284,303 |
+| exe mtime | 2026-09-09 08:12 | 2026-09-09 11:53 |
+
+Not taken on faith: `python\build\TestAssist\xref-TestAssist.html` (this
+build's own module cross-reference) was grepped directly and lists
+`debug_log` — proof the new logging module was actually analyzed into
+this exe, not just that the hash happened to differ.
+
+**Artifacts:**
+- Built folder: `python\dist\TestAssist\` (exe md5 `94124e37bdc2eed2444b3b83ae3ea88e`, 2,284,303 bytes)
+- Zip: `python\dist\TestAssist-1.4.0-rc5-win64.zip` (renamed from the
+  `TestAssist-1.3.0-win64.zip` `build.ps1` produced — `__version__` is
+  still `1.3.0`, deliberately, until the manual pass is green)
+- Desktop shortcut: `C:\Users\MSI workstation\Desktop\Test Assist.lnk` (from `-Shortcut`)
+
+**Installed at:** `C:\TestAssist\TestAssist-1.4.0-rc5(09092026)\TestAssist.exe`
+— a new dated subfolder, same convention as rc3/rc4. Nothing existing was
+renamed or moved. No `TestAssist` process was running at install time
+(checked via `tasklist` before copying), so there was nothing to close per
+S-1. Installed copy's md5 checked directly against the build output:
+**identical** (`94124e37bdc2eed2444b3b83ae3ea88e`).
+
+**Per-ticket status:**
+- **TA-220** — confirmed part fixed: `bring_forward()` now checks
+  `Qt.WindowState.WindowMaximized` before restoring, calling
+  `showMaximized()` instead of unconditionally `showNormal()`; a maximized
+  Editor minimized then restored now comes back maximized. Test added,
+  verified to fail pre-fix. Minimize-toggle-not-firing gap:
+  **instrumented, not fixed** — `bring_forward()` logs
+  `isActiveWindow()`/`isMinimized()` on every call when `TESTASSIST_DEBUG=1`,
+  writing to `paths.history_dir()/debug.log` (`%LOCALAPPDATA%\Test
+  Assist\history\debug.log` on a real install). No second monitor/
+  interactive session here to confirm the `isActiveWindow()` timing
+  hypothesis — needs a real click on the actual hardware.
+- **TA-221** — fixed: removed `_btn_copy`/`_btn_export_json`'s
+  `setFixedHeight(26)` rather than bumping it; both now size naturally at
+  28px, matching `_btn_save_png`'s already-proven-clear height. Test added
+  (checks `maximumHeight()` is uncapped), verified to fail pre-fix. Could
+  **not** get the ticket's own asked-for rendered-screenshot confirmation
+  in this environment — the offscreen Qt platform used for headless tests
+  has no real font rendering available (glyphs render as tofu boxes, not
+  usable to confirm clipping is gone); the measurement-based proxy
+  (natural height now exactly matches Save PNG's already-unclipped 28px)
+  is strong but not the literal visual check the ticket asks for — needs
+  a real screenshot from the installed build.
+- **TA-222** — fixed: added the settings bar's missing leading
+  `layout.addStretch()`, matching the tools bar's centering pattern. Test
+  added, verified to fail pre-fix.
+- **TA-217** — confirmed part fixed: `_dismiss_active_modal_dialog()` is
+  now also called from the Quick Capture button's own click handler, not
+  just the hotkey path. Test added, verified to fail pre-fix.
+  Hotkey-path-doesn't-capture gap: **instrumented, not fixed** —
+  `_dismiss_active_modal_dialog()` logs whether it found a modal;
+  `_start_capture()` logs when its overlay-activation `singleShot`
+  actually fires. Same `TESTASSIST_DEBUG=1` / `debug.log` location as
+  above.
+- **TA-215** — confirmed parts fixed: `_on_record_finished()` now calls
+  the editor's new public `refresh_history()`, so a finished recording
+  appears in History live instead of only after a restart; the docked
+  capture icon now shows a distinct appearance when Video mode is
+  selected but not yet recording (reuses the existing `_make_video_icon()`
+  glyph). Tests added for both, verified to fail pre-fix.
+- **TA-223** — **instrumented, not fixed** (P1, but genuinely needs the
+  real dual-monitor hardware to measure, not another guess): `capture.py`'s
+  `mouseMoveEvent()` now logs the raw `event.globalPosition()` value
+  alongside both screens' `QScreen.geometry()` on every drag move, gated
+  behind `TESTASSIST_DEBUG=1`, written to `paths.history_dir()/debug.log`.
+  The next manual pass dragging across the laptop/external boundary with
+  this build will produce the coordinate log needed to confirm or rule out
+  the DPI-rounding hypothesis.
+- **TA-224** — **deferred past 1.4.0**, decision recorded on the ticket in
+  `TESTASSIST_BACKLOG.md` (net-new capability, not a bug; 1.4.0's scope has
+  already grown from 7 to 16 tickets). No code change.
+- **TA-225** — **instrumented, not fixed**, same reasoning as TA-223:
+  `capture.py`'s `_grab()` now logs the dragged rect and what
+  `plan_capture()` received/returned for it, same env var and log file.
+  Possibly the same mechanism as TA-223 — the next manual pass's log
+  output for both will show whether they share a cause.
+
+**Debug logging convention used:** a new `debug_log.py` module (no
+existing app-wide logging module existed to reuse) — `debug_log.log(msg)`,
+gated on `os.environ.get("TESTASSIST_DEBUG") == "1"` (checked per call,
+not cached, so it can be toggled without restarting), appends a
+timestamped plain-text line to `paths.history_dir() / "debug.log"` — the
+same app-managed-cache location `paths.py` already designates for
+non-Documents data. On a real install this resolves to
+`%LOCALAPPDATA%\Test Assist\history\debug.log`. To capture the next
+manual pass's measurements: set `TESTASSIST_DEBUG=1` before launching
+`TestAssist.exe`, reproduce TA-220/TA-217/TA-223/TA-225's cases, then read
+that file.
+
+**Full suite:** 320 passed, 0 skipped, 0 failed. Every new/changed test
+verified to genuinely fail against the pre-fix code first (production
+files reverted to HEAD, confirmed real failures, then restored) — 12
+new/changed tests failed pre-fix as expected; a 13th
+(`test_TA215_a_recording_with_nothing_captured_does_not_refresh_history`)
+is a pinning test for an already-correct early-return path and correctly
+passed both before and after.
+
+**What this unblocks:** TA-220's maximize-restore, TA-221's button text,
+TA-222's row alignment, TA-217's button-path dismiss, and TA-215's
+History-refresh-on-finish and video-mode icon are all re-testable manually
+against `C:\TestAssist\TestAssist-1.4.0-rc5(09092026)\TestAssist.exe`
+(single monitor is enough for all five). Still blocked on the second
+monitor: TA-220's minimize-toggle gap, TA-217's hotkey-capture gap,
+TA-223, and TA-225 — this batch instruments them but doesn't fix them; the
+actual fix is a follow-up ticket once the `debug.log` output from the next
+manual pass is in hand. TA-224 stays deferred past 1.4.0 per the decision
+above unless overridden.
