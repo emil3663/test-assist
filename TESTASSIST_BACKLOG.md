@@ -256,6 +256,39 @@ Everything below is what remains.
     covering it.
 - **Dependencies:** None.
 
+### TA-210 — Register Test Assist as a Windows file association for images
+
+- **Phase:** 3
+- **Priority:** P3
+- **Suggested labels:** `enhancement`, `packaging`
+- **Problem it solves:** "Open with -> Test Assist" now works once a user picks
+  it manually - the app validates the file argument and loads it into the
+  editor. It is not, and does not need to be, the *default* handler for any
+  image extension to work: that is a separate, more visible decision (it
+  changes what double-clicking a `.png` does system-wide) than making "Open
+  with" functional at all, and was explicitly out of scope for that fix.
+- **Scope:**
+  - Decide which extensions (`.png` at minimum; `.jpg`/`.jpeg` maybe) Test
+    Assist should be allowed to register for, and whether it should ever set
+    itself as *default* versus only appearing in the "Open with" list.
+  - Registry writes (`HKCU\Software\Classes\...`) or an installer-time
+    association, scoped to the current user - never a system-wide/admin
+    write for an app that installs by unzipping.
+  - An uninstall/cleanup story, since nothing currently uninstalls this app
+    beyond deleting the folder - a stale association pointing at a deleted
+    `TestAssist.exe` must not be left behind silently.
+- **Deliverables:**
+  - A decision on default-handler vs. "Open with"-list-only, recorded here or
+    in a follow-up brief before any registry code is written.
+  - If implemented: the registration code, plus a manual test case in
+    `DESKTOP_TEST_PLAN.md` (this cannot be verified by the automated suite -
+    it is real Windows shell state, not application behaviour).
+- **Acceptance criteria:**
+  - No registry write happens outside of this ticket's own implementation -
+    the "Open with" fix it follows on from must keep working with zero
+    registration, as it does today.
+- **Dependencies:** None.
+
 ---
 
 ## Recommended Execution Order

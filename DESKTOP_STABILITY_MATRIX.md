@@ -1,6 +1,6 @@
 # 🔍 Test Assist — Desktop stability matrix
 
-**Version:** 1.15
+**Version:** 1.16
 **Last updated:** 2026-09-09
 **Applies to:** the PySide6 desktop build. The browser build has its own matrix
 in `STABILITY_MATRIX.md`.
@@ -25,13 +25,13 @@ not. This document is that check.
 
 | | Count |
 |---|---|
-| Cases in `DESKTOP_TEST_PLAN.md` v1.19 | 179 |
-| Automated and passing | 174 |
+| Cases in `DESKTOP_TEST_PLAN.md` v1.20 | 183 |
+| Automated and passing | 178 |
 | Blocked, documented as manual | 5 |
-| Automated tests | 278 collected — 278 pass everywhere, no skips |
+| Automated tests | 283 collected — 283 pass everywhere, no skips |
 | Wall clock | about 2-3 seconds warm; the first run is slower while the bundled ffmpeg loads |
 
-**A green run is `278 passed, 0 skipped`, everywhere.** MP4 assembly used to
+**A green run is `283 passed, 0 skipped`, everywhere.** MP4 assembly used to
 depend on `opencv-python`, an optional dependency the product deliberately
 shipped without, which made REC-05 skip itself on CI, the packaged build, and
 any clean checkout. It now shells out to a bundled `ffmpeg` binary via
@@ -154,7 +154,7 @@ These five are the manual pass to run against a release before trusting it.
 | 3.11 History | 18 | Moderate | HIS-05 back-dates a file's mtime rather than waiting. HIS-08 through HIS-12 (item 4) prove recordings appear in the gallery, get their own widget rather than being fed through `_SnapshotThumb`'s `QPixmap(path)` call, open externally rather than loading into the canvas, and are never touched by history pruning. HIS-13 through HIS-17 (recording thumbnails) shell out to the real bundled ffmpeg the same way REC-05 does, and HIS-14/HIS-15 poll for a background-thread result with a timeout rather than a fixed sleep - see the note on `QTest.qWait()` below. All five were verified to fail against the pre-fix code; HIS-17 (pruning vs. a thumbnail file) is a pinning test, not a regression test - the pruning glob already only ever matched `*.png`, thumbnail or not. |
 | 3.12 Launcher | 11 | Stable | LCH-07 asserts the always-on-top flag is set, not that the window is actually on top. LCH-08 substitutes `QApplication.screenAt()` to prove docking and positioning measure the screen the widget is actually on. DSP-12/13/14 were each verified to genuinely fail against the pre-fix code (reverted locally, run, restored) rather than trusted to discriminate on the strength of the arithmetic alone. |
 | 3.13 Shortcuts | 6 | Stable | KEY-05 exercises the real signal path rather than calling the setter directly. KEY-06 (the `help.html` pin, PRE_BUILD_HANDOVER item 5) is a deliberately partial mechanical check: the 9 tool-letter and 4 editing rows are compared against the real `QShortcut` objects `EditorWindow` registers, but the 3 launcher-only rows (Alt+P, Alt+Shift+P, Alt+V) are not pinned the same way. Those are inline `keyPressEvent` conditionals in `launcher.py`, not `QShortcut` objects - there is no non-hardcoded source of truth to check them against without either regex-parsing source (brittle to any refactor) or a second hardcoded list (which just moves the manual-sync burden rather than removing it). Their behaviour, not their documentation, is what `test_launcher_keyPressEvent_*` covers instead. |
-| 3.14 Lifecycle | 7 | Moderate | INS-01 binds a uniquely named local server so it cannot collide with a running app. INS-05 monkeypatches `QApplication.quit` at the class level (this suite shares one real `QApplication`) rather than calling it for real, verified to fail against the pre-fix code. INS-06 covers `restore()`'s off-screen repositioning, also verified to fail without it. INS-07 (item 3, the editor's own way back to the launcher) monkeypatches `FloatingLauncher.restore`/`.show` at the class level the same way, specifically to prove the button routes through `restore()` rather than `show()` - INS-06's repositioning has to keep applying from this new route too. |
+| 3.14 Lifecycle | 11 | Moderate | INS-01 binds a uniquely named local server so it cannot collide with a running app. INS-05 monkeypatches `QApplication.quit` at the class level (this suite shares one real `QApplication`) rather than calling it for real, verified to fail against the pre-fix code. INS-06 covers `restore()`'s off-screen repositioning, also verified to fail without it. INS-07 (the editor's own way back to the launcher) monkeypatches `FloatingLauncher.restore`/`.show` at the class level the same way, specifically to prove the button routes through `restore()` rather than `show()` - INS-06's repositioning has to keep applying from this new route too. INS-08/INS-09 exercise `EditorWindow.load_image_path()` directly against real files on disk (a valid PNG, a missing path, a non-image file), `QMessageBox.warning` substituted so a bad-path test does not block on a real dialog. INS-10/INS-11 run two real `SingleInstanceManager`s against real local sockets under a test-unique server name - no substitution - one of them (INS-11) binds a raw non-cooperating `QLocalServer` to stand in for a hung instance; see the note on same-process handoff timing below for a quirk this surfaced. |
 | 3.15 Packaging | 7 | Blocked (3) | PKG-01, PKG-02, PKG-06 and PKG-07 are automated. PKG-07's "True" assertion is also exercised for real, once, against an actual PyInstaller build - see below. |
 | 3.16 Update check | 12 | Stable (11) / Blocked (1) | UPD-01 through UPD-11 are pure-function and substituted-result tests, no network. UPD-12 (the real round-trip) is blocked. |
 | 3.17 Diagnostics | 4 | Stable | ABT-02's clipboard assertion is the same shape as issue #1's own diagnosis - proving a reporter's monitor layout is now visible without a code read. |
@@ -188,6 +188,27 @@ so with no other reference the worker could be garbage-collected while the
 background thread was still using it - a genuine use-after-free (an access
 violation, not a hang, in the reproduction), not a hypothetical one. Fixed by
 keeping `(thread, worker)` pairs together.
+
+---
+
+## A same-process handoff-timing quirk found while testing single-instance handoff
+
+`SingleInstanceManager._handoff_to_existing()` writes a command to the running
+instance's socket, then waits for an "OK" acknowledgement. Testing this with
+two `SingleInstanceManager`s in one process (as INS-10/INS-11 do, and as this
+suite has to - there is no second real process to test against) initially
+made every handoff time out: the "running" instance's `QLocalServer` never
+got a chance to accept the connection and reply within the wait window,
+because nothing was pumping this thread's event loop between the write and
+the read. An isolated reproduction outside pytest confirmed a bare
+`sock.waitForBytesWritten()` does not drive that dispatch, but an explicit
+`QCoreApplication.processEvents()` immediately after it reliably does. This
+is not a real defect in the shipped mechanism - two genuinely separate
+processes each have their own continuously-running event loop and do not
+need this nudge from each other - so `_handoff_to_existing()` keeps the
+`processEvents()` call (documented inline as a same-process consideration,
+harmless for the real two-process case) rather than treating it as
+something to work around only in tests.
 
 ---
 
@@ -510,7 +531,7 @@ yet on the packaged build.
 ```bash
 cd python
 pip install -r requirements.txt
-QT_QPA_PLATFORM=offscreen pytest -q      # 278 passed, about 2-3 seconds warm;
+QT_QPA_PLATFORM=offscreen pytest -q      # 283 passed, about 2-3 seconds warm;
                                           # slower on the first run while the
                                           # bundled ffmpeg loads
 ```

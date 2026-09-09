@@ -928,6 +928,67 @@ def test_show_launcher_button_routes_through_restore_not_show(qapp, monkeypatch)
     editor.close()
 
 
+def test_INS_08_load_image_path_loads_a_valid_image_and_brings_the_editor_forward(qapp, tmp_path, blank_pixmap) -> None:
+    """The "Open with -> Test Assist" / second-instance-handoff entry
+    point: both hand load_image_path() a raw path string, never a
+    QPixmap directly."""
+    image_path = tmp_path / "photo.png"
+    blank_pixmap.save(str(image_path), "PNG")
+
+    editor = EditorWindow()
+    assert editor.load_image_path(str(image_path)) is True
+
+    assert editor._canvas.has_image()
+    assert editor._canvas._pixmap.size() == blank_pixmap.size()
+    assert not editor.isHidden(), "the editor must come to the front, not load silently in the background"
+    editor.close()
+
+
+def test_INS_09_load_image_path_degrades_cleanly_on_a_missing_file(qapp, tmp_path, monkeypatch) -> None:
+    """A path that does not exist must warn and return False - never raise,
+    and never start the editor pretending an open that didn't happen did."""
+    missing = tmp_path / "does-not-exist.png"
+
+    warnings: list[str] = []
+    monkeypatch.setattr(
+        QMessageBox, "warning",
+        staticmethod(lambda *a, **k: warnings.append(a[-1]) or QMessageBox.StandardButton.Ok),
+    )
+
+    editor = EditorWindow()
+    before = editor._canvas.has_image()
+
+    assert editor.load_image_path(str(missing)) is False
+
+    assert warnings, "no warning was shown for a missing file"
+    assert editor._canvas.has_image() == before, "a failed open must not change canvas state"
+    editor.close()
+
+
+def test_INS_09b_load_image_path_degrades_cleanly_on_a_non_image_file(qapp, tmp_path, monkeypatch) -> None:
+    """A path that exists but is not a real image (a corrupt or unrelated
+    file) must degrade the same way a missing one does - QPixmap loading it
+    returns a null pixmap rather than raising, and that must be treated as
+    a failure, not loaded as a blank canvas pretending to be the image."""
+    not_an_image = tmp_path / "notes.txt"
+    not_an_image.write_text("this is not an image")
+
+    warnings: list[str] = []
+    monkeypatch.setattr(
+        QMessageBox, "warning",
+        staticmethod(lambda *a, **k: warnings.append(a[-1]) or QMessageBox.StandardButton.Ok),
+    )
+
+    editor = EditorWindow()
+    before = editor._canvas.has_image()
+
+    assert editor.load_image_path(str(not_an_image)) is False
+
+    assert warnings, "no warning was shown for an unreadable image"
+    assert editor._canvas.has_image() == before
+    editor.close()
+
+
 def test_launcher_open_editor_button_is_available_without_capture(qapp) -> None:
     editor = _EditorStub()
     launcher = FloatingLauncher(editor)

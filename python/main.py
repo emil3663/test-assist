@@ -16,8 +16,22 @@ from PySide6.QtWidgets import QApplication, QMenu, QSystemTrayIcon
 import paths
 from editor import EditorWindow
 from launcher import FloatingLauncher
-from single_instance import SingleInstanceManager
+from single_instance import AcquireOutcome, SingleInstanceManager
 from theme import EDITOR_STYLE
+
+
+_FLAGS = ("--version", "--selftest")
+
+
+def _extract_open_path(argv: list[str]) -> str | None:
+    """The file path Windows "Open with" passes on the command line, if
+    any - the first argument after the program name that isn't one of the
+    flags handled separately below."""
+    for arg in argv[1:]:
+        if arg in _FLAGS:
+            continue
+        return arg
+    return None
 
 
 def _asset_path(name: str) -> Path:
@@ -204,9 +218,15 @@ def main() -> None:
 
     paths.migrate_legacy_data()
 
+    open_path = _extract_open_path(sys.argv)
+
     single = SingleInstanceManager()
-    if not single.acquire():
-        # Another instance could not be replaced cleanly.
+    outcome = single.acquire(open_path)
+    if outcome is AcquireOutcome.HANDED_OFF:
+        # A running instance took the request (opened the file, or came to
+        # the front) - nothing to start here.
+        return
+    if outcome is AcquireOutcome.FAILED:
         sys.exit(1)
 
     single.quit_requested.connect(app.quit)
@@ -215,7 +235,14 @@ def main() -> None:
     launcher = FloatingLauncher(editor, version=__version__)
     tray = _setup_tray(app, launcher, editor)
     app.setProperty("trayIcon", tray)
-    launcher.show()
+
+    # A second launch's handoff lands here too, once this instance is the
+    # one running - same destinations either way.
+    single.show_requested.connect(launcher.restore)
+    single.open_requested.connect(editor.load_image_path)
+
+    if not open_path or not editor.load_image_path(open_path):
+        launcher.show()
 
     exit_code = app.exec()
     single.close()

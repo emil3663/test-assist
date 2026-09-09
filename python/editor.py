@@ -164,6 +164,36 @@ class EditorWindow(QMainWindow):
         self.activateWindow()
         self.raise_()
 
+    def load_image_path(self, path: str) -> bool:
+        """Load an image file into the canvas and bring the editor forward.
+
+        The entry point for both "Open with -> Test Assist" (a file
+        argument at first-instance startup) and a second-instance handoff
+        (single_instance.py's `open_requested`) - both hand this a raw,
+        unvalidated path. A path that does not exist, is not a real image,
+        or fails to decode shows a plain warning and returns False rather
+        than raising or silently starting the editor on nothing - a caller
+        must never mistake a failed open for a working one.
+        """
+        file = Path(path)
+        if not file.is_file():
+            QMessageBox.warning(
+                self, "Test Assist",
+                f"Can't open this file - it doesn't exist:\n{path}",
+            )
+            return False
+
+        pixmap = QPixmap(str(file))
+        if pixmap.isNull():
+            QMessageBox.warning(
+                self, "Test Assist",
+                f"Can't open this file - it isn't a readable image:\n{path}",
+            )
+            return False
+
+        self.load_pixmap(pixmap, background=False)
+        return True
+
     def set_show_launcher_callback(self, callback: Callable[[], None]) -> None:
         """Wire up the editor's "Show Launcher" button.
 

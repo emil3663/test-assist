@@ -1314,13 +1314,81 @@ def test_KEY_02_03_04_editing_shortcuts_are_registered(editor):
 # ── 3.14 Application lifecycle ───────────────────────────────────────────────
 
 def test_INS_01_single_instance_manager_acquires_once(qapp):
-    from single_instance import SingleInstanceManager
+    from single_instance import AcquireOutcome, SingleInstanceManager
 
     first = SingleInstanceManager(server_name="test-assist-functional-suite")
     try:
-        assert first.acquire() is True
+        assert first.acquire() is AcquireOutcome.STARTED
     finally:
         first.close()
+
+
+def test_INS_10_a_second_launch_hands_off_to_the_running_instance_instead_of_replacing_it(qapp):
+    """The second launch must not kill the first: a plain second launch
+    (no file argument) sends SHOW, and a launch with a file sends OPEN -
+    neither may ever cause the first instance to quit."""
+    from single_instance import AcquireOutcome, SingleInstanceManager
+
+    server_name = "test-assist-functional-suite-handoff"
+    first = SingleInstanceManager(server_name=server_name)
+    try:
+        assert first.acquire() is AcquireOutcome.STARTED
+
+        quit_calls: list[int] = []
+        show_calls: list[int] = []
+        open_calls: list[str] = []
+        first.quit_requested.connect(lambda: quit_calls.append(1))
+        first.show_requested.connect(lambda: show_calls.append(1))
+        first.open_requested.connect(open_calls.append)
+
+        second = SingleInstanceManager(server_name=server_name)
+        assert second.acquire() is AcquireOutcome.HANDED_OFF
+        assert quit_calls == [], "a reachable second launch must never quit the first instance"
+        assert show_calls == [1]
+
+        third = SingleInstanceManager(server_name=server_name)
+        assert third.acquire(open_path=r"C:\some\image.png") is AcquireOutcome.HANDED_OFF
+        assert quit_calls == []
+        assert open_calls == [r"C:\some\image.png"]
+    finally:
+        first.close()
+
+
+def test_INS_11_a_second_launch_falls_back_to_replace_when_the_first_never_acknowledges(qapp):
+    """A running instance that accepts the connection but never replies -
+    hung, or simply too old to understand SHOW/OPEN - must not be mistaken
+    for a successful handoff: the second launch has to fall back to the
+    original QUIT-and-replace path so a hung instance is still recoverable
+    by relaunching, rather than the new launch silently doing nothing."""
+    from PySide6.QtNetwork import QLocalServer
+
+    from single_instance import AcquireOutcome, SingleInstanceManager
+
+    server_name = "test-assist-functional-suite-hung"
+    QLocalServer.removeServer(server_name)
+    stub = QLocalServer()
+    stub_connections: list = []
+
+    def _accept_and_never_reply() -> None:
+        while stub.hasPendingConnections():
+            stub_connections.append(stub.nextPendingConnection())  # kept alive, never written to
+
+    stub.newConnection.connect(_accept_and_never_reply)
+    assert stub.listen(server_name), "test setup: could not bind the stub hung server"
+
+    try:
+        second = SingleInstanceManager(server_name=server_name)
+        second._HANDOFF_ACK_TIMEOUT_MS = 150  # keep the test fast
+
+        outcome = second.acquire()
+
+        assert outcome is not AcquireOutcome.HANDED_OFF, \
+            "a non-acknowledging instance must never be treated as a successful handoff"
+        assert outcome is AcquireOutcome.STARTED, \
+            "the fallback must still let this launch become the running instance"
+        second.close()
+    finally:
+        stub.close()
 
 
 def test_INS_04_help_resolves_from_a_source_checkout(qapp):

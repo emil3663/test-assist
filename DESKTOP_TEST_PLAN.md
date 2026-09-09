@@ -1,6 +1,6 @@
 # 🔍 Test Assist — Desktop Test Plan
 
-**Version:** 1.19
+**Version:** 1.20
 **Last updated:** 2026-09-09
 **Status:** In active development
 **Applies to:** the PySide6 desktop build under `python/`. The browser build has
@@ -45,7 +45,8 @@ history that survives restarts.
 | Edge docking | ✅ Done | Compact vertical strip |
 | System tray icon and menu | ✅ Done | Show launcher, open editor, exit |
 | A route back to the launcher from the editor | ✅ Done | Toolbar button beside About/Help, since the tray icon Windows hides by default was otherwise the only way back |
-| Single-instance enforcement | ✅ Done | Second launch focuses the running app |
+| Single-instance enforcement | ✅ Done | A second launch hands off to the running instance (opens a file argument, or brings it to front) rather than quitting it; falls back to the original quit-and-replace only if the running instance never acknowledges |
+| "Open with" a file argument | ✅ Done | Loads into the editor at first launch, or into the running instance via handoff on a second launch; a bad argument leaves the app running normally with a message. Not (yet) a registered default file handler - see TESTASSIST_BACKLOG.md TA-210 |
 | Packaged Windows executable | ✅ Done | Built by the tagged-release workflow |
 | Manual "Check for Updates" | ✅ Done | Button in the launcher; compares `__version__` against the latest GitHub release tag |
 | Multi-display capture | ✅ Done | Region capture, full-screen capture, recording and launcher pinning all follow the actual screen; a selection spanning two screens is composited rather than clamped |
@@ -309,6 +310,10 @@ launcher back to the wrong display on undock.
 | INS-05 | The launcher's X (`_btn_close`) | Hides the launcher; does not quit the application. Exit in the tray menu is the only full quit | ✅ |
 | INS-06 | `restore()` (Show Launcher / tray click) after the launcher's screen is gone | Repositions - docked or floating, matching how it was left - rather than reappearing at an unreachable stale position | ✅ |
 | INS-07 | "Show Launcher" button in the editor's toolbar, on a hidden launcher | Makes it visible again via `restore()` (not `show()`), so INS-06's repositioning still applies | ✅ |
+| INS-08 | "Open with -> Test Assist" (a file argument at first launch) | Loads into the editor and brings it forward, instead of showing only the launcher | ✅ |
+| INS-09 | An "Open with" argument that does not exist, or is not a real image | Leaves the app running normally with a clear message - never crashes, never starts on an empty canvas pretending it worked | ✅ |
+| INS-10 | A second launch while the first is reachable, with or without a file | Hands the request off to the running instance (`SHOW` or `OPEN:<path>`); never quits it | ✅ |
+| INS-11 | A second launch while the first accepts the connection but never acknowledges | Falls back to the original quit-and-replace path, so a hung instance is still recoverable by relaunching | ✅ |
 
 ### 3.15 Packaging (built executable only)
 

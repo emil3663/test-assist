@@ -7,6 +7,26 @@ release; only tagged versions appear as releases.
 
 ### Fixed
 
+- **A second launch silently killed the first, losing unsaved annotation
+  work.** `SingleInstanceManager.acquire()` unconditionally sent an existing
+  instance `QUIT` and waited for it to exit - so opening a second capture,
+  or a second "Open with -> Test Assist", quietly destroyed whatever the
+  first instance had open, with no prompt, because nothing tracks the
+  editor as modified. A second launch now hands the request off instead:
+  it sends the running instance either the file path to open or a plain
+  `SHOW`, waits briefly for an acknowledgement, and exits without starting
+  a UI of its own once acknowledged. The running instance loads a handed-off
+  path via `EditorWindow.load_image_path()` (bringing the editor forward)
+  or comes to the front via `restore()` for a plain `SHOW`. The old
+  quit-and-replace behaviour is kept, but only as a fallback for when the
+  handoff is not acknowledged in time - a hung instance (or one too old to
+  understand the new commands) must still be recoverable by relaunching,
+  not left permanently unkillable.
+  - Testing this against two `SingleInstanceManager`s in one process (there
+    being no second real process to test against) surfaced a same-process-
+    only timing quirk, not a real defect in the mechanism itself: see
+    `DESKTOP_STABILITY_MATRIX.md` for why `_handoff_to_existing()` calls
+    `QCoreApplication.processEvents()` after writing its request.
 - **The launcher's X quit the whole application, taking the tray icon down
   with it.** `_close_launcher()` called `QApplication.instance().quit()`, so
   closing the floating widget made `Show Launcher` unreachable and left
@@ -161,6 +181,18 @@ release; only tagged versions appear as releases.
     exactly like a screenshot. Extraction failing, ffmpeg being missing, or
     the source frames already being gone all fall back to the original
     generic icon rather than a broken tile.
+- **"Open with -> Test Assist" now actually opens the file.** `main()` used
+  to read `sys.argv` only for `--version` and `--selftest`; a file path was
+  ignored and the app just launched to the floating launcher regardless. A
+  file argument now loads into the editor at startup (or, on a second
+  launch, is handed to the already-running instance - see above) and
+  brings it to the front. A path that does not exist, is not an image, or
+  fails to decode leaves the app running normally with a plain warning
+  message rather than crashing or starting on an empty canvas pretending
+  it worked. Deliberately not a registered file association - "Open with"
+  works without one, and declaring Test Assist the default handler for
+  `.png` is a separate, more visible decision; tracked as
+  `TESTASSIST_BACKLOG.md` TA-210.
 
 ### Changed
 
