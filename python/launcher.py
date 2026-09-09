@@ -440,8 +440,13 @@ class FloatingLauncher(QWidget):
         self._on_capture_ready(pixmap)
 
     def _on_capture_ready(self, pixmap: QPixmap) -> None:
+        # record_capture(), not load_pixmap() directly: this is the single
+        # choke point both region and full-screen captures pass through,
+        # so it is also the one place that must persist to History
+        # automatically (TA-216) rather than requiring a completed Save
+        # dialog first.
         self.show()
-        self._editor.load_pixmap(pixmap, background=True)
+        self._editor.record_capture(pixmap)
         self._btn_open_editor.setEnabled(True)
 
     def _on_capture_cancelled(self) -> None:

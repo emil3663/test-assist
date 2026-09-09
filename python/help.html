@@ -376,6 +376,12 @@
     The Editor opens automatically after every capture. It contains a toolbar of annotation
     tools across the top, the canvas in the centre, and a controls panel on the right.
   </p>
+  <p>
+    With the Editor open and nothing loaded, use the <strong>📂 Open Image</strong> button in
+    the toolbar to bring in an existing file, or press <code>Ctrl+V</code> to paste an image
+    from the clipboard. Both use the same validation a capture does — a bad path or an empty
+    clipboard leaves the Editor exactly as it was, with a message, rather than failing silently.
+  </p>
 
   <div class="diagram-box" style="margin-bottom:28px">
       <h3>③ Editor Window</h3>
@@ -604,9 +610,11 @@
   <!-- ─── History ─── -->
   <h2>History</h2>
   <p>
-    Every time you save or copy an image, a thumbnail snapshot is added automatically to the
-    History sidebar. Recordings appear there too, shown as a distinct video card rather than a
-    thumbnail — clicking one opens it in your video player instead of loading it into the canvas.
+    Every capture — region or full-screen — is added to the History sidebar the moment it's
+    taken, so nothing is lost if you take another capture before saving the first. Saving or
+    copying an image also adds a snapshot. Recordings appear there too, shown as a distinct
+    video card rather than a thumbnail — clicking one opens it in your video player instead of
+    loading it into the canvas.
   </p>
   <p>
     Use the <strong>Show</strong> dropdown to filter: Recent 5, Today, This Week, or This Month.
@@ -634,6 +642,7 @@
       <tr><td><code>Ctrl+Z</code></td><td>Undo</td></tr>
       <tr><td><code>Ctrl+Y</code></td><td>Redo</td></tr>
       <tr><td><code>Ctrl+S</code></td><td>Save PNG</td></tr>
+      <tr><td><code>Ctrl+V</code></td><td>Paste an image from the clipboard</td></tr>
       <tr><td><code>Delete</code></td><td>Delete selected annotation</td></tr>
       <tr><td><code>Alt+P</code></td><td>Quick Capture (launcher)</td></tr>
       <tr><td><code>Alt+Shift+P</code></td><td>Full-screen capture (launcher)</td></tr>

@@ -34,12 +34,16 @@ class _EditorStub:
     def __init__(self) -> None:
         self.bring_forward_calls = 0
         self.loaded = []
+        self.recorded = []
 
     def bring_forward(self) -> None:
         self.bring_forward_calls += 1
 
     def load_pixmap(self, pixmap, background: bool = True) -> None:
         self.loaded.append((pixmap, background))
+
+    def record_capture(self, pixmap) -> None:
+        self.recorded.append(pixmap)
 
 
 def _canvas_with_image(qapp, blank_pixmap) -> AnnotationCanvas:
@@ -817,6 +821,20 @@ def test_DSP_dock_then_undock_returns_to_the_screen_it_docked_on(qapp, monkeypat
     expected = laptop.geometry()
     assert launcher.x() == expected.right() - launcher.width() - 20, \
         "undocking landed on a different screen than the one it docked on"
+    launcher.close()
+
+
+def test_TA216_on_capture_ready_routes_through_record_capture_not_load_pixmap(qapp) -> None:
+    """A completed region or full-screen capture must reach History
+    immediately (TA-216) - record_capture() is what does that;
+    load_pixmap() alone (also used to view an existing image) does not."""
+    editor = _EditorStub()
+    launcher = FloatingLauncher(editor)
+
+    launcher._on_capture_ready(QPixmap(64, 48))
+
+    assert editor.recorded, "on_capture_ready must call record_capture()"
+    assert editor.loaded == [], "on_capture_ready must not also call load_pixmap() directly"
     launcher.close()
 
 

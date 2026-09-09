@@ -157,6 +157,25 @@ class EditorWindow(QMainWindow):
             self.activateWindow()
             self.raise_()
 
+    def record_capture(self, pixmap: QPixmap) -> None:
+        """Load a freshly taken capture (region or full-screen) AND
+        persist it to History immediately (TA-216).
+
+        Deliberately not folded into load_pixmap() itself: that method is
+        also how an existing image gets viewed - a history snapshot
+        reloaded, a file opened, a clipboard paste - and none of those
+        should create a new History entry every time they're viewed. This
+        is the one call a genuinely new capture needs in addition to
+        load_pixmap(); the launcher's _on_capture_ready() is the single
+        choke point both region and full-screen captures already pass
+        through, so it is the one call site that needs to use this
+        instead of load_pixmap() directly. Reuses
+        _persist_history_snapshot()'s existing "too small to be a real
+        capture" guard unchanged.
+        """
+        self.load_pixmap(pixmap, background=True)
+        self._persist_history_snapshot(pixmap)
+
     def bring_forward(self) -> None:
         """Raise and activate the editor window - or minimize it if it is
         already the active window (TA-220), so the TA icon (floating and
@@ -299,6 +318,18 @@ class EditorWindow(QMainWindow):
             layout.addWidget(cell)
 
         layout.addStretch()
+
+        # Open Image button — with the editor open and nothing loaded,
+        # History (past app-generated exports) and a fresh capture were
+        # the only ways to bring an image in; there was no way to pull in
+        # an external file (TA-214).
+        self._btn_open_image = QPushButton("📂")
+        self._btn_open_image.setObjectName("btn_open_image")
+        self._btn_open_image.setProperty("smallIconButton", True)
+        self._btn_open_image.setFixedSize(28, 28)
+        self._btn_open_image.setToolTip("Open Image…")
+        self._btn_open_image.clicked.connect(self._open_image_file)
+        layout.addWidget(self._btn_open_image, 0, Qt.AlignmentFlag.AlignVCenter)
 
         # Show Launcher button — beside About and Help, far right of toolbar.
         # Once the launcher is hidden (its own X, or the tray), this is the
@@ -559,6 +590,7 @@ class EditorWindow(QMainWindow):
         QShortcut(QKeySequence("Ctrl+Z"), self, self._canvas.undo)
         QShortcut(QKeySequence("Ctrl+Y"), self, self._canvas.redo)
         QShortcut(QKeySequence("Ctrl+S"), self, self._save_png)
+        QShortcut(QKeySequence("Ctrl+V"), self, self._paste_from_clipboard)
         QShortcut(QKeySequence("Delete"), self, self._canvas.delete_selected)
 
         self._tool_shortcuts = []
@@ -660,6 +692,37 @@ class EditorWindow(QMainWindow):
     def _on_show_launcher_clicked(self) -> None:
         if self._show_launcher_callback is not None:
             self._show_launcher_callback()
+
+    def _open_image_file(self) -> None:
+        """TA-214: the discoverable control for bringing an external file
+        into the editor. Routes through load_image_path() rather than
+        loading the chosen path directly, so a bad selection gets exactly
+        the same validation and warning as "Open with" and the
+        second-instance handoff already do - one behaviour, three entry
+        points, not three reimplementations of it.
+        """
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Open Image", str(paths.recordings_dir()),
+            "Images (*.png *.jpg *.jpeg *.bmp *.gif *.webp *.tif *.tiff)",
+        )
+        if path:
+            self.load_image_path(path)
+
+    def _paste_from_clipboard(self) -> None:
+        """Ctrl+V (TA-214). An empty clipboard - no image on it at all -
+        must be a plain no-op with a status message, never a crash and
+        never a blank canvas presenting itself as a successful paste.
+        Guarded against an in-progress text annotation: that edit is its
+        own text-entry surface and must not have an image silently
+        dropped over it out from under the user.
+        """
+        if self._canvas._text_editing:
+            return
+        image = QApplication.clipboard().image()
+        if image.isNull():
+            self.statusBar().showMessage("Clipboard has no image to paste.", 4000)
+            return
+        self.load_pixmap(QPixmap.fromImage(image), background=False)
 
     def _open_help(self) -> None:
         # resolves both from a source checkout and from a PyInstaller bundle

@@ -969,6 +969,85 @@ def test_TA219_export_json_dialog_defaults_to_documents_test_assist(editor, monk
         f"expected the dialog to default into {paths.recordings_dir()}, got {default_path!r}"
 
 
+# ── TA-214: open / paste an image into the editor ───────────────────────────
+
+def test_TA214_open_image_loads_a_valid_file(qapp, tmp_path, blank_pixmap, monkeypatch) -> None:
+    """The discoverable control routes through load_image_path() rather
+    than loading the chosen path directly, so it inherits that method's
+    validation instead of reimplementing it."""
+    from PySide6.QtWidgets import QFileDialog
+
+    image_path = tmp_path / "photo.png"
+    blank_pixmap.save(str(image_path), "PNG")
+    monkeypatch.setattr(
+        QFileDialog, "getOpenFileName",
+        staticmethod(lambda *a, **k: (str(image_path), "")),
+    )
+
+    editor = EditorWindow()
+    editor._open_image_file()
+
+    assert editor._canvas.has_image()
+    assert editor._canvas._pixmap.size() == blank_pixmap.size()
+    editor.close()
+
+
+def test_TA214_open_image_cancelled_dialog_does_nothing(qapp, monkeypatch) -> None:
+    from PySide6.QtWidgets import QFileDialog
+
+    monkeypatch.setattr(QFileDialog, "getOpenFileName", staticmethod(lambda *a, **k: ("", "")))
+
+    editor = EditorWindow()
+    before = editor._canvas.has_image()
+
+    editor._open_image_file()
+
+    assert editor._canvas.has_image() == before
+    editor.close()
+
+
+def test_TA214_paste_with_no_clipboard_image_shows_a_status_message_not_a_crash(qapp) -> None:
+    """An empty clipboard must be a plain no-op with a status message -
+    never a crash, never a blank canvas presenting itself as a successful
+    paste."""
+    editor = EditorWindow()
+    QApplication.clipboard().clear()
+    before = editor._canvas.has_image()
+
+    editor._paste_from_clipboard()  # must not raise
+
+    assert editor._canvas.has_image() == before
+    assert "no image" in editor.statusBar().currentMessage().lower()
+    editor.close()
+
+
+def test_TA214_paste_with_an_image_on_the_clipboard_loads_it(qapp, blank_pixmap) -> None:
+    editor = EditorWindow()
+    QApplication.clipboard().setPixmap(blank_pixmap)
+
+    editor._paste_from_clipboard()
+
+    assert editor._canvas.has_image()
+    assert editor._canvas._pixmap.size() == blank_pixmap.size()
+    editor.close()
+
+
+def test_TA214_paste_does_not_interrupt_an_in_progress_text_annotation(qapp, blank_pixmap) -> None:
+    """A clipboard image must never be dropped over an in-progress text
+    annotation out from under the user - that edit is its own text-entry
+    surface."""
+    editor = EditorWindow()
+    editor._canvas.set_pixmap(blank_pixmap)
+    editor._canvas._text_editing = True
+    QApplication.clipboard().setPixmap(blank_pixmap)
+    before_size = editor._canvas._pixmap.size()
+
+    editor._paste_from_clipboard()  # must not raise, must not replace the canvas
+
+    assert editor._canvas._pixmap.size() == before_size
+    editor.close()
+
+
 # ── 3.11 Capture history ─────────────────────────────────────────────────────
 
 def test_HIS_01_history_persists_for_a_new_editor(editor, qapp):
@@ -985,6 +1064,31 @@ def test_HIS_02_blank_captures_are_not_persisted(editor):
     tiny.fill(QColor("white"))
     editor._persist_history_snapshot(tiny)
     assert list(editor._history_dir.glob("*.png")) == []
+
+
+def test_TA216_two_captures_without_saving_both_appear_in_history(qapp, blank_pixmap) -> None:
+    """TA-216: a capture must reach History the moment it's taken, not
+    only once a completed Save-As dialog has run - a second capture taken
+    before saving the first must not cost the first one its only route
+    back."""
+    editor = EditorWindow()
+
+    first = QPixmap(blank_pixmap)
+    second = QPixmap(blank_pixmap)
+    editor.record_capture(first)
+    editor.record_capture(second)
+
+    assert len(list(editor._history_dir.glob("*.png"))) == 2, \
+        "both captures must be in History with no Save or Copy in between"
+    editor.close()
+
+
+def test_TA216_record_capture_still_loads_the_image_into_the_canvas(qapp, blank_pixmap) -> None:
+    editor = EditorWindow()
+    editor.record_capture(blank_pixmap)
+    assert editor._canvas.has_image()
+    assert editor._canvas._pixmap.size() == blank_pixmap.size()
+    editor.close()
 
 
 def test_HIS_03_tiny_files_are_pruned_on_load(qapp, isolate_home):
