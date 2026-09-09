@@ -1,6 +1,6 @@
 # 🔍 Test Assist — Desktop Test Plan
 
-**Version:** 1.18
+**Version:** 1.19
 **Last updated:** 2026-09-09
 **Status:** In active development
 **Applies to:** the PySide6 desktop build under `python/`. The browser build has
@@ -44,6 +44,7 @@ history that survives restarts.
 | Floating launcher | ✅ Done | Always on top; drag to reposition |
 | Edge docking | ✅ Done | Compact vertical strip |
 | System tray icon and menu | ✅ Done | Show launcher, open editor, exit |
+| A route back to the launcher from the editor | ✅ Done | Toolbar button beside About/Help, since the tray icon Windows hides by default was otherwise the only way back |
 | Single-instance enforcement | ✅ Done | Second launch focuses the running app |
 | Packaged Windows executable | ✅ Done | Built by the tagged-release workflow |
 | Manual "Check for Updates" | ✅ Done | Button in the launcher; compares `__version__` against the latest GitHub release tag |
@@ -307,6 +308,7 @@ launcher back to the wrong display on undock.
 | INS-04 | Help | `help.html` resolves from both a source checkout and a build | ✅ |
 | INS-05 | The launcher's X (`_btn_close`) | Hides the launcher; does not quit the application. Exit in the tray menu is the only full quit | ✅ |
 | INS-06 | `restore()` (Show Launcher / tray click) after the launcher's screen is gone | Repositions - docked or floating, matching how it was left - rather than reappearing at an unreachable stale position | ✅ |
+| INS-07 | "Show Launcher" button in the editor's toolbar, on a hidden launcher | Makes it visible again via `restore()` (not `show()`), so INS-06's repositioning still applies | ✅ |
 
 ### 3.15 Packaging (built executable only)
 

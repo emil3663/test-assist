@@ -870,6 +870,64 @@ def test_restore_does_not_reposition_a_launcher_still_on_a_real_screen(qapp) -> 
     launcher.close()
 
 
+def test_show_launcher_button_uses_the_shared_small_icon_button_style(qapp) -> None:
+    """No new one-off rule - it opts into the same dynamic property as
+    About, zoom out/in and Fit."""
+    editor = EditorWindow()
+    assert editor._show_launcher_btn.property("smallIconButton") is True
+    editor.close()
+
+
+def test_show_launcher_button_is_a_noop_without_a_wired_callback(qapp) -> None:
+    """A standalone EditorWindow (as most tests construct one) has nothing
+    wired yet - clicking must not raise."""
+    editor = EditorWindow()
+    editor._show_launcher_btn.click()
+    editor.close()
+
+
+def test_show_launcher_button_makes_a_hidden_launcher_visible(qapp) -> None:
+    """editor.py holds no reference to the launcher at all, so once the
+    launcher's own X hides it, the tray was the only route back - and
+    Windows hides a new tray icon in the overflow by default."""
+    from launcher import FloatingLauncher
+
+    editor = EditorWindow()
+    launcher = FloatingLauncher(editor)
+    launcher.show()
+    qapp.processEvents()
+    launcher.hide()
+    assert launcher.isHidden()
+
+    editor.set_show_launcher_callback(launcher.restore)
+    editor._show_launcher_btn.click()
+    qapp.processEvents()
+
+    assert not launcher.isHidden()
+    editor.close()
+    launcher.close()
+
+
+def test_show_launcher_button_routes_through_restore_not_show(qapp, monkeypatch) -> None:
+    """It must go through restore(), not show()/raise_() directly, so
+    DSP-15's off-screen repositioning still applies here the same way it
+    does for the tray menu and tray-icon click."""
+    from launcher import FloatingLauncher
+
+    editor = EditorWindow()
+    launcher = FloatingLauncher(editor)
+
+    calls: list[str] = []
+    monkeypatch.setattr(FloatingLauncher, "restore", lambda self: calls.append("restore"))
+    monkeypatch.setattr(FloatingLauncher, "show", lambda self: calls.append("show"))
+
+    editor.set_show_launcher_callback(launcher.restore)
+    editor._show_launcher_btn.click()
+
+    assert calls == ["restore"]
+    editor.close()
+
+
 def test_launcher_open_editor_button_is_available_without_capture(qapp) -> None:
     editor = _EditorStub()
     launcher = FloatingLauncher(editor)

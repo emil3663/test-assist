@@ -115,6 +115,16 @@ release; only tagged versions appear as releases.
     defaulting to the primary; and resolving the screen once before docking
     or undocking mutates the frame a second resolution would otherwise
     re-read mid-call.
+- **No way back to the launcher from the editor once it was hidden**, other
+  than the tray icon — which Windows hides in the overflow by default, so
+  in practice there was none. A new "Show Launcher" button sits in the
+  editor's toolbar beside About and Help, using the same shared
+  small-icon-button style. It goes through `restore()`, exactly like the
+  tray menu and tray-icon click do, so INS-06's off-screen repositioning
+  still applies from this route. `editor.py` takes a plain callable
+  (`set_show_launcher_callback()`) rather than importing `FloatingLauncher`
+  directly, which would create an import cycle; `main.py` wires it to
+  `launcher.restore` in `_setup_tray()`, alongside the tray's own wiring.
 
 ### Added
 

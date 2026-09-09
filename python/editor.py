@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from datetime import datetime, timedelta
 import sys
 import json
@@ -98,6 +99,10 @@ class EditorWindow(QMainWindow):
 
         self._canvas = AnnotationCanvas()
         self._fit_mode = True
+        # Set via set_show_launcher_callback(), wired from main.py alongside
+        # the tray - editor.py takes a plain callable rather than importing
+        # FloatingLauncher, which would create an import cycle.
+        self._show_launcher_callback: Callable[[], None] | None = None
 
         scroll = QScrollArea()
         scroll.setWidget(self._canvas)
@@ -158,6 +163,17 @@ class EditorWindow(QMainWindow):
         self.show()
         self.activateWindow()
         self.raise_()
+
+    def set_show_launcher_callback(self, callback: Callable[[], None]) -> None:
+        """Wire up the editor's "Show Launcher" button.
+
+        Once the launcher's own X hides it, the tray was the only route
+        back - and Windows hides a new tray icon in the overflow by
+        default. Takes a plain callable (in practice FloatingLauncher.
+        restore) rather than a FloatingLauncher instance, so editor.py
+        never has to import launcher.py.
+        """
+        self._show_launcher_callback = callback
 
     # ── Top tools bar ─────────────────────────────────────────────────────────
 
@@ -242,6 +258,18 @@ class EditorWindow(QMainWindow):
             layout.addWidget(cell)
 
         layout.addStretch()
+
+        # Show Launcher button — beside About and Help, far right of toolbar.
+        # Once the launcher is hidden (its own X, or the tray), this is the
+        # only route back besides the tray icon, which Windows hides in the
+        # overflow by default.
+        self._show_launcher_btn = QPushButton("🏠")
+        self._show_launcher_btn.setObjectName("btn_show_launcher")
+        self._show_launcher_btn.setProperty("smallIconButton", True)
+        self._show_launcher_btn.setFixedSize(28, 28)
+        self._show_launcher_btn.setToolTip("Show Launcher")
+        self._show_launcher_btn.clicked.connect(self._on_show_launcher_clicked)
+        layout.addWidget(self._show_launcher_btn, 0, Qt.AlignmentFlag.AlignVCenter)
 
         # About button — beside Help, far right of toolbar
         self._about_btn = QPushButton("ⓘ")
@@ -587,6 +615,10 @@ class EditorWindow(QMainWindow):
         )
         if reply == QMessageBox.StandardButton.Yes:
             self._canvas.clear_annotations()
+
+    def _on_show_launcher_clicked(self) -> None:
+        if self._show_launcher_callback is not None:
+            self._show_launcher_callback()
 
     def _open_help(self) -> None:
         # resolves both from a source checkout and from a PyInstaller bundle

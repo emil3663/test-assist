@@ -48,6 +48,13 @@ def _make_tray_icon() -> QIcon:
 
 
 def _setup_tray(app: QApplication, launcher: FloatingLauncher, editor: EditorWindow) -> QSystemTrayIcon:
+    # The editor's own "Show Launcher" toolbar button goes through the same
+    # restore() as the tray menu and tray-icon click below - editor.py takes
+    # a plain callable rather than importing FloatingLauncher, which would
+    # create an import cycle (launcher.py already takes an EditorWindow
+    # instance without importing editor.py for it).
+    editor.set_show_launcher_callback(launcher.restore)
+
     tray = QSystemTrayIcon(_make_tray_icon(), app)
     tray.setToolTip("Test Assist")
 
