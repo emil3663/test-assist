@@ -407,6 +407,306 @@ that will actually ship.
 - **Dependencies:** TA-211. Do this after the shortcut work, not before, or the
   table is rewritten twice.
 
+### TA-214 — No way to open or paste an image into the editor once it's open
+
+- **Phase:** 2
+- **Priority:** P1
+- **Suggested labels:** `bug`, `editor`, `ux`
+- **Problem it solves:** Found during the rc3 manual pass. With the editor open
+  and nothing loaded — first launch, or "Open Editor" with no capture taken —
+  there is no way to bring an image in except History (past app-generated
+  exports) or going back to the launcher for a fresh screen capture. Confirmed
+  directly in the code, not just observed behaviour: every `QFileDialog` call in
+  `editor.py` is `getSaveFileName` (Save PNG, Export JSON) — there is no
+  `getOpenFileName` anywhere. The only clipboard code is `_copy_to_clipboard()`
+  (write-only); nothing reads `QApplication.clipboard()`, and no `Ctrl+V`
+  shortcut is registered (the bound set is `Ctrl+Z`, `Ctrl+Y`, `Ctrl+S`,
+  `Delete`). Neither `canvas.py` nor `editor.py` implements `setAcceptDrops`,
+  `dragEnterEvent` or `dropEvent`. `load_image_path()` (from `6468591`) is
+  wired only to CLI argv at startup and the second-instance handoff socket —
+  there is no UI control anywhere in the running editor that calls it. This
+  isn't a regression: the README's "file picker or drag-and-drop" bullet is
+  explicitly scoped to the browser build only. But it's a real gap in the
+  desktop build's own stated purpose — "long test sessions" — if the tester
+  can't get an existing image into it without a fresh capture.
+- **Scope:**
+  - Add an "Open Image…" action reachable from the editor toolbar, calling
+    `QFileDialog.getOpenFileName()` and routing the result through the
+    existing `load_image_path()` — reuse its bad-path/non-image handling
+    rather than duplicating it.
+  - Add `Ctrl+V` paste-from-clipboard: read the clipboard's pixmap/image data
+    and load it the same way; a clipboard with no image should do nothing
+    destructive (no crash, a plain status message), not silently fail.
+  - Drag-and-drop onto the canvas, for parity with the browser build, is a
+    reasonable stretch addition — flag it as optional rather than required.
+  - Whether this should also be reachable from the floating launcher (a
+    faster way to open an existing file without opening an empty editor
+    first) is a product decision to make explicitly, not assume.
+- **Deliverables:**
+  - Open-file action wired to `load_image_path()`; `Ctrl+V` paste support;
+    tests for a valid open, a cancelled dialog, an empty clipboard, and an
+    image-bearing clipboard.
+- **Acceptance criteria:**
+  - With the editor open and nothing loaded, a discoverable control opens a
+    file picker and loads the chosen image.
+  - `Ctrl+V` loads a clipboard image into the canvas; an empty clipboard is a
+    no-op with a status message, never a crash.
+  - Both paths reuse `load_image_path()`'s existing validation rather than
+    reimplementing it.
+- **Dependencies:** None — builds on `load_image_path()` from `6468591`,
+  already shipped.
+
+### TA-215 — The docked launcher gives no feedback during a recording
+
+- **Phase:** 2
+- **Priority:** P1
+- **Suggested labels:** `bug`, `launcher`, `ux`
+- **Problem it solves:** Found during the rc3 manual pass (LCH-13 — the
+  hotkeys themselves passed cleanly). Reported: *"there is no way to see that
+  the recording is running, and no way to stop it besides the floating
+  widget — even clicking the video capture icon does nothing. Only hitting
+  Stop Recording stops it. The video capture icon should change into a red
+  square which will stop the video capture."* Confirmed directly in
+  `launcher.py`: the docked strip's single capture icon
+  (`_btn_dock_capture`, wired to `_on_action_click` → `_toggle_recording()`)
+  has its icon set once at construction and never updated — unlike the
+  undocked `_btn_capture`, whose text/style *do* change between
+  `"⏺ Start Recording"` and `"■ Stop Recording"`. Worse, `_rec_label` (the
+  `"⏺ 00:00"` running-time readout) is added only to the undocked
+  `float_layout`, never to `dock_layout` — so a user working from the
+  compact docked strip, which is exactly the mode the docking feature exists
+  for, gets **zero** visual confirmation a recording is running, and the one
+  control available to stop it gives no visual cue that it will. The
+  underlying toggle is correctly wired either way — clicking the docked icon
+  a second time does call `_stop_recording()` — this is a state-feedback gap,
+  not a broken stop mechanism, which is exactly why it read as "does
+  nothing" under test.
+  UPD-12 (*"unable to see test assist update request button"*) was
+  originally suspected to be the same docked-visibility pattern. Screenshots
+  of the *undocked* panel disproved that: `_btn_check_updates` is present
+  and correctly wired exactly where documented (2nd icon in `header_row`,
+  right after the editor icon). The real cause is unrelated to docking —
+  moved to **TA-218**.
+  Also flagged from the same pass, not yet reproduced with enough detail to
+  diagnose: capturing the Windows Properties dialog (PKG-05) with Test
+  Assist itself reportedly didn't work while docked, native PrintScreen was
+  used instead. Needs a specific repro (did Quick Capture do nothing, fail
+  to show the selection overlay, or capture the wrong window?) before it's
+  scoped as part of this ticket or filed separately.
+- **Scope:**
+  - Give the docked capture icon its own visual state: swap its icon (e.g.
+    to a red square/stop glyph) when `self._rec_timer.isActive()`, mirroring
+    what `_btn_capture`'s text already does undocked.
+  - Surface a minimal recording indicator while docked — a colored dot or
+    the elapsed-time text is enough; it doesn't need the full `_rec_label`
+    treatment, but *something* must be visible in the docked strip.
+  - Get a precise repro on the PKG-05 docked-capture report before scoping a
+    fix for it.
+- **Deliverables:**
+  - Docked-mode recording state (icon + indicator); a confirmed repro (or
+    a "not reproducible" note) for the PKG-05 report.
+- **Acceptance criteria:**
+  - Starting a recording from the docked strip visibly changes the capture
+    icon and shows some running-time indicator, without undocking.
+  - Clicking the same icon again stops the recording, with the icon
+    reverting.
+- **Dependencies:** None.
+
+### TA-216 — A capture isn't kept anywhere until you explicitly Save or Copy
+
+- **Phase:** 2
+- **Priority:** P1
+- **Suggested labels:** `bug`, `editor`, `ux`
+- **Problem it solves:** Found during the rc3 manual pass: *"taking multiple
+  images do not store them in the history for me to be able to select them in
+  the editor."* Confirmed in code: `_persist_history_snapshot()` — the only
+  thing that adds a History entry — is called from exactly two places,
+  `_save_png()` (after a completed Save-As dialog) and `_copy_to_clipboard()`.
+  Simply taking a capture (Quick Capture, full-screen, or a recording) does
+  not, by itself, add anything to History. A tester who takes a second
+  capture without first running the Save-PNG file dialog for the first one
+  has already lost access to it — nothing brings it back (this compounds
+  `TA-214`: no open/paste path either). For a QA evidence tool meant for a
+  session of several captures in a row, requiring a full Save-As dialog
+  completion per capture just to keep it reachable is a real workflow cost,
+  not a corner case.
+- **Scope:**
+  - Persist every completed capture (region, full-screen) to History
+    automatically, the same way a save/copy currently does — without
+    requiring the Save-As dialog first.
+  - Decide explicitly whether recordings need equivalent treatment (they
+    already appear in History per `a7a465f` — confirm captures get the same
+    guarantee, not just video).
+  - Keep the existing "skip if too small to be a real capture" guard
+    (`pixmap.width() < 50...`) — that part of `_persist_history_snapshot()`
+    is sound and should carry over unchanged.
+- **Deliverables:** capture-time auto-persist to History; a test that two
+  captures taken back to back, with no Save or Copy in between, both appear
+  in the gallery.
+- **Acceptance criteria:** taking N captures without saving or copying any
+  of them leaves N entries in History, each selectable back into the canvas.
+- **Dependencies:** None. Closely related to `TA-214` — both are "how do I
+  get back to an image I'm not currently looking at" — worth sequencing
+  together in the brief even though they're separate tickets.
+
+### TA-217 — Quick Capture doesn't reliably start when another window has focus
+
+- **Phase:** 2
+- **Priority:** P1
+- **Suggested labels:** `bug`, `capture`, `launcher`
+- **Problem it solves:** Two related reports from the rc3 manual pass.
+  1. **Confirmed mechanism:** *"opening the about screen and hitting alt+p...
+     opens the capture on the screen below the about screen even though the
+     about is in focus"* — and separately, Quick Capture reported as doing
+     nothing while a dialog was open. `editor.py`'s `_open_about()` creates
+     its `QDialog` with `setModal(True)`, which Qt treats as
+     `Qt::ApplicationModal` — while that dialog's event loop is running, Qt
+     blocks mouse/keyboard delivery to every other window belonging to the
+     application, including a freshly-shown `ScreenshotOverlay`. Alt+P still
+     fires `_start_capture()` (the global hotkey is a native OS message, not
+     routed through Qt's own event queue), and the overlay's own
+     `WindowStaysOnTopHint` + `raise_()` + `activateWindow()`
+     (`capture.py::activate()`) still execute — but Qt's application-modal
+     blocking means the overlay most likely never receives the mouse events
+     needed to drag a selection, and the still-modal About dialog keeps real
+     OS-level Z-order priority, consistent with the overlay appearing
+     "below" it. This is a strong, code-grounded explanation, not yet
+     confirmed live — needs a real repro with the About dialog open before
+     it's called fixed.
+  2. **Separate, less understood, intermittent:** capturing over the Windows
+     Properties dialog (a different application's window, not one of Test
+     Assist's own) reportedly did nothing on a first attempt, then worked on
+     retry. Qt's own modality doesn't apply to a foreign process's window,
+     so this is a different mechanism — most likely a focus/Z-order race
+     against `_start_capture()`'s fixed 220ms `singleShot` delay before the
+     overlay activates. Not enough repro detail yet to pin down; flagged
+     separately rather than folded into the About-dialog fix.
+- **Scope:**
+  - For the confirmed case: either dismiss/close Test Assist's own modal
+    dialogs (About, and any future one) automatically when a global hotkey
+    fires a capture, or make overlay activation itself modality-proof so it
+    can grab input regardless of an open dialog. Prefer the first — simpler,
+    and matches user intent: pressing Alt+P clearly means "capture now."
+  - For the intermittent case: get a repeatable repro (does it correlate
+    with how quickly Quick Capture is clicked after the target window gains
+    focus? does raising the delay in `_start_capture()` change the failure
+    rate?) before scoping a fix.
+- **Deliverables:** the About-dialog case fixed and covered by a test that
+  opens the About dialog, fires the capture path, and asserts the overlay
+  actually receives input; a documented repro (or a "not reproducible" note)
+  for the Properties-dialog case.
+- **Acceptance criteria:** triggering a capture (hotkey or button) while
+  Test Assist's own About dialog is open results in a working, interactive
+  capture overlay, not a silent no-op.
+- **Dependencies:** None.
+
+### TA-218 — Check for Updates is present but not recognizable, and only reachable from the launcher
+
+- **Phase:** 2
+- **Priority:** P2
+- **Suggested labels:** `bug`, `launcher`, `editor`, `ux`
+- **Problem it solves:** Reported as UPD-12, *"unable to see test assist
+  update request button,"* then reconfirmed against the undocked launcher
+  panel with *"still cant see the update button"* — and separately,
+  *"the check for updates should be included on the editor screen as
+  well."* Confirmed in `launcher.py`: `_btn_check_updates` exists, is
+  correctly positioned in `header_row` (2nd icon, right after the editor
+  icon) and correctly wired
+  (`_btn_check_updates.clicked.connect(self._check_for_updates)`) — this is
+  not a hidden or missing control. `_make_update_icon()` draws the glyph
+  itself:
+  ```python
+  p.drawLine(7, 2, 7, 9)    # vertical stem
+  p.drawLine(4, 6, 7, 9)    # arrowhead, left
+  p.drawLine(10, 6, 7, 9)   # arrowhead, right
+  p.drawLine(3, 12, 11, 12) # bar underneath
+  ```
+  That's a plain arrow into a tray — a generic "download" shape with no
+  refresh/update visual convention (no circular arrows, no badge, no
+  distinct color from its neighbors). The control isn't hidden; it isn't
+  recognizable. Separately, it exists only on the launcher — the Editor
+  window has no equivalent, so a user working from the Editor has no path
+  to it at all without switching back to the launcher.
+- **Scope:**
+  - Redesign `_make_update_icon()` to something that reads as "check for
+    updates" at 14×14 (a circular refresh arrow is the standard convention;
+    a small tooltip already exists and stays as reinforcement, not a
+    substitute).
+  - Add a Check for Updates entry reachable from the Editor window (menu
+    item or a header icon consistent with the Editor's own affordances) —
+    it should not require returning to the launcher.
+- **Deliverables:** a recognizable update-check icon on the launcher; a
+  Check for Updates path from the Editor.
+- **Acceptance criteria:** a user shown only the undocked launcher, without
+  being told what it does, can identify the update-check control by sight;
+  the same action is reachable from the Editor window.
+- **Dependencies:** None.
+
+### TA-219 — Save PNG / Export JSON default to the install folder instead of Documents\Test Assist
+
+- **Phase:** 2
+- **Priority:** P1
+- **Suggested labels:** `bug`, `editor`, `data-integrity`
+- **Problem it solves:** Reported: *"the images dont open to the documents
+  test assist folder. when going to save an image in the new version it
+  defaulted it to the location where the app was installed not to the
+  documents folder."* Confirmed in `editor.py`: `_save_png()` and
+  `_export_json()` both call `QFileDialog.getSaveFileName()` with a bare
+  filename and no directory —
+  ```python
+  default = f"test-assist-{int(time.time())}.png"
+  path, _ = QFileDialog.getSaveFileName(self, "Save PNG", default, "PNG (*.png)")
+  ```
+  Neither function references `paths` at all, despite `import paths` being
+  present in the file and already used correctly elsewhere in the same
+  module (`self._history_dir = paths.history_dir()`, and
+  `directory = paths.recordings_dir()` for recordings). With no directory
+  hint, Qt's save dialog falls back to the last-used folder or the current
+  working directory — on Windows, launched via a shortcut, that's typically
+  the app's own folder, matching exactly what was reported. This is the
+  same `Documents\Test Assist` split `docs/data-locations-brief.md` already
+  specifies and that video recordings (`capture.py::_recordings_dir()` →
+  `paths.recordings_dir()`) already get right — the PNG/JSON save dialogs
+  are the one place that split wasn't wired through.
+- **Scope:**
+  - Pass `paths.recordings_dir()` as the starting directory to both
+    `QFileDialog.getSaveFileName()` calls in `_save_png()` and
+    `_export_json()`, matching what `_recording_entries()` already does.
+  - Confirm `paths.recordings_dir()` creates the folder if it doesn't exist
+    yet, so the dialog doesn't open to a missing path on first save.
+  - Out of scope for this ticket, explicitly not yet decided: letting the
+    user choose a different default save folder — noted as a future option,
+    not built here.
+- **Deliverables:** both save dialogs default to `Documents\Test Assist`.
+- **Acceptance criteria:** on a machine where that folder has never been
+  opened manually, clicking Save PNG or Export JSON opens the dialog
+  already inside `Documents\Test Assist`, not the app's install folder.
+- **Dependencies:** None.
+
+### TA-220 — Clicking the TA icon while the Editor is already open should toggle it, not just raise it
+
+- **Phase:** 2
+- **Priority:** P3
+- **Suggested labels:** `enhancement`, `launcher`, `editor`, `ux`
+- **Problem it solves:** Reported: *"if the editor has already been opened
+  and the user clicks on the TA button on the floating widget it should
+  maximise or minimise the editor page so that the user can have quick
+  access to it instead of looking for the app in the toolbar."* Confirmed
+  in `launcher.py`/`editor.py`: `_btn_open_editor` is already wired to
+  `self._editor.bring_forward`, which does `show()` +
+  `activateWindow()` + `raise_()` — so the "find it without hunting in the
+  taskbar" half already works today. What's missing is the toggle half:
+  clicking the TA icon again while the Editor is already open and focused
+  currently does the same bring-forward no-op instead of minimizing it back
+  out of the way.
+- **Scope:** in `bring_forward()` (or the click handler that calls it),
+  check whether the Editor window is currently the active window; if so,
+  minimize it instead of re-raising it.
+- **Deliverables:** the TA icon acts as a show/hide toggle for the Editor.
+- **Acceptance criteria:** with the Editor open and focused, clicking the TA
+  icon minimizes it; clicking it again restores and focuses it.
+- **Dependencies:** None.
+
 ### Gate A — Code complete
 - TA-201, TA-202, TA-203 merged
 - Suite green, no skips, no test opens a socket

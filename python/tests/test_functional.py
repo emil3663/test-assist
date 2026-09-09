@@ -926,6 +926,49 @@ def test_OUT_09_cancelling_the_dialog_writes_nothing(editor, monkeypatch, tmp_pa
     assert list(tmp_path.glob("*.png")) == []
 
 
+def test_TA219_save_png_dialog_defaults_to_documents_test_assist(editor, monkeypatch) -> None:
+    """TA-219: with no directory hint, Qt's save dialog falls back to the
+    last-used folder or the current working directory - on Windows,
+    launched via a shortcut, that's the app's own install folder. The
+    starting directory passed to the dialog must be paths.recordings_dir()
+    (Documents\\Test Assist), not a bare filename."""
+    import paths
+    from PySide6.QtWidgets import QFileDialog
+
+    draw(editor._canvas, "rect", 20, 20, 140, 110)
+    calls: list[tuple] = []
+    monkeypatch.setattr(
+        QFileDialog, "getSaveFileName",
+        staticmethod(lambda *a, **k: calls.append(a) or ("", "")),
+    )
+
+    editor._save_png()
+
+    assert calls, "the save dialog was never opened"
+    default_path = calls[0][2]  # (parent, caption, dir, filter)
+    assert default_path.startswith(str(paths.recordings_dir())), \
+        f"expected the dialog to default into {paths.recordings_dir()}, got {default_path!r}"
+
+
+def test_TA219_export_json_dialog_defaults_to_documents_test_assist(editor, monkeypatch) -> None:
+    import paths
+    from PySide6.QtWidgets import QFileDialog
+
+    draw(editor._canvas, "rect", 20, 20, 140, 110)
+    calls: list[tuple] = []
+    monkeypatch.setattr(
+        QFileDialog, "getSaveFileName",
+        staticmethod(lambda *a, **k: calls.append(a) or ("", "")),
+    )
+
+    editor._export_json()
+
+    assert calls, "the export dialog was never opened"
+    default_path = calls[0][2]
+    assert default_path.startswith(str(paths.recordings_dir())), \
+        f"expected the dialog to default into {paths.recordings_dir()}, got {default_path!r}"
+
+
 # ── 3.11 Capture history ─────────────────────────────────────────────────────
 
 def test_HIS_01_history_persists_for_a_new_editor(editor, qapp):

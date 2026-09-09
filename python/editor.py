@@ -158,7 +158,18 @@ class EditorWindow(QMainWindow):
             self.raise_()
 
     def bring_forward(self) -> None:
-        """Raise and activate the editor window."""
+        """Raise and activate the editor window - or minimize it if it is
+        already the active window (TA-220), so the TA icon (floating and
+        docked) and the tray's "Open Editor" all act as a show/hide toggle
+        rather than a no-op re-raise when the editor is already what the
+        user is looking at.
+        """
+        if self.isActiveWindow() and not self.isMinimized():
+            self.showMinimized()
+            return
+        if self.isMinimized():
+            # show() alone does not restore from a minimized state.
+            self.showNormal()
         self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating, False)
         self.show()
         self.activateWindow()
@@ -704,7 +715,12 @@ class EditorWindow(QMainWindow):
         pixmap = self._canvas.export_pixmap()
         if not pixmap:
             return
-        default = f"test-assist-{int(time.time())}.png"
+        # paths.recordings_dir(), not a bare filename: with no directory
+        # hint Qt's dialog falls back to the last-used folder or the
+        # current working directory - on Windows, launched via a shortcut,
+        # that's the app's own install folder (TA-219). recordings_dir()
+        # already creates Documents\Test Assist if it doesn't exist yet.
+        default = str(paths.recordings_dir() / f"test-assist-{int(time.time())}.png")
         path, _ = QFileDialog.getSaveFileName(self, "Save PNG", default, "PNG (*.png)")
         if path:
             pixmap.save(path, "PNG")
@@ -722,7 +738,7 @@ class EditorWindow(QMainWindow):
             "annotations": self._canvas.serialisable_annotations(),
             "timestamp":   time.strftime("%Y-%m-%dT%H:%M:%S"),
         }
-        default = f"annotations-{int(time.time())}.json"
+        default = str(paths.recordings_dir() / f"annotations-{int(time.time())}.json")
         path, _ = QFileDialog.getSaveFileName(self, "Export JSON", default, "JSON (*.json)")
         if path:
             with open(path, "w", encoding="utf-8") as fh:

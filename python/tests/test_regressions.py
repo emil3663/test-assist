@@ -1063,6 +1063,54 @@ def test_show_launcher_button_routes_through_restore_not_show(qapp, monkeypatch)
     editor.close()
 
 
+def test_TA220_bring_forward_toggles_minimize_when_already_active(qapp) -> None:
+    """Clicking the TA icon while the Editor is already open and focused
+    used to be a no-op re-raise; it must minimize instead, and a further
+    click must restore and focus it again - a genuine show/hide toggle."""
+    editor = EditorWindow()
+
+    editor.bring_forward()
+    qapp.processEvents()
+    assert editor.isActiveWindow()
+    assert not editor.isMinimized()
+
+    editor.bring_forward()
+    qapp.processEvents()
+    assert editor.isMinimized(), "a second bring_forward() while active must minimize, not re-raise"
+
+    editor.bring_forward()
+    qapp.processEvents()
+    assert not editor.isMinimized()
+    assert editor.isActiveWindow()
+    editor.close()
+
+
+def test_TA220_bring_forward_raises_rather_than_minimizes_when_not_active(qapp) -> None:
+    """The toggle only applies when the editor is already the active
+    window - bring_forward() while something else has focus must still
+    just raise and activate it, not minimize an editor nobody was
+    looking at."""
+    from PySide6.QtWidgets import QWidget
+
+    editor = EditorWindow()
+    editor.show()
+    qapp.processEvents()
+
+    other = QWidget()
+    other.show()
+    other.activateWindow()
+    qapp.processEvents()
+    assert not editor.isActiveWindow()
+
+    editor.bring_forward()
+    qapp.processEvents()
+
+    assert not editor.isMinimized()
+    assert editor.isActiveWindow()
+    editor.close()
+    other.close()
+
+
 def test_INS_08_load_image_path_loads_a_valid_image_and_brings_the_editor_forward(qapp, tmp_path, blank_pixmap) -> None:
     """The "Open with -> Test Assist" / second-instance-handoff entry
     point: both hand load_image_path() a raw path string, never a
