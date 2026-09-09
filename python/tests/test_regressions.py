@@ -9,6 +9,8 @@ from PySide6.QtCore import QEvent, QPoint, QPointF, QRect, Qt
 from PySide6.QtGui import QColor, QKeyEvent, QPixmap
 from PySide6.QtWidgets import QApplication, QDialog, QFrame, QLabel, QMessageBox, QPushButton, QTabWidget, QWidget
 
+import debug_log
+import paths
 from canvas import AnnotationCanvas
 from editor import EditorWindow
 from launcher import FloatingLauncher
@@ -37,6 +39,7 @@ class _EditorStub:
         self.bring_forward_calls = 0
         self.loaded = []
         self.recorded = []
+        self.refresh_history_calls = 0
 
     def bring_forward(self) -> None:
         self.bring_forward_calls += 1
@@ -46,6 +49,9 @@ class _EditorStub:
 
     def record_capture(self, pixmap) -> None:
         self.recorded.append(pixmap)
+
+    def refresh_history(self) -> None:
+        self.refresh_history_calls += 1
 
 
 def _canvas_with_image(qapp, blank_pixmap) -> AnnotationCanvas:
@@ -316,12 +322,22 @@ def test_settings_bar_does_not_clip_at_the_960_minimum_window_width(qapp) -> Non
 
 def test_save_png_stays_visually_primary_in_the_settings_bar(qapp) -> None:
     """Moving Save PNG into a strip of other buttons must not demote it to
-    just another button in that strip."""
+    just another button in that strip.
+
+    TA-221 removed Copy/Export's setFixedHeight(26) rather than bumping it
+    (it was clipping their text) - all three buttons now share the same
+    QSS-driven natural height (28px, measured via sizeHint() since raw
+    height() is meaningless before a layout pass has run), so primacy is
+    carried by the accent-filled btn_primary style and this button's own
+    width (icon + longer label), not by being taller.
+    """
     editor = EditorWindow()
 
     assert editor._btn_save_png.objectName() == "btn_primary"
-    assert editor._btn_save_png.height() > editor._btn_copy.height()
-    assert editor._btn_save_png.height() > editor._btn_export_json.height()
+    assert editor._btn_copy.objectName() != "btn_primary"
+    assert editor._btn_export_json.objectName() != "btn_primary"
+    assert editor._btn_save_png.sizeHint().width() > editor._btn_copy.sizeHint().width()
+    assert editor._btn_save_png.sizeHint().width() > editor._btn_export_json.sizeHint().width()
 
     editor.close()
 
@@ -617,6 +633,88 @@ def test_TA217_global_hotkey_closes_an_open_about_dialog_before_capturing(qapp, 
     assert QApplication.activeModalWidget() is None, \
         "the About dialog must be closed, not left open and still input-blocking"
     editor.close()
+    launcher.close()
+
+
+def test_TA217_quick_capture_button_closes_an_open_about_dialog_before_capturing(qapp, monkeypatch) -> None:
+    """Re-tested on rc4: the fix only covered the hotkey path -
+    _dismiss_active_modal_dialog() was called only from
+    _on_global_hotkey(), so clicking the Quick Capture *button* itself
+    while About was open was still silently swallowed by Qt's
+    application-modal block, exactly as before the ticket's rc4 fix."""
+    from PySide6.QtCore import QTimer
+
+    editor = EditorWindow()
+    launcher = FloatingLauncher(editor)
+
+    calls: list[str] = []
+    launcher._start_capture = lambda: calls.append("start_capture")
+
+    dismiss_calls: list[bool] = []
+    real_dismiss = FloatingLauncher._dismiss_active_modal_dialog
+    def _spy_dismiss():
+        dismiss_calls.append(True)
+        real_dismiss()
+    monkeypatch.setattr(FloatingLauncher, "_dismiss_active_modal_dialog", staticmethod(_spy_dismiss))
+
+    QTimer.singleShot(0, launcher._on_action_click)
+    QTimer.singleShot(2000, lambda: QApplication.activeModalWidget() and QApplication.activeModalWidget().close())
+    editor._open_about()  # blocks until the dialog closes
+
+    assert dismiss_calls, "the button path must also attempt to dismiss an open modal dialog"
+    assert calls == ["start_capture"], \
+        "the button must still dispatch to a capture while the About dialog is open"
+    assert QApplication.activeModalWidget() is None
+    editor.close()
+    launcher.close()
+
+
+def test_TA217_dismiss_active_modal_dialog_logs_what_it_found(qapp, monkeypatch) -> None:
+    """Instrumentation only (TA-217's hotkey-capture gap is not fixed in
+    this batch) - pins that the log call site exists and reports the real
+    activeModalWidget() value, not just that debug_log.log gets called
+    with something."""
+    logged: list[str] = []
+    monkeypatch.setattr(debug_log, "log", lambda msg: logged.append(msg))
+
+    editor = EditorWindow()
+    dlg_holder: list[QDialog] = []
+
+    def _open_and_dismiss():
+        dlg = QDialog()
+        dlg.setModal(True)
+        dlg_holder.append(dlg)
+        from PySide6.QtCore import QTimer
+        QTimer.singleShot(50, FloatingLauncher._dismiss_active_modal_dialog)
+        QTimer.singleShot(500, dlg.close)
+        dlg.exec()
+
+    _open_and_dismiss()
+
+    assert any("_dismiss_active_modal_dialog" in msg for msg in logged)
+    assert any(repr(dlg_holder[0]) in msg or "QDialog" in msg for msg in logged), \
+        "must log the actual modal widget found, not a generic message"
+    editor.close()
+
+
+def test_TA217_start_capture_logs_when_the_singleshot_activation_fires(qapp, monkeypatch) -> None:
+    """Reported: pressing Alt+P while About was open closed the dialog but
+    took no snapshot - unconfirmed from the code alone whether
+    _overlay.activate()'s singleShot callback ever fires on that path.
+    Instrumentation only, no fix - pins the log call actually fires when
+    the timer elapses, not just that the code compiles."""
+    from PySide6.QtTest import QTest
+
+    logged: list[str] = []
+    monkeypatch.setattr(debug_log, "log", lambda msg: logged.append(msg))
+
+    launcher = FloatingLauncher(_EditorStub())
+    monkeypatch.setattr(launcher._overlay, "activate", lambda: None)
+
+    launcher._start_capture()
+    QTest.qWait(400)
+
+    assert any("singleShot fired" in msg for msg in logged)
     launcher.close()
 
 
@@ -978,6 +1076,58 @@ def test_TA215_clicking_the_docked_capture_icon_again_stops_the_recording(qapp) 
     launcher.close()
 
 
+def test_TA215_docked_capture_icon_shows_a_distinct_video_mode_appearance(qapp) -> None:
+    """Re-tested on rc4: the recording-in-progress feedback works, but
+    Photo vs Video mode was indistinguishable on the docked icon until a
+    recording was actually running - reuses _make_video_icon(), the same
+    glyph the undocked mode buttons already use for this distinction."""
+    launcher = FloatingLauncher(_EditorStub())
+    launcher._dock_right()
+
+    launcher._set_mode("photo")
+    photo_icon = launcher._btn_dock_capture.icon().pixmap(20, 20).toImage()
+
+    launcher._set_mode("video")
+    video_icon = launcher._btn_dock_capture.icon().pixmap(20, 20).toImage()
+
+    assert photo_icon != video_icon, \
+        "selecting Video mode before recording must look different from Photo mode on the docked icon"
+    launcher.close()
+
+
+def test_TA215_finished_recording_refreshes_history_without_reopening_the_editor(qapp) -> None:
+    """record_capture() persists a still capture to History live via
+    _persist_history_snapshot(); a finished recording never routed through
+    that, so it only appeared in History on the next rebuild (e.g. editor
+    restart), not live - _on_record_finished() must now trigger the same
+    refresh."""
+    editor = _EditorStub()
+    launcher = FloatingLauncher(editor)
+
+    video_path = paths.recordings_dir() / "test-recording-ta215.mp4"
+    video_path.write_bytes(b"fake mp4")
+    try:
+        launcher._on_record_finished(str(video_path))
+        assert editor.refresh_history_calls == 1, \
+            "a finished recording must refresh the editor's History panel"
+    finally:
+        video_path.unlink(missing_ok=True)
+        launcher.close()
+
+
+def test_TA215_a_recording_with_nothing_captured_does_not_refresh_history(qapp) -> None:
+    """No file means nothing to show - refreshing History for an empty
+    result would be pointless work, not a correctness issue, but pins the
+    early-return path stays early."""
+    editor = _EditorStub()
+    launcher = FloatingLauncher(editor)
+
+    launcher._on_record_finished("")
+
+    assert editor.refresh_history_calls == 0
+    launcher.close()
+
+
 def test_open_folder_button_appears_after_a_recording_and_opens_its_folder(qapp, monkeypatch) -> None:
     """Fixes the discoverability complaint properly, per the data-locations
     brief: "where did it go" gets a one-click answer instead of a folder name
@@ -1300,6 +1450,75 @@ def test_TA220_bring_forward_raises_rather_than_minimizes_when_not_active(qapp) 
     assert editor.isActiveWindow()
     editor.close()
     other.close()
+
+
+def test_TA220_bring_forward_restores_a_maximized_editor_to_maximized_not_windowed(qapp) -> None:
+    """Re-tested on rc4: showNormal() unconditionally clears both the
+    minimized and maximized flags, so a maximized editor came back
+    windowed-size after being minimized and restored via the TA icon. Qt
+    keeps both WindowMinimized and WindowMaximized set together on such a
+    window, so the maximized flag is available to check before deciding
+    how to restore."""
+    editor = EditorWindow()
+    editor.showMaximized()
+    qapp.processEvents()
+    assert editor.isMaximized()
+
+    editor.showMinimized()
+    qapp.processEvents()
+    assert editor.isMinimized()
+
+    editor.bring_forward()
+    qapp.processEvents()
+
+    assert not editor.isMinimized()
+    assert editor.isMaximized(), "a maximized editor must restore maximized, not windowed-size"
+    editor.close()
+
+
+def test_TA220_bring_forward_logs_active_and_minimized_state(qapp, monkeypatch) -> None:
+    """Instrumentation only (the minimize-toggle-not-firing gap is not
+    fixed in this batch - no second monitor/interactive session here to
+    confirm the isActiveWindow() timing hypothesis). Pins that the log
+    call site exists and reports the real values, not just that
+    debug_log.log gets called."""
+    logged: list[str] = []
+    monkeypatch.setattr(debug_log, "log", lambda msg: logged.append(msg))
+
+    editor = EditorWindow()
+    editor.bring_forward()
+    qapp.processEvents()
+
+    assert any("isActiveWindow=" in msg and "isMinimized=" in msg for msg in logged)
+    editor.close()
+
+
+def test_TA221_copy_and_export_buttons_have_no_fixed_height(qapp) -> None:
+    """setFixedHeight(26) left only 12px of vertical room inside the QSS
+    rule's 14px of padding, clipping descenders ("Copy" -> "Copv",
+    "Export" -> "Exoort"). Removing the override (rather than bumping it
+    to another hand-tuned pixel value) is what can't drift out of sync
+    with the stylesheet again - a setFixedHeight() call caps maximumHeight()
+    at that value, which is the mechanism this test actually checks for."""
+    editor = EditorWindow()
+    QWIDGETSIZE_MAX = 16777215
+    assert editor._btn_copy.maximumHeight() == QWIDGETSIZE_MAX, \
+        "a setFixedHeight() call would cap this below the QSS-driven natural size"
+    assert editor._btn_export_json.maximumHeight() == QWIDGETSIZE_MAX
+    editor.close()
+
+
+def test_TA222_settings_bar_has_a_leading_stretch_matching_the_tools_bar(qapp) -> None:
+    """_build_tools_bar() centers its content with a stretch on both
+    sides; _build_settings_bar() only had the trailing one, packing zoom
+    through Save PNG flush against the left edge instead of centering the
+    row as one group the way the row above it does."""
+    editor = EditorWindow()
+    settings_bar = editor._btn_zoom_out.parentWidget()
+    layout = settings_bar.layout()
+    assert layout.itemAt(0).spacerItem() is not None, \
+        "the settings bar needs a leading stretch to center as a group, like the tools bar"
+    editor.close()
 
 
 def test_INS_08_load_image_path_loads_a_valid_image_and_brings_the_editor_forward(qapp, tmp_path, blank_pixmap) -> None:

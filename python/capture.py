@@ -11,6 +11,7 @@ from PySide6.QtCore import QObject, QPoint, QRect, QSize, Qt, QTimer, Signal
 from PySide6.QtGui import QColor, QImage, QPainter, QPixmap, QRegion
 from PySide6.QtWidgets import QApplication, QRubberBand, QWidget
 
+import debug_log
 import paths
 from screen_geometry import plan_capture
 
@@ -223,6 +224,17 @@ class ScreenshotOverlay(QWidget):
     def mouseMoveEvent(self, event) -> None:
         if self._active:
             current = event.globalPosition().toPoint()
+            # TA-223: the selection rectangle reportedly jumps/resizes
+            # crossing the laptop/external boundary on a mixed-DPI setup
+            # (125% laptop, 100% external) - a plausible cause (a Qt
+            # logical-pixel rounding discontinuity at the boundary) has no
+            # measurement from real hardware to confirm it yet. Logged
+            # raw, every move, rather than guessed at - see
+            # docs/ta215-225-fix-brief.md.
+            debug_log.log(
+                f"TA-223 drag move: globalPosition=({current.x()}, {current.y()}) "
+                f"screens={[s.geometry().getRect() for s in QApplication.screens()]}"
+            )
             self._rubber.setGeometry(
                 QRect(self._to_local(self._origin), self._to_local(current)).normalized()
             )
@@ -286,6 +298,18 @@ class ScreenshotOverlay(QWidget):
         screens = QApplication.screens()
         geometries = [screen.geometry() for screen in screens]
         pieces = plan_capture(global_rect, geometries)
+        # TA-225: capture on the laptop in the secondary-above layout
+        # reportedly produces no visible content, despite the drag
+        # selection visibly highlighting the right region - unconfirmed
+        # whether this is a new edge case or shares TA-223's mechanism.
+        # Logs exactly what plan_capture() was asked to divide and what it
+        # returned, so a real repro can show which. See
+        # docs/ta215-225-fix-brief.md.
+        debug_log.log(
+            f"TA-225 grab: dragged_rect={global_rect.getRect()} "
+            f"screen_geometries={[g.getRect() for g in geometries]} "
+            f"plan_capture_result={pieces}"
+        )
 
         if not pieces:
             # The selection touched no known screen - should not happen for a

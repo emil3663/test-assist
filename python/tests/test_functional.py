@@ -1162,6 +1162,22 @@ def test_HIS_09_a_recording_thumb_is_never_decoded_as_a_pixmap(editor):
     assert not any(isinstance(t, _SnapshotThumb) and t.toolTip().endswith(video.name) for t in thumbs)
 
 
+def test_TA215_refresh_history_public_method_picks_up_a_new_recording(editor) -> None:
+    """launcher.py has no editor.py import (avoids an import cycle), so
+    _on_record_finished() needs a public method to call - pins that
+    EditorWindow.refresh_history() actually re-scans disk (via
+    _refresh_history()) rather than being a no-op wrapper."""
+    import paths
+
+    video = paths.recordings_dir() / "test-recording-ta215-public.mp4"
+    video.write_bytes(b"fake mp4")
+    try:
+        editor.refresh_history()
+        assert video in editor._history_files_for_mode("all")
+    finally:
+        video.unlink(missing_ok=True)
+
+
 def test_HIS_10_clicking_a_recording_opens_it_externally_not_into_the_canvas(editor, monkeypatch) -> None:
     import editor as editor_module
     import paths
@@ -1749,6 +1765,63 @@ def test_CAP_03_a_click_without_a_drag_captures_nothing(qapp):
 
     assert grabbed == [], "a zero-size region is not a capture"
     assert cancelled == [True]
+
+
+def test_TA223_drag_move_logs_global_position_and_screen_geometries(qapp, monkeypatch):
+    """Instrumentation only - TA-223's boundary-crossing resize is not
+    fixed in this batch, no second monitor here to measure it on. Pins
+    that a drag move logs the exact raw values (cursor position and both
+    screens' geometry) the next manual pass' on-hardware logging needs to
+    confirm or rule out the DPI-rounding hypothesis, not just that
+    debug_log.log gets called with something."""
+    import debug_log
+    from capture import ScreenshotOverlay
+
+    logged: list[str] = []
+    monkeypatch.setattr(debug_log, "log", lambda msg: logged.append(msg))
+
+    laptop = _StubScreen(QRect(0, 0, 1000, 800), "red")
+    external = _StubScreen(QRect(1000, 0, 1920, 1080), "blue")
+    monkeypatch.setattr(QApplication, "screens", staticmethod(lambda: [laptop, external]))
+
+    overlay = ScreenshotOverlay()
+    overlay.mousePressEvent(_overlay_mouse(40, 40))
+    overlay.mouseMoveEvent(_overlay_mouse(200, 160))
+
+    assert any("TA-223" in msg and "(200, 160)" in msg for msg in logged)
+    assert any("(0, 0, 1000, 800)" in msg and "(1000, 0, 1920, 1080)" in msg for msg in logged), \
+        "must log the real screen geometries, not just the cursor position"
+    overlay.close()
+
+
+def test_TA225_grab_logs_the_dragged_rect_and_plan_capture_result(qapp, monkeypatch):
+    """Instrumentation only - TA-225 (capture on the laptop in the
+    secondary-above layout producing no visible content) is not fixed in
+    this batch, since it needs a repro with the actual coordinates
+    plan_capture() received, which this environment cannot produce. Pins
+    that _grab() logs both what it dragged and what plan_capture() did
+    with it."""
+    import debug_log
+    from capture import ScreenshotOverlay
+
+    logged: list[str] = []
+    monkeypatch.setattr(debug_log, "log", lambda msg: logged.append(msg))
+
+    screen = _StubScreen(QRect(0, 0, 1000, 800), "red")
+    monkeypatch.setattr(QApplication, "screens", staticmethod(lambda: [screen]))
+    monkeypatch.setattr(QApplication, "primaryScreen", staticmethod(lambda: screen))
+
+    overlay = ScreenshotOverlay()
+    grabbed: list = []
+    overlay.capture_ready.connect(grabbed.append)
+
+    overlay.mousePressEvent(_overlay_mouse(40, 40))
+    overlay.mouseMoveEvent(_overlay_mouse(200, 160))
+    overlay.mouseReleaseEvent(_overlay_mouse(200, 160))
+    QTest.qWait(300)
+
+    assert any("TA-225" in msg and "dragged_rect=" in msg for msg in logged)
+    assert any("plan_capture_result=" in msg for msg in logged)
 
 
 def test_CAP_04_a_new_capture_replaces_the_previous_image(editor):

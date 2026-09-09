@@ -27,6 +27,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+import debug_log
 from capture import FrameRecorder, ScreenshotOverlay
 from global_hotkeys import MOD_ALT, MOD_SHIFT, GlobalHotkeyManager
 from screen_geometry import is_within_dock_band, screen_for_rect
@@ -416,13 +417,27 @@ class FloatingLauncher(QWidget):
         About specifically, so any future modal dialog is covered the
         same way without needing its own fix (TA-217)."""
         modal = QApplication.activeModalWidget()
+        # TA-217: rc4's fix covered the hotkey path but not this one - the
+        # Quick Capture *button* silently swallowed its click the same way
+        # while a modal was up. Logged here (shared by both paths) rather
+        # than only at the hotkey call site, since whichever path called
+        # in is equally worth knowing about.
+        debug_log.log(f"_dismiss_active_modal_dialog: activeModalWidget={modal!r}")
         if modal is not None:
             modal.close()
 
     # ── Action dispatch ───────────────────────────────────────────────────────
 
     def _on_action_click(self) -> None:
-        """Single action button dispatches to photo capture or video toggle."""
+        """Single action button dispatches to photo capture or video toggle.
+
+        _dismiss_active_modal_dialog() first (TA-217): the hotkey path
+        already closes a blocking modal before dispatching - the button
+        click handler never did, so clicking Quick Capture while e.g. the
+        About dialog was open was silently swallowed by Qt's
+        application-modal block exactly as if the fix had never shipped.
+        """
+        self._dismiss_active_modal_dialog()
         if self._mode == "photo":
             self._start_capture()
         else:
@@ -439,6 +454,7 @@ class FloatingLauncher(QWidget):
         self._btn_photo.setStyleSheet(self._style_mode_icon(active=is_photo))
         self._btn_video.setStyleSheet(self._style_mode_icon(active=not is_photo))
         self._refresh_mode_icons()
+        self._refresh_dock_recording_indicator()
 
         if is_photo:
             self._btn_capture.setText("Quick Capture")
@@ -460,7 +476,14 @@ class FloatingLauncher(QWidget):
     def _start_capture(self) -> None:
         self.hide()
         # Give the OS time to repaint the screen without this window.
-        QTimer.singleShot(220, self._overlay.activate)
+        # TA-217: reported that pressing Alt+P while About was open closed
+        # the dialog but took no snapshot - unconfirmed from the code
+        # alone whether this singleShot callback ever fires on that path.
+        # Logged rather than guessed at; see docs/ta215-225-fix-brief.md.
+        def _activate_overlay() -> None:
+            debug_log.log("_start_capture: singleShot fired, calling _overlay.activate()")
+            self._overlay.activate()
+        QTimer.singleShot(220, _activate_overlay)
 
     def _start_full_capture(self) -> None:
         """Capture the full primary desktop, including taskbar and clock."""
@@ -531,12 +554,26 @@ class FloatingLauncher(QWidget):
         either way - clicking the docked icon a second time does call
         _stop_recording() - this is a state-feedback gap, not a broken
         stop mechanism.
+
+        Also gives the docked icon a distinct "video mode selected"
+        appearance before recording starts (re-tested on rc4: recording
+        feedback itself works, but Photo vs Video mode was indistinguishable
+        on the docked icon until a recording was actually running) - reuses
+        _make_video_icon(), the same glyph the undocked mode buttons already
+        use for exactly this distinction, rather than inventing a new one.
         """
         recording = self._rec_timer.isActive()
-        self._btn_dock_capture.setIcon(
-            self._make_stop_icon() if recording else self._make_camera_icon("#f0d0a0")
-        )
-        self._btn_dock_capture.setIconSize(QSize(16, 16) if recording else QSize(20, 20))
+        if recording:
+            icon = self._make_stop_icon()
+            icon_size = QSize(16, 16)
+        elif self._mode == "video":
+            icon = self._make_video_icon("#f0d0a0")
+            icon_size = QSize(20, 20)
+        else:
+            icon = self._make_camera_icon("#f0d0a0")
+            icon_size = QSize(20, 20)
+        self._btn_dock_capture.setIcon(icon)
+        self._btn_dock_capture.setIconSize(icon_size)
         self._btn_dock_capture.setToolTip("Stop Recording" if recording else "Quick Capture")
         self._dock_rec_label.setText("00:00" if recording else "")
         self._dock_rec_label.setVisible(recording)
@@ -558,6 +595,13 @@ class FloatingLauncher(QWidget):
             )
         self._last_recording_path = result
         self._btn_open_folder.show()
+        # TA-215: a finished recording is saved straight to disk, but
+        # nothing told the editor's History panel to look again - it would
+        # only show up the next time History rebuilds on its own (e.g. an
+        # editor restart), unlike a still capture which persists live via
+        # record_capture(). refresh_history() re-scans the same directory
+        # _persist_history_snapshot() already refreshes from.
+        self._editor.refresh_history()
 
     def _open_last_recording_folder(self) -> None:
         """"Where did it go" gets a one-click answer, whatever the path is -

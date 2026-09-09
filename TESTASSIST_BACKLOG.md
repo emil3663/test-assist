@@ -487,29 +487,53 @@ that will actually ship.
   and correctly wired exactly where documented (2nd icon in `header_row`,
   right after the editor icon). The real cause is unrelated to docking —
   moved to **TA-218**.
-  Also flagged from the same pass, not yet reproduced with enough detail to
-  diagnose: capturing the Windows Properties dialog (PKG-05) with Test
-  Assist itself reportedly didn't work while docked, native PrintScreen was
-  used instead. Needs a specific repro (did Quick Capture do nothing, fail
-  to show the selection overlay, or capture the wrong window?) before it's
-  scoped as part of this ticket or filed separately.
+  PKG-05 (docked capture over the Windows Properties dialog): retried on
+  rc4 and **not reproducible** — closing this sub-item, no longer part of
+  this ticket's scope.
+
+  **Re-tested on rc4, 2026-09-09 — the icon/indicator fix works, but two
+  new gaps found:**
+  1. *Video recordings don't appear in History without reopening the
+     editor.* Confirmed in code: `record_capture()` (still captures) ends
+     with `self._persist_history_snapshot(pixmap)`, which itself calls
+     `self._refresh_history()` — the gallery updates live. But
+     `_on_record_finished()` (launcher.py, called when a recording
+     finishes) only updates the status label and reveals "Open Folder" —
+     it never tells the editor's History panel to refresh. The recording
+     is saved correctly to `recordings_dir()` on disk, and would show up
+     the next time History is rebuilt (e.g. on editor restart), but not
+     live, unlike still captures.
+  2. *No visual distinction for "video mode selected" before recording
+     starts.* Reported: *"the image for capture should be changed to video
+     icon if that is selected."* The recording-in-progress feedback this
+     ticket originally fixed does work now — this is a separate, smaller
+     ask: the docked icon doesn't reflect that Video mode (vs. Photo) is
+     the active mode until a recording is actually running.
 - **Scope:**
   - Give the docked capture icon its own visual state: swap its icon (e.g.
     to a red square/stop glyph) when `self._rec_timer.isActive()`, mirroring
-    what `_btn_capture`'s text already does undocked.
-  - Surface a minimal recording indicator while docked — a colored dot or
-    the elapsed-time text is enough; it doesn't need the full `_rec_label`
-    treatment, but *something* must be visible in the docked strip.
-  - Get a precise repro on the PKG-05 docked-capture report before scoping a
-    fix for it.
+    what `_btn_capture`'s text already does undocked. **Done in rc4.**
+  - Surface a minimal recording indicator while docked. **Done in rc4.**
+  - New: have `_on_record_finished()` trigger the same History refresh
+    `_persist_history_snapshot()` already does, so a finished recording
+    appears in the open editor's gallery without a restart.
+  - New, smaller: give the docked (and undocked) capture icon a distinct
+    "video mode selected" appearance when Video mode is active but not yet
+    recording — decide the exact glyph (e.g. a video-camera icon) rather
+    than guessing.
 - **Deliverables:**
-  - Docked-mode recording state (icon + indicator); a confirmed repro (or
-    a "not reproducible" note) for the PKG-05 report.
+  - Docked-mode recording state (icon + indicator) — done.
+  - Finished recordings appear in History live, no restart needed.
+  - Video-mode-selected visual state on the capture icon.
 - **Acceptance criteria:**
   - Starting a recording from the docked strip visibly changes the capture
-    icon and shows some running-time indicator, without undocking.
+    icon and shows some running-time indicator, without undocking. ✅
   - Clicking the same icon again stops the recording, with the icon
-    reverting.
+    reverting. ✅
+  - A finished recording appears in History without closing/reopening the
+    editor.
+  - Selecting Video mode (before recording) is visually distinguishable
+    from Photo mode on the capture icon.
 - **Dependencies:** None.
 
 ### TA-216 — A capture isn't kept anywhere until you explicitly Save or Copy
@@ -548,6 +572,9 @@ that will actually ship.
 - **Dependencies:** None. Closely related to `TA-214` — both are "how do I
   get back to an image I'm not currently looking at" — worth sequencing
   together in the brief even though they're separate tickets.
+- **Verified:** ✅ 2026-09-09, rc4 — PASS. Manual re-test confirms multiple
+  captures now persist to History without a Save/Copy step
+  (`multiple_images_saved.png`).
 
 ### TA-217 — Quick Capture doesn't reliably start when another window has focus
 
@@ -575,29 +602,48 @@ that will actually ship.
      it's called fixed.
   2. **Separate, less understood, intermittent:** capturing over the Windows
      Properties dialog (a different application's window, not one of Test
-     Assist's own) reportedly did nothing on a first attempt, then worked on
-     retry. Qt's own modality doesn't apply to a foreign process's window,
-     so this is a different mechanism — most likely a focus/Z-order race
-     against `_start_capture()`'s fixed 220ms `singleShot` delay before the
-     overlay activates. Not enough repro detail yet to pin down; flagged
-     separately rather than folded into the About-dialog fix.
+     Assist's own). Retried on rc4 and **not reproducible** — closing this
+     sub-item, no longer part of this ticket's scope.
+
+  **Re-tested on rc4, 2026-09-09 — FAIL, two distinct gaps found in the
+  "fix":**
+  1. *The fix only covers the hotkey path.* Reported: *"clicking the quick
+     capture on the widgets does not work"* (while About is open).
+     Confirmed in `launcher.py`: `_dismiss_active_modal_dialog()` is called
+     **only** from `_on_global_hotkey()`. The launcher's own Quick Capture
+     *button* click handler never calls it — so clicking the button while
+     About's `Qt::ApplicationModal` block is up is still silently
+     swallowed by Qt, exactly as before this ticket's fix. The rc4 fix
+     solved the hotkey path and left the button path exactly as broken as
+     it always was.
+  2. *The hotkey path itself no longer captures.* Reported: *"pressing
+     alt+P closes the about popup. it doesnt take a snap shot."* So
+     `_dismiss_active_modal_dialog()` is doing its job (About visibly
+     closes), but the capture that's supposed to follow doesn't happen.
+     Read through `_on_global_hotkey()` → `_start_capture()` and didn't
+     find a definitive mechanism from the code alone — this needs a live
+     repro with logging (does `_overlay.activate()`'s 220ms `singleShot`
+     even fire? does the overlay show but not receive input, or never show
+     at all?) rather than another guess. Flagging honestly as unconfirmed
+     instead of asserting a cause I haven't verified.
 - **Scope:**
-  - For the confirmed case: either dismiss/close Test Assist's own modal
-    dialogs (About, and any future one) automatically when a global hotkey
-    fires a capture, or make overlay activation itself modality-proof so it
-    can grab input regardless of an open dialog. Prefer the first — simpler,
-    and matches user intent: pressing Alt+P clearly means "capture now."
-  - For the intermittent case: get a repeatable repro (does it correlate
-    with how quickly Quick Capture is clicked after the target window gains
-    focus? does raising the delay in `_start_capture()` change the failure
-    rate?) before scoping a fix.
-- **Deliverables:** the About-dialog case fixed and covered by a test that
-  opens the About dialog, fires the capture path, and asserts the overlay
-  actually receives input; a documented repro (or a "not reproducible" note)
-  for the Properties-dialog case.
-- **Acceptance criteria:** triggering a capture (hotkey or button) while
-  Test Assist's own About dialog is open results in a working, interactive
-  capture overlay, not a silent no-op.
+  - Wire `_dismiss_active_modal_dialog()` into the Quick Capture *button's*
+    click handler too, not just the hotkey path — both routes into
+    `_start_capture()` need the same guard.
+  - Instrument or step through the hotkey path on real hardware to find why
+    dismissing About no longer results in a working capture — this regressed
+    from what rc4's own test claimed to cover, so the rc4 test itself needs
+    re-examination (was it asserting the right thing, or just that
+    `_dismiss_active_modal_dialog` was *called*, not that a capture actually
+    resulted?).
+- **Deliverables:** both the button and hotkey paths dismiss a blocking
+  modal *and* produce a working, interactive capture overlay afterward,
+  covered by a test that checks the end state (an overlay that can actually
+  receive a drag), not just that the dismiss function ran.
+- **Acceptance criteria:** triggering a capture (hotkey **or** button)
+  while Test Assist's own About dialog is open results in a working,
+  interactive capture overlay, not a silent no-op — neither leaves the
+  dialog open blocking input, nor closes it without capturing.
 - **Dependencies:** None.
 
 ### TA-218 — Check for Updates is present but not recognizable, and only reachable from the launcher
@@ -641,6 +687,8 @@ that will actually ship.
   being told what it does, can identify the update-check control by sight;
   the same action is reachable from the Editor window.
 - **Dependencies:** None.
+- **Verified:** ✅ 2026-09-09, rc4 — PASS. "check for updates clear in both
+  edit and floating widget."
 
 ### TA-219 — Save PNG / Export JSON default to the install folder instead of Documents\Test Assist
 
@@ -682,30 +730,297 @@ that will actually ship.
   opened manually, clicking Save PNG or Export JSON opens the dialog
   already inside `Documents\Test Assist`, not the app's install folder.
 - **Dependencies:** None.
+- **Verified:** ✅ 2026-09-09, rc4 — PASS, after a full restart. App now
+  defaults to `C:\Users\MSI workstation\Documents\Test Assist`; both a PNG
+  and a JSON export landed there correctly.
 
-### TA-220 — Clicking the TA icon while the Editor is already open should toggle it, not just raise it
+### TA-220 — TA icon does not restore the Editor when it's minimized
 
 - **Phase:** 2
-- **Priority:** P3
-- **Suggested labels:** `enhancement`, `launcher`, `editor`, `ux`
+- **Priority:** P1
+- **Suggested labels:** `bug`, `launcher`, `editor`, `ux`
 - **Problem it solves:** Reported: *"if the editor has already been opened
   and the user clicks on the TA button on the floating widget it should
   maximise or minimise the editor page so that the user can have quick
-  access to it instead of looking for the app in the toolbar."* Confirmed
-  in `launcher.py`/`editor.py`: `_btn_open_editor` is already wired to
-  `self._editor.bring_forward`, which does `show()` +
-  `activateWindow()` + `raise_()` — so the "find it without hunting in the
-  taskbar" half already works today. What's missing is the toggle half:
-  clicking the TA icon again while the Editor is already open and focused
-  currently does the same bring-forward no-op instead of minimizing it back
-  out of the way.
-- **Scope:** in `bring_forward()` (or the click handler that calls it),
-  check whether the Editor window is currently the active window; if so,
-  minimize it instead of re-raising it.
-- **Deliverables:** the TA icon acts as a show/hide toggle for the Editor.
-- **Acceptance criteria:** with the Editor open and focused, clicking the TA
-  icon minimizes it; clicking it again restores and focuses it.
+  access to it instead of looking for the app in the toolbar."* Then
+  reproduced more precisely: *"during my manual testing it was discovered
+  if the edit app was minimised it is not brought forward maximised. the
+  focus might change to the edit screen but it is not displayed."*
+  `_btn_open_editor` is wired to `self._editor.bring_forward`:
+  ```python
+  def bring_forward(self) -> None:
+      self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating, False)
+      self.show()
+      self.activateWindow()
+      self.raise_()
+  ```
+  This is a genuine bug, not just a missing toggle. Once a Qt window has
+  already been shown once, calling `.show()` again does not clear a
+  minimized state — Qt treats "shown" and "not minimized" as separate
+  flags, and neither `show()` nor `raise_()` clears
+  `Qt::WindowMinimized`. `activateWindow()` can still hand the window OS-
+  level activation while it stays iconified in the taskbar, which is
+  exactly the reported symptom: focus moves, nothing becomes visible.
+  Confirmed by absence — `windowState`, `isMinimized`, and `showNormal`
+  do not appear anywhere in `editor.py`; the minimized case was never
+  handled.
+  **Fixed in the rc4 batch** (see `docs/BUILD_LOG.md`'s rc4 entry):
+  `bring_forward()` now checks `isActiveWindow()`/`isMinimized()` and
+  calls `showNormal()` before re-showing.
+
+  **Re-tested on rc4, 2026-09-09 — FAIL, restore now works but two gaps
+  remain.** Current code:
+  ```python
+  def bring_forward(self) -> None:
+      if self.isActiveWindow() and not self.isMinimized():
+          self.showMinimized()
+          return
+      if self.isMinimized():
+          self.showNormal()
+      self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating, False)
+      self.show()
+  ```
+  1. *Confirmed:* Reported: *"it does restore now but there seems to be an
+     issue if the edit app was full view(maximised) then it should return
+     in full view not the minimum size view. it should keep the sizing
+     parameters."* `showNormal()` always restores to the **normal**
+     (windowed) state — it clears both the minimized *and* maximized
+     flags unconditionally, so a window that was maximized before being
+     minimized comes back windowed-size instead. Qt actually keeps both
+     flags set at once on a minimized-while-maximized window (its
+     `windowState()` carries `WindowMinimized | WindowMaximized`
+     together), so the maximized flag is available to check — the code
+     just never checks it before deciding how to restore.
+  2. *Reported, not yet confirmed by code:* *"minimise doesn't work at
+     present"* and *"if view is maximised the ta icon in the docked or
+     floating widgets do not minimise it."* One plausible mechanism: the
+     `isActiveWindow()` check at the top runs the instant the TA icon is
+     clicked — but the click itself happens on a *different* top-level
+     window (the launcher), so at the moment this code runs, Windows may
+     not yet have reported the Editor as active even if it visually is,
+     making `isActiveWindow()` read `False` more often than intended and
+     skipping the minimize branch regardless of maximize state. This is a
+     hypothesis from reading the code, not a measurement — needs a live
+     check (e.g. log `isActiveWindow()`'s value at the top of the
+     function on a real click) before treating it as the cause.
+- **Scope:**
+  - In the `isMinimized()` branch, check whether `Qt.WindowState.WindowMaximized`
+    is also set in `self.windowState()` before restoring; call
+    `self.showMaximized()` in that case instead of `self.showNormal()`, so
+    the Editor comes back in whatever state (normal or maximized) it was
+    minimized from.
+  - Investigate the minimize-toggle not firing — confirm or rule out the
+    `isActiveWindow()` timing hypothesis above with a real measurement
+    before changing that logic.
+- **Deliverables:** `bring_forward()` restores to the correct prior window
+  state (not always "normal"); the minimize toggle reliably fires
+  regardless of whether the Editor is maximized.
+- **Acceptance criteria:**
+  - A maximized Editor, minimized, then restored via the TA icon, comes
+    back maximized — not windowed-size.
+  - With the Editor open and focused (maximized or not), clicking the TA
+    icon minimizes it; clicking it again restores and focuses it.
 - **Dependencies:** None.
+
+### TA-221 — Copy/Export button text is clipped, reads as "Copv"/"Exoort"
+
+- **Phase:** 2
+- **Priority:** P2
+- **Suggested labels:** `bug`, `editor`, `ux`
+- **Problem it solves:** Reported with a screenshot: the Copy and Export
+  buttons on the editor's settings bar render as "Copv" and "Exoort," not
+  "Copy" and "Export." Confirmed in code, and the exact letters match a
+  precise mechanism, not a random rendering glitch:
+  ```python
+  self._btn_copy = QPushButton("Copy")
+  self._btn_copy.setFixedHeight(26)
+  ...
+  self._btn_export_json = QPushButton("Export")
+  self._btn_export_json.setFixedHeight(26)
+  ```
+  The global `QPushButton` rule in `theme.py` sets
+  `padding: 7px 14px; font-size: 12px;` — 14px of vertical padding alone.
+  Inside a `setFixedHeight(26)` button, that leaves only 12px of vertical
+  room for the text, tighter than a 12px font's natural line height, so
+  Qt clips whatever falls below the baseline. "Copy" loses the descender
+  tail off its **y**, leaving what reads as "Copv"; "Export" loses the
+  descender stem off its **p**, leaving only the round bowl, which reads
+  as "Exoort." `_btn_save_png` — same base rule, but
+  `setFixedHeight(28)`, 2px taller — is not reported as clipped, which is
+  exactly consistent with 26px being the specific height that's too
+  tight.
+  Not related to the rc4 batch — this button and its fixed height predate
+  every ticket fixed in that round.
+- **Scope:** don't hand-tune another fixed pixel height that can drift out
+  of sync with the stylesheet's own padding/font-size again. Either:
+  - remove the redundant `setFixedHeight(26)` on `_btn_copy` and
+    `_btn_export_json` and let them size naturally from the QSS padding,
+    the way most other buttons in this file already do, or
+  - raise both to `setFixedHeight(28)`, matching `_btn_save_png`'s
+    proven-working height.
+
+  Whichever is chosen, verify against an actual rendered screenshot
+  showing the full, unclipped text — font metrics can shift slightly with
+  Windows' own scaling/ClearType settings, so a matched pixel count isn't
+  proof by itself.
+- **Deliverables:** Copy and Export render their full text with no clipped
+  descenders, confirmed visually on the real Windows build.
+- **Acceptance criteria:** a screenshot of both buttons shows "Copy" and
+  "Export" in full — not "Copv"/"Exoort" or any other clipped variant.
+- **Dependencies:** None.
+
+### TA-222 — Settings bar is right-aligned instead of centered under the tool row
+
+- **Phase:** 2
+- **Priority:** P3
+- **Suggested labels:** `bug`, `editor`, `ux`
+- **Problem it solves:** Reported: *"the second row of icons needs to be
+  centered below the editing icons not right aligned."* Confirmed in
+  `editor.py`: `_build_tools_bar()` (the row of tool icons — Highlight,
+  Circle, Arrow, Rectangle, Pen, etc.) wraps its tool-icon group in
+  `layout.addStretch()` on **both** sides, centering it as a group in the
+  available width. `_build_settings_bar()`, the row directly below it, does
+  not follow the same pattern: there's no leading stretch at all — the
+  zoom/stroke/arrow-style/opacity controls are packed flush against the
+  left edge, then a single `layout.addStretch(1)` pushes Copy, Export and
+  Save PNG all the way to the right edge. The two rows use different
+  alignment strategies stacked directly on top of each other, which is
+  exactly what reads as inconsistent in the screenshot.
+- **Scope:** add a matching leading `layout.addStretch()` at the start of
+  `_build_settings_bar()`'s layout, before the zoom controls, so the row's
+  full content — zoom through Save PNG — centers as one group the same way
+  the tool row above it does. Confirm this is the intended scope (the
+  whole row centered as a group, not just the Copy/Export/Save PNG cluster
+  centered on its own) before building — it's a visual call the code alone
+  doesn't settle.
+- **Deliverables:** settings bar content centered as a group, matching the
+  tools bar's centering pattern one row above it.
+- **Acceptance criteria:** at a typical window width, the settings bar's
+  content sits visually centered beneath the tool-icon row, not flush
+  against the right edge.
+- **Dependencies:** None.
+
+### TA-223 — Drag-selection rectangle resizes unexpectedly crossing a screen boundary
+
+- **Phase:** 3
+- **Priority:** P1
+- **Suggested labels:** `bug`, `capture`, `multi-display`
+- **Problem it solves:** From the first real second-monitor pass, reported
+  independently for three cases in the current layout (laptop LEFT @125%,
+  external main @100% — negative coordinates *and* mixed DPI):
+  - **DSP-03** (capture on the laptop): *"capture point and where icon is
+    differ. unable to do selection properly. box being highlighted changes
+    when you get close to the right of the screen when laptop is set as
+    left screen. size of highlighted section auto changes when going from
+    one screen to the next. this is not what i would want to see."*
+  - **DSP-07** (capture on the external): *"image does say external however
+    size of highlighted section auto changes when going from one screen to
+    the next."*
+  - **DSP-08** (selection spanning both screens): *"when going over the
+    sides then there is an incorrect sizing of the dragged size for the
+    image"* (`auto area change.png` saved as evidence).
+  - Possibly the same mechanism as **DSP-01** (Block C, secondary on the
+    right): *"unable to span the entire screen to the right."*
+
+  Read through `capture.py`'s drag handling
+  (`mousePressEvent`/`mouseMoveEvent`/`mouseReleaseEvent`): it already
+  tracks the selection in `event.globalPosition()` throughout (not
+  window-local coordinates), which is the fix the earlier
+  `overlay-geometry-fix-brief.md` recommended and which is meant to make
+  the rectangle independent of window geometry. That doesn't rule out the
+  live symptom being reported here, though — a plausible mechanism **not
+  yet confirmed by measurement**: Windows' per-monitor DPI awareness can
+  report `globalPosition()` with a rounding discontinuity right at a
+  monitor boundary on a mixed-DPI setup (125% laptop next to 100%
+  external), which would make a rectangle that's being actively dragged
+  appear to jump or resize exactly when the cursor crosses from one
+  screen's scale to the other's — matching "changes when you get close to
+  the right of the screen" precisely. This needs on-hardware coordinate
+  logging during a real boundary-crossing drag to confirm or rule out,
+  not another round of reading the code.
+- **Scope:**
+  - Log the raw values `mouseMoveEvent` receives from
+    `event.globalPosition()` on the real dual-monitor hardware while
+    dragging across the laptop/external boundary, and compare against
+    `QScreen.geometry()` for both screens at that moment — this is the
+    measurement the hypothesis above needs before any fix is attempted.
+  - If confirmed, either work in a single physical-pixel space that
+    doesn't inherit Qt's per-screen logical-pixel rounding, or clamp/adjust
+    the tracked origin at each `mouseMoveEvent` rather than trusting
+    `globalPosition()` to stay linear across the boundary.
+  - Check whether DSP-01 ("unable to span... to the right") is the same
+    mechanism under a different screen arrangement, or a separate issue.
+- **Deliverables:** a confirmed measurement of what actually happens to
+  tracked coordinates at the boundary crossing; a fix or a documented
+  reason none is needed; a regression test if the mechanism can be
+  reproduced synthetically (a fake mixed-DPI two-screen layout, if Qt's
+  own DPI reporting can be faked in a test the way `screen_geometry.py`'s
+  existing synthetic-layout tests already do).
+- **Acceptance criteria:** dragging a selection across the laptop/external
+  boundary in the reporter's exact layout produces a rectangle that tracks
+  the cursor smoothly, with no visible jump or resize at the crossing.
+- **Dependencies:** None.
+
+### TA-224 — Recording has no region-selection, only full-screen
+
+- **Phase:** 3
+- **Priority:** P2
+- **Suggested labels:** `enhancement`, `capture`
+- **Problem it solves:** Reported (DSP-11): *"as it is full screen this
+  always plays back correctly. unable to do area selection first for
+  recording."* Confirmed in code — this isn't a regression, it's a
+  capability that has never existed: `launcher.py::_start_recording()`
+  calls `self._recorder.start(self._current_screen())`, and
+  `FrameRecorder.start()` takes a screen, not a rectangle. Every recording
+  captures a whole screen; there is no drag-a-region step before recording
+  the way there is for a still capture.
+- **Scope:** decide explicitly whether region-selection recording is in
+  scope for 1.4.0 or a deferred enhancement — it's a real feature gap, not
+  a small fix, and needs its own scoping pass (reusing the same drag-select
+  overlay `ScreenshotOverlay` already provides, then recording only that
+  sub-rectangle) rather than being folded into this ticket unscoped.
+- **Deliverables:** an explicit decision recorded here (build it for 1.4.0,
+  or defer it with the reason), not a silent gap.
+- **Acceptance criteria:** N/A until the scope decision above is made.
+- **Dependencies:** Reuses `ScreenshotOverlay`'s existing drag-select
+  mechanism if built.
+- **Decision, 2026-09-09 (`docs/ta215-225-fix-brief.md`): deferred past
+  1.4.0.** This is a net-new capability (region-select before recording),
+  not a bug, and 1.4.0's scope has already grown from seven tickets to
+  sixteen since the manual pass started. No code change made. Reusing
+  `ScreenshotOverlay`'s drag-select overlay for a sub-rectangle recording
+  is still the intended approach whenever this is picked up — noted here
+  so the scoping pass above doesn't need to be redone from scratch.
+
+### TA-225 — Capture on the laptop (Block D, secondary above) produces no visible content
+
+- **Phase:** 3
+- **Priority:** P1
+- **Suggested labels:** `bug`, `capture`, `multi-display`
+- **Problem it solves:** Reported (DSP-04, laptop above/negative-Y layout):
+  *"information not displayed even though the wording of laptop and
+  external where highlighted."* Read literally: the drag selection
+  correctly highlighted the region containing the on-screen `LAPTOP LAPTOP
+  LAPTOP` test text, but the resulting capture didn't show it. Block D is
+  separated on a single axis (vertical only, no horizontal offset), which
+  is exactly the case `TA-209` says `plan_capture()` should already handle
+  without gaps — so either this is a new edge case in the single-axis
+  path, or it shares the same root cause as `TA-223` (a wrong/degenerate
+  selection rectangle produced *during the drag*, before `plan_capture()`
+  ever runs on it). Not enough information yet to tell which — needs a
+  repro with the actual captured image and the coordinates
+  `plan_capture()` received, not a guess.
+- **Scope:** reproduce with logging on real hardware (the selected rect
+  as dragged, and what `plan_capture()` did with it); compare against
+  `TA-209`'s and `TA-223`'s findings once those have their own answers —
+  this may turn out to be the same bug reported three ways rather than a
+  third independent one.
+- **Deliverables:** a confirmed repro and either a fix or a merge into
+  `TA-209`/`TA-223` if the mechanism turns out to be shared.
+- **Acceptance criteria:** capturing on the laptop in the secondary-above
+  layout produces an image showing the actual on-screen content.
+- **Dependencies:** Likely related to `TA-209`, `TA-223` — confirm before
+  fixing independently.
 
 ### Gate A — Code complete
 - TA-201, TA-202, TA-203 merged

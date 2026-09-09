@@ -34,6 +34,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+import debug_log
 import paths
 from canvas import AnnotationCanvas
 from theme import ACCENT, BG_800, LINE, MUTED, TEXT
@@ -183,6 +184,21 @@ class EditorWindow(QMainWindow):
         self.load_pixmap(pixmap, background=True)
         self._persist_history_snapshot(pixmap)
 
+    def refresh_history(self) -> None:
+        """Re-scan History from disk (TA-215).
+
+        A finished recording is saved straight to recordings_dir() by
+        FrameRecorder, with nothing routing back through
+        _persist_history_snapshot() the way a still capture does - so
+        without an explicit call here, it would only show up the next time
+        History rebuilds on its own (e.g. editor restart), not live. Public
+        because the launcher, which has no editor.py import (avoids an
+        import cycle - editor.py doesn't import launcher.py either), needs
+        to call this from _on_record_finished() the same way it already
+        calls record_capture() and bring_forward().
+        """
+        self._refresh_history()
+
     def bring_forward(self) -> None:
         """Raise and activate the editor window - or minimize it if it is
         already the active window (TA-220), so the TA icon (floating and
@@ -190,12 +206,30 @@ class EditorWindow(QMainWindow):
         rather than a no-op re-raise when the editor is already what the
         user is looking at.
         """
-        if self.isActiveWindow() and not self.isMinimized():
+        active = self.isActiveWindow()
+        minimized = self.isMinimized()
+        # TA-220: the minimize toggle was reported not to fire reliably
+        # (unconfirmed - a plausible cause is isActiveWindow() reading
+        # False because the click that triggers this happens on a
+        # *different* top-level window, before Windows has reported the
+        # Editor as active). No second monitor/interactive session here to
+        # reproduce it, so this logs the values instead of guessing at a
+        # fix - see docs/ta215-225-fix-brief.md.
+        debug_log.log(f"bring_forward: isActiveWindow={active} isMinimized={minimized}")
+        if active and not minimized:
             self.showMinimized()
             return
-        if self.isMinimized():
-            # show() alone does not restore from a minimized state.
-            self.showNormal()
+        if minimized:
+            # show() alone does not restore from a minimized state. Qt
+            # keeps both WindowMinimized and WindowMaximized set together
+            # on a window that was maximized before being minimized, so
+            # unconditionally calling showNormal() silently dropped a
+            # maximized editor to windowed size on restore (TA-220) -
+            # check for that combination first.
+            if self.windowState() & Qt.WindowState.WindowMaximized:
+                self.showMaximized()
+            else:
+                self.showNormal()
         self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating, False)
         self.show()
         self.activateWindow()
@@ -417,6 +451,13 @@ class EditorWindow(QMainWindow):
         layout.setContentsMargins(10, 5, 10, 5)
         layout.setSpacing(5)
 
+        # Leading stretch (TA-222): _build_tools_bar() centers its content
+        # as one group with a stretch on both sides; this row only had the
+        # trailing one, so it packed flush left while the row above it
+        # centered - matching that pattern here makes both rows read as
+        # the same layout system stacked vertically.
+        layout.addStretch()
+
         # ── Zoom ──────────────────────────────────────────────────────────
         # No text label: at this width, a tooltip on each control carries the
         # meaning that a "Zoom"/"Stroke"/"Arrow"/"Fill" label used to - the
@@ -490,13 +531,17 @@ class EditorWindow(QMainWindow):
         layout.addStretch(1)
 
         # ── Export ────────────────────────────────────────────────────────
+        # No setFixedHeight() (TA-221): the QSS QPushButton rule's own
+        # padding needs more vertical room than 26px left for a 12px font,
+        # clipping descenders ("Copy" -> "Copv", "Export" -> "Exoort").
+        # Sizing naturally from the stylesheet, like most other buttons in
+        # this file already do, can't drift out of sync with it again the
+        # way a second hand-tuned pixel height could.
         self._btn_copy = QPushButton("Copy")
-        self._btn_copy.setFixedHeight(26)
         self._btn_copy.setToolTip("Copy annotated image to clipboard")
         layout.addWidget(self._btn_copy)
 
         self._btn_export_json = QPushButton("Export")
-        self._btn_export_json.setFixedHeight(26)
         self._btn_export_json.setToolTip("Export annotations as JSON")
         layout.addWidget(self._btn_export_json)
 
