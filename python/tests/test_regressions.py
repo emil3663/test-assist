@@ -912,6 +912,65 @@ def test_launcher_full_capture_uses_the_screen_the_widget_is_on(qapp, monkeypatc
     launcher.close()
 
 
+def test_TA215_docked_capture_icon_shows_recording_state(qapp) -> None:
+    """The docked strip's capture icon was set once at construction and
+    never updated - unlike the undocked action button, whose text/style
+    do change - so a user working from the compact dock (exactly the mode
+    docking exists for) got zero visual confirmation a recording was
+    running."""
+    launcher = FloatingLauncher(_EditorStub())
+    launcher.show()
+    launcher._dock_right()
+    qapp.processEvents()
+
+    idle_tooltip = launcher._btn_dock_capture.toolTip()
+    assert launcher._dock_rec_label.isHidden()
+
+    launcher._set_mode("video")
+    launcher._toggle_recording()  # start
+
+    assert launcher._btn_dock_capture.toolTip() != idle_tooltip
+    assert not launcher._dock_rec_label.isHidden()
+    assert launcher._dock_rec_label.text() == "00:00"
+
+    launcher._toggle_recording()  # stop
+
+    assert launcher._btn_dock_capture.toolTip() == idle_tooltip
+    assert launcher._dock_rec_label.isHidden()
+    launcher.close()
+
+
+def test_TA215_docked_recording_indicator_shows_elapsed_time(qapp) -> None:
+    launcher = FloatingLauncher(_EditorStub())
+    launcher._set_mode("video")
+    launcher._toggle_recording()
+
+    launcher._tick()
+    launcher._tick()
+
+    assert launcher._dock_rec_label.text() == "00:02"
+    launcher._toggle_recording()
+    launcher.close()
+
+
+def test_TA215_clicking_the_docked_capture_icon_again_stops_the_recording(qapp) -> None:
+    """The underlying toggle was already correctly wired - clicking the
+    docked icon a second time does call _stop_recording() - this pins
+    that end-to-end via the actual button click, not just the method
+    call, since the reported symptom was "even clicking the video
+    capture icon does nothing"."""
+    launcher = FloatingLauncher(_EditorStub())
+    launcher._dock_right()
+    launcher._set_mode("video")
+
+    launcher._btn_dock_capture.click()
+    assert launcher._rec_timer.isActive()
+
+    launcher._btn_dock_capture.click()
+    assert not launcher._rec_timer.isActive()
+    launcher.close()
+
+
 def test_open_folder_button_appears_after_a_recording_and_opens_its_folder(qapp, monkeypatch) -> None:
     """Fixes the discoverability complaint properly, per the data-locations
     brief: "where did it go" gets a one-click answer instead of a folder name

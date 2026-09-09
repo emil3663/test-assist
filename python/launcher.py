@@ -282,14 +282,26 @@ class FloatingLauncher(QWidget):
         _btn_dock_editor.clicked.connect(self._editor.bring_forward)
         dock_layout.addWidget(_btn_dock_editor)
 
-        _btn_dock_capture = QPushButton()
-        _btn_dock_capture.setFixedSize(36, 36)
-        _btn_dock_capture.setIcon(self._make_camera_icon("#f0d0a0"))
-        _btn_dock_capture.setIconSize(QSize(20, 20))
-        _btn_dock_capture.setToolTip("Quick Capture")
-        _btn_dock_capture.setStyleSheet(self._style_icon_btn())
-        _btn_dock_capture.clicked.connect(self._on_action_click)
-        dock_layout.addWidget(_btn_dock_capture)
+        self._btn_dock_capture = QPushButton()
+        self._btn_dock_capture.setFixedSize(36, 36)
+        self._btn_dock_capture.setIcon(self._make_camera_icon("#f0d0a0"))
+        self._btn_dock_capture.setIconSize(QSize(20, 20))
+        self._btn_dock_capture.setToolTip("Quick Capture")
+        self._btn_dock_capture.setStyleSheet(self._style_icon_btn())
+        self._btn_dock_capture.clicked.connect(self._on_action_click)
+        dock_layout.addWidget(self._btn_dock_capture)
+
+        # Minimal running-time readout, docked-strip width - TA-215: the
+        # icon swap alone is easy to miss at 20x20px, and the compact dock
+        # is exactly the mode this needs to be visible in, since it's the
+        # one place recording state previously had zero feedback at all.
+        self._dock_rec_label = QLabel()
+        self._dock_rec_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._dock_rec_label.setStyleSheet(
+            "color:#c04040; font-size:9px; font-weight:700; background:transparent;"
+        )
+        self._dock_rec_label.hide()
+        dock_layout.addWidget(self._dock_rec_label)
 
         _btn_undock = QPushButton()
         _btn_undock.setFixedSize(36, 36)
@@ -492,6 +504,7 @@ class FloatingLauncher(QWidget):
         self._status_lbl.setText(
             "Recording in progress — click to stop and save."
         )
+        self._refresh_dock_recording_indicator()
 
     def _stop_recording(self) -> None:
         self._rec_timer.stop()
@@ -500,11 +513,33 @@ class FloatingLauncher(QWidget):
         self._btn_capture.setText("⏺  Start Recording")
         self._btn_capture.setStyleSheet(self._style_danger())
         self._status_lbl.setText("Recording stopped. Saving file…")
+        self._refresh_dock_recording_indicator()
 
     def _tick(self) -> None:
         self._rec_seconds += 1
         m, s = divmod(self._rec_seconds, 60)
         self._rec_label.setText(f"⏺  {m:02d}:{s:02d}")
+        self._dock_rec_label.setText(f"{m:02d}:{s:02d}")
+
+    def _refresh_dock_recording_indicator(self) -> None:
+        """TA-215: the docked strip's single capture icon was set once at
+        construction and never updated, unlike the undocked action button
+        (whose text/style do change) - so a user working from the compact
+        dock got no visual confirmation a recording was running, and the
+        one control available to stop it gave no cue that clicking it
+        again would. The underlying toggle was already correctly wired
+        either way - clicking the docked icon a second time does call
+        _stop_recording() - this is a state-feedback gap, not a broken
+        stop mechanism.
+        """
+        recording = self._rec_timer.isActive()
+        self._btn_dock_capture.setIcon(
+            self._make_stop_icon() if recording else self._make_camera_icon("#f0d0a0")
+        )
+        self._btn_dock_capture.setIconSize(QSize(16, 16) if recording else QSize(20, 20))
+        self._btn_dock_capture.setToolTip("Stop Recording" if recording else "Quick Capture")
+        self._dock_rec_label.setText("00:00" if recording else "")
+        self._dock_rec_label.setVisible(recording)
 
     def _on_record_finished(self, path: str) -> None:
         if not path:
@@ -934,6 +969,21 @@ class FloatingLauncher(QWidget):
         p.drawLine(5, 5, 7, 3)
         p.drawLine(7, 3, 11, 3)
         p.drawLine(11, 3, 13, 5)
+        p.end()
+        return QIcon(pix)
+
+    @staticmethod
+    def _make_stop_icon(color: str = "#ff5050") -> QIcon:
+        """Filled red square - the docked capture icon's recording state
+        (TA-215), mirroring the "■" the undocked action button already
+        shows in its text while recording."""
+        pix = QPixmap(18, 18)
+        pix.fill(Qt.GlobalColor.transparent)
+        p = QPainter(pix)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        p.setPen(Qt.PenStyle.NoPen)
+        p.setBrush(QColor(color))
+        p.drawRoundedRect(3, 3, 12, 12, 2, 2)
         p.end()
         return QIcon(pix)
 
