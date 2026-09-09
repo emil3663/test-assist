@@ -156,3 +156,43 @@ are re-testable manually against
 needing the second monitor or a clean machine stays blocked, as do
 TA-217's and TA-215's repro-first sub-items (no repro found with what was
 tried).
+
+---
+
+## TA-211 test guard — 2026-09-09
+
+Built per `docs/ta211-test-guard-brief.md`, executed in full. Test-only —
+no build/install step, nothing in `python\dist\` changes.
+
+Added `@pytest.mark.skipif(sys.platform != "win32", reason="RegisterHotKey
+is a Win32 API")` to exactly the five tests that call
+`ctypes.windll.user32.RegisterHotKey`/`UnregisterHotKey` directly:
+`test_TA211_global_hotkeys_register_and_are_advertised`,
+`test_TA211_global_hotkey_dispatch_routes_to_the_right_action`,
+`test_TA211_an_unrelated_native_message_is_ignored`,
+`test_TA211_a_failed_registration_is_surfaced_and_not_advertised`,
+`test_TA211_hotkeys_are_released_on_close`. Left
+`test_TA211_hotkeys_are_not_touched_without_opting_in` and the TA-217
+hotkey test unguarded, per the brief — both use
+`register_global_hotkeys=False` and never touch the real API.
+
+**Windows suite, guard in place:** 307 passed, 0 skipped — identical to
+rc4's count; the guard is inert here, exactly as expected.
+
+**Off-Windows skip verified for real, not just asserted by reasoning:** no
+non-Windows shell was available in this environment (no WSL Linux distro
+installed — only the `docker-desktop` internal one — and the Docker
+daemon itself was not running, so a container run wasn't possible either).
+Instead of asserting the `sys.platform` check "would work," the exact
+failure mode was reproduced directly: a standalone pytest file used
+`monkeypatch.delattr(ctypes, "windll")` (removing the real attribute that
+Linux/macOS lack, not a mock) to prove two things under real
+`pytest.mark.skipif` machinery in the same run — (1) without the guard,
+the test body hits a genuine `AttributeError` exactly as the brief
+describes, and (2) with the guard's condition forced `True` (simulating
+`sys.platform != "win32"`), pytest reports the test as **skipped** and the
+crashing line never executes at all (a trailing `assert False` placed
+after it was never reached). 1 passed (the crash case), 1 skipped (the
+guarded case) — confirms the mechanism, not just the syntax.
+
+**Commit:** `7bf77ee` (test-only change, on top of `8aed866`).
