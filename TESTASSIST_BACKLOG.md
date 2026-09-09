@@ -1105,6 +1105,129 @@ that will actually ship.
   specific historical height reproduces it. Full measurement in
   `docs/BUILD_LOG.md`'s TA-226 entry.
 
+### TA-227 — Capture-dispatch tests stub the very thing they're supposed to prove works
+
+- **Phase:** 2
+- **Priority:** P2
+- **Suggested labels:** `testing`, `quality`
+- **Problem it solves:** Both TA-217 tests —
+  `test_TA217_global_hotkey_closes_an_open_about_dialog_before_capturing` and
+  `test_TA217_quick_capture_button_closes_an_open_about_dialog_before_capturing`
+  (`python/tests/test_regressions.py`) — replace `launcher._start_capture`
+  with `lambda: calls.append("start_capture")` before triggering the path
+  under test, then assert `calls == ["start_capture"]`. That proves the
+  function was *called*. It does not, and structurally cannot, prove a real
+  capture overlay ever became visible or interactive — the actual
+  `_start_capture()` → `QTimer.singleShot(220, self._overlay.activate)`
+  chain never runs in either test, because the stub replaces it entirely.
+  This is exactly the shape of gap TA-217's own ticket already called out
+  by name: *"was it asserting the right thing, or just that
+  `_dismiss_active_modal_dialog` was called, not that a capture actually
+  resulted?"* — confirmed here by direct code read, not inference. It means
+  TA-217's still-open "hotkey path dismisses the dialog but doesn't
+  capture" gap could regress *again* in either direction and both of these
+  tests would stay green throughout.
+  The button-path test has a second, smaller version of the same shape: it
+  calls `launcher._on_action_click` directly via `QTimer.singleShot` rather
+  than clicking the real `_btn_capture` widget, skipping the signal/slot
+  wiring Qt itself provides between the button and the handler.
+- **Scope:**
+  - Retrofit both named tests so the real `_start_capture()` runs — no stub
+    — and the assertion is on the real end state: the overlay
+    (`launcher._overlay`) is visible, active, and able to receive input,
+    not just that a function was invoked. Use whatever mechanism this file
+    already uses elsewhere for letting an async Qt chain actually complete
+    before asserting (`QTest.qWait()` appears in `test_functional.py` for
+    exactly this reason) rather than inventing a new pattern.
+  - In the button-path test, trigger the real click
+    (`launcher._btn_capture.click()`) instead of calling
+    `_on_action_click` directly, so the signal/slot wiring itself is
+    exercised too, not just the handler body.
+  - Grep the rest of `test_regressions.py` and `test_functional.py` for the
+    same shape — a dispatched action replaced with a
+    call-recording lambda, then only the call recorded is asserted on —
+    and retrofit any other case found where the stubbed thing is the
+    actual behavior the ticket exists to prove. Report what was found, even
+    if the answer is "no other instance of this shape."
+  - Note the convention going forward (a line in whichever doc already
+    carries this project's testing conventions): a dispatch/wiring test
+    stubs the *side effects downstream of* the action under test (file
+    I/O, network, the OS hotkey API), never the action's own immediate,
+    in-process effect — that's the one thing the test exists to check.
+- **Deliverables:** both retrofitted tests, verified to still pass against
+  current code and to fail if `_start_capture()`'s call is removed from
+  either dispatch path (the actual regression this ticket exists to catch);
+  a report on whether the same shape exists elsewhere; the convention note.
+- **Acceptance criteria:** reverting either the hotkey-path or button-path
+  call to `_start_capture()` (a deliberate, temporary regression) makes the
+  corresponding retrofitted test fail — not just a function-call assertion,
+  a real observed absence of the overlay.
+- **Dependencies:** None.
+
+### TA-228 — No test drives the actual packaged app from outside the process
+
+- **Phase:** 3
+- **Priority:** P2
+- **Suggested labels:** `testing`, `infra`, `e2e`
+- **Problem it solves:** Every test in this suite, including TA-227's
+  retrofit above, imports `python/`'s modules directly into the test
+  process and drives them in-process — real Qt signal/slot wiring, but
+  still one process, one Qt event loop, Qt's *own* idea of window state.
+  That's exactly why TA-220's minimize-toggle gap and TA-217's
+  hotkey-capture gap are still "instrumented, not fixed" rather than
+  actually fixed: nothing in this suite can observe what the real Windows
+  window manager does with a real separate top-level window under real
+  focus/Z-order rules, which is precisely where both unconfirmed hypotheses
+  live (`isActiveWindow()` timing against a *different* top-level window;
+  whether the overlay actually receives real OS-level input after a
+  hotkey). Debug logging plus a manual pass was the best available option
+  in-process; a black-box layer driving the actual built `.exe` is what
+  could close that gap for good instead of needing a human on real hardware
+  every time.
+- **Scope:**
+  - Add `pywinauto` as a Windows-only, dev/test-only dependency — it drives
+    a real running application from outside via Windows UI Automation, the
+    native-desktop equivalent of what a browser-automation tool does for a
+    web page. Not bundled into the shipped app.
+  - New, clearly separate test lane — its own module or directory (e.g.
+    `tests_e2e/`), not mixed into `test_regressions.py`/`test_functional.py`
+    — that launches the actual built `python/dist/TestAssist/TestAssist.exe`
+    as a subprocess and drives it via `pywinauto`, not by importing the
+    Python modules.
+  - Start deliberately small — three checks, not broad coverage:
+    1. The app launches and its main window/tray icon appears within a
+       timeout.
+    2. Clicking the real Quick Capture button produces a real, visible
+       overlay window (owned by the OS, not asserted from inside the
+       process).
+    3. Minimize/restore via the TA icon changes the *real* OS window state
+       (`pywinauto`'s own maximized/minimized checks, not Qt's internal
+       flags) — the direct, actual test of TA-220's still-unconfirmed
+       hypothesis.
+  - Decide explicitly, and record the decision here rather than defaulting
+    silently: does this lane run in CI (needs a build step before the
+    tests, adding real CI time for three checks) or stay a documented
+    local/manual smoke pass for now, promoted to CI once it's proven its
+    worth? Recommendation, not a mandate: start local/manual — a
+    `scripts/` helper run against an already-built exe — since building
+    just to run three checks is a heavier lift than today's payoff; revisit
+    once this lane has caught something real.
+  - Document how to run it (README or a new doc) — this can't run from a
+    source checkout the way everything else in the suite can; it needs a
+    build first.
+- **Deliverables:** `pywinauto` added; the three smoke checks; the
+  CI-vs-manual decision recorded with its reasoning; a way to run it
+  documented.
+- **Acceptance criteria:** each of the three checks fails against a
+  deliberately broken build (e.g. TA-220's fix temporarily reverted, built,
+  and tested) and passes against the current one — same
+  verified-to-fail-first discipline as everything else in this project.
+- **Dependencies:** Needs a built exe to run against
+  (`python/dist/TestAssist/TestAssist.exe`) — cannot run from source alone.
+  Complements rather than replaces TA-220's and TA-217's still-open
+  investigate-first gaps; a passing check here is what would let those
+  finally close without waiting on a manual pass.
+
 ### Gate A — Code complete
 - TA-201, TA-202, TA-203 merged
 - Suite green, no skips, no test opens a socket
