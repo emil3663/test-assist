@@ -332,3 +332,108 @@ TA-223, and TA-225 — this batch instruments them but doesn't fix them; the
 actual fix is a follow-up ticket once the `debug.log` output from the next
 manual pass is in hand. TA-224 stays deferred past 1.4.0 per the decision
 above unless overridden.
+
+---
+
+## TA-226 — real-font-rendering visual test lane — 2026-09-09
+
+Built per `docs/ta226-visual-test-lane-brief.md`, executed in full.
+Test/CI infrastructure only — no app code changed, nothing in
+`python\dist\` differs, no new `rc` build.
+
+**Source:** `origin/main` at `41bd84437dd3437be29e4c3a3a5725651fd920f4`
+(`41bd844`) — pushed this session (`7ff53f3..41bd844`). CI confirmed
+**green** on this exact commit —
+[run 34341689925](https://github.com/emil3663/test-assist/actions/runs/34341689925),
+conclusion `success`, both jobs reported by CI itself (not asserted from
+the workflow file alone):
+[`test`](https://github.com/emil3663/test-assist/actions/runs/34341689925/job/102433712117)
+succeeded in 1m1s, and the new
+[`visual`](https://github.com/emil3663/test-assist/actions/runs/34341689925/job/102433711803)
+job succeeded in 46s.
+
+**Assertion mechanism chosen: bounding-box/ink-extent against a real
+`QWidget.grab()` screenshot, not a pixel-diff golden image.** A golden
+image is brittle to font-hinting/ClearType/DPI drift whenever the CI
+runner's Windows or font-package version changes underneath it, needing
+re-capture for reasons that have nothing to do with a real regression;
+measuring where the ink actually falls relative to the widget's own
+rendered rect is closer to what "not clipped" literally means and keeps
+working across a font-rendering change that isn't a bug.
+
+**CI wiring:** a new `visual` job in
+`.github/workflows/python-tests.yml`, separate from the existing `test`
+job (not a step inside it), `runs-on: windows-latest` with
+`QT_QPA_PLATFORM: windows` (not left unset — `conftest.py`'s
+`os.environ.setdefault` fills in `offscreen` otherwise) and
+`continue-on-error: true`, so a failure here can never block anything
+gating on the workflow's overall conclusion; only the `test` job's own
+status does that. Runs `python -m pytest -q -m visual`.
+
+**Main suite confirmed unaffected:** `320 passed, 0 skipped (2
+deselected)` — identical to rc5's count. A new `python/pytest.ini` sets
+`addopts = -m "not visual"` so the new marker is excluded from the
+default run everywhere (local dev and the `test` job) without needing an
+environment-based skip, which would have shown up as an unwanted
+"skipped" instead of a clean deselection (tried first, corrected after
+measuring the actual summary line).
+
+**Real font rendering confirmed, not just claimed — with real measured
+values:** the CI log for the `visual` job's "Run visual regression
+tests" step shows `env: QT_QPA_PLATFORM: windows` and
+`2 passed, 320 deselected in 4.15s`, i.e. actually running on the
+runner's real Windows font stack, not offscreen. Local measurement while
+writing the test (`tests/test_visual.py`'s real `QWidget.grab()`
+screenshots, same machine class as CI):
+- `_btn_copy`/`_btn_export_json` (current/shipped code): ink spans rows
+  14–27 of a 38px-tall real render, 10–14px of clear background margin
+  above and below — not touching either edge.
+- The button's own `border: 1px solid` (theme.LINE_STRONG) measured a
+  combined RGB distance of ~95–104 from the background on every row (it
+  runs the full height on both edges) — real text (theme.MUTED) measured
+  ~271–340 on the same render, which is what the ink-extent threshold
+  (160) is tuned to sit between.
+
+**Honest gap found while verifying, not hidden:** Task item 3 asked to
+verify the retrofitted test fails against the old `setFixedHeight(26)`
+code and passes against current code. Reverting to `setFixedHeight(26)`
+on this machine's real font rendering does **not** reproduce visible
+clipping — measured at 12 ink rows out of a 14-row unclipped maximum,
+**identical** to `_btn_save_png`'s own untouched `setFixedHeight(28)`
+(already treated as fine by the original ticket). A height sweep from 14
+to 34px on a plain `QPushButton("Copy")` with the real stylesheet applied
+found: 0 ink rows at height ≤16 (Qt omits the label rather than drawing
+a partial glyph), a genuinely partial glyph from height 18 up, plateauing
+at the full 14-row glyph only from height 30. So height 26 sits in a
+region that is measurably tighter than the natural size but not tight
+enough to visibly clip *on this specific machine's font metrics* — this
+is exactly the font-hinting/DPI-drift risk TA-226's own problem
+statement named, encountered directly while building the fix for it, not
+a flaw in the new test. Reported here rather than silently forcing a
+pass/fail narrative that the real pixels didn't support.
+
+Handled by not overstating what the retrofitted test proves: it checks
+the real, literal acceptance criterion against the **code as shipped**
+(passes, for real, against real rendering — the actual thing rc5 could
+not do). A second test in the same file,
+`test_ink_extent_detection_actually_catches_a_clipped_button`, separately
+proves the detection mechanism itself catches a real, deliberately
+undersized button (height 18) on this same hardware, by comparing its
+ink-row count against a naturally-sized control from the same run rather
+than a hardcoded number — independent of whether the specific historical
+height reproduces clipping on any given machine.
+
+**Per-test timing (`--durations=0`, warm run):** `test_TA221_...`: 0.23s.
+`test_ink_extent_detection_...`: 0.13s. Noticeably slower per test than
+the main suite's ~30-40ms average (real font rasterization and window
+creation cost, vs. offscreen), though the absolute cost is small at two
+tests — worth knowing as this lane grows, not a surprise on a later run.
+
+**Testing-conventions note added:** `DESKTOP_STABILITY_MATRIX.md` now
+documents which class of future ticket belongs in this lane
+(rendering/layout — clipping, contrast, icon legibility at real size)
+versus the main offscreen suite (everything else: logic, state, wiring,
+geometry math).
+
+**Commit:** `41bd844` (includes `TESTASSIST_BACKLOG.md`'s TA-226 status
+update in the same commit as the test/CI changes, per the brief).
