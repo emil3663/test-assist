@@ -1,7 +1,7 @@
 # 🔍 Test Assist — Desktop Test Plan
 
-**Version:** 1.16
-**Last updated:** 2026-09-07
+**Version:** 1.17
+**Last updated:** 2026-09-09
 **Status:** In active development
 **Applies to:** the PySide6 desktop build under `python/`. The browser build has
 its own plan in `TEST_PLAN.md`.
@@ -39,7 +39,7 @@ history that survives restarts.
 | Export JSON | ✅ Done | Annotation list plus timestamp |
 | Copy to clipboard | ✅ Done | Also written to history |
 | Capture history | ✅ Done | Persists in `%LOCALAPPDATA%\Test Assist\history`, auto-pruned on launch |
-| Recordings in the gallery | ✅ Done | Listed alongside snapshots, visually distinct; opens externally (no in-app playback) |
+| Recordings in the gallery | ✅ Done | Listed alongside snapshots with a real thumbnail and play badge (backfilled with ffmpeg for older recordings, falls back to a generic icon); opens externally (no in-app playback) |
 | History filters | ✅ Done | Recent 5 / Today / This Week / This Month |
 | Floating launcher | ✅ Done | Always on top; drag to reposition |
 | Edge docking | ✅ Done | Compact vertical strip |
@@ -254,6 +254,11 @@ inside changes the words.
 | HIS-10 | Click a recording | Opens externally (system player); the canvas is untouched | ✅ |
 | HIS-11 | Click a kept frame sequence (ffmpeg unavailable) | Opens its containing folder, since there is no single file to play | ✅ |
 | HIS-12 | History pruning vs. a recording | Never touches it, even one that would fail the same readability check a corrupt PNG would | ✅ |
+| HIS-13 | A recording's gallery thumbnail | Shows the video's first frame, scaled to the tile, once one is available | ✅ |
+| HIS-14 | An existing recording with no cached thumbnail | Backfilled once with the bundled ffmpeg and cached, without blocking the UI thread | ✅ |
+| HIS-15 | Thumbnail extraction fails, or ffmpeg is missing | Falls back to the generic recording icon - never a broken or blank tile | ✅ |
+| HIS-16 | Every video tile, thumbnail or fallback icon alike | Shows a play badge, so it is never mistakable for a screenshot at a glance | ✅ |
+| HIS-17 | History pruning vs. a recording's thumbnail file | Never touched, even one that is itself unreadable | ✅ |
 
 ### 3.12 Floating Launcher
 

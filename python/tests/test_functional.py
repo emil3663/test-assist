@@ -7,6 +7,7 @@ is deliberately not covered here and why.
 from __future__ import annotations
 
 import json
+import time
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -1069,6 +1070,201 @@ def test_HIS_12_history_pruning_never_touches_a_recording(editor) -> None:
     editor._prune_unreadable_history()
 
     assert corrupt_looking.exists(), "a recording was deleted by history pruning"
+
+
+# ── Recording thumbnails ─────────────────────────────────────────────────────
+#
+# A background-thread backfill (see editor._RecordingThumb._load_thumbnail())
+# delivers its result via a queued cross-thread signal, which needs the main
+# thread's event loop pumped to arrive. QTest.qWait() was tried first and does
+# not reliably deliver it under the offscreen QPA platform this suite runs
+# under - a plain processEvents() loop does, consistently, so that is what
+# _wait_until below uses.
+
+def _wait_until(condition, timeout: float = 5.0) -> bool:
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        QApplication.processEvents()
+        if condition():
+            return True
+        time.sleep(0.02)
+    return condition()
+
+
+def _pump_events(seconds: float) -> None:
+    deadline = time.monotonic() + seconds
+    while time.monotonic() < deadline:
+        QApplication.processEvents()
+        time.sleep(0.02)
+
+
+def test_a_saved_recording_writes_a_gallery_thumbnail(qapp, isolate_home):
+    """The cheap path: frames[0] is already on disk before _encode_frames()
+    deletes it, so this costs no extra ffmpeg call and no subprocess at
+    record time."""
+    import capture
+    import paths
+
+    rec = capture.FrameRecorder()
+    rec.start()
+    for _ in range(3):
+        rec._capture_frame()
+
+    emitted: list[str] = []
+    rec.finished.connect(emitted.append)
+    rec.stop()
+
+    output = Path(emitted[0])
+    assert output.suffix == ".mp4"
+    thumbnail = capture.thumbnail_path_for(output)
+    assert thumbnail.is_file()
+    assert str(thumbnail).startswith(str(paths.history_dir())), \
+        "a thumbnail is regenerable cache, not evidence - it belongs in history_dir(), not recordings_dir()"
+    assert not QImage(str(thumbnail)).isNull()
+
+
+def test_a_recording_thumb_shows_its_cached_thumbnail_immediately(qapp, isolate_home):
+    """A cached thumbnail needs no subprocess and no background thread -
+    it should be showing before this call even returns."""
+    import capture
+    import paths
+    from editor import _RecordingThumb
+
+    video = paths.recordings_dir() / "test-recording-thumb-1.mp4"
+    video.write_bytes(b"fake mp4")
+
+    cached = QPixmap(64, 36)
+    cached.fill(QColor("blue"))
+    cached.save(str(capture.thumbnail_path_for(video)), "JPG")
+
+    thumb = _RecordingThumb(video, 1)
+
+    assert thumb._preview.text() == ""
+    assert not thumb._preview.pixmap().isNull()
+
+
+def test_a_recording_thumb_backfills_a_missing_thumbnail_off_the_ui_thread(qapp, isolate_home):
+    """No cached thumbnail: the fallback icon must show immediately (the
+    backfill must not block construction), then get replaced once the
+    background extraction delivers a result. Needs a genuinely decodable
+    video - unlike most tests here, a `b"fake mp4"` placeholder cannot
+    stand in, since real ffmpeg legitimately fails to extract a frame from
+    one, so this reuses the recorder to produce a real small mp4 first."""
+    import capture
+    from editor import _RecordingThumb
+
+    rec = capture.FrameRecorder()
+    rec.start()
+    for _ in range(3):
+        rec._capture_frame()
+    saved: list[str] = []
+    rec.finished.connect(saved.append)
+    rec.stop()
+    output = Path(saved[0])
+    assert output.suffix == ".mp4"
+    capture.thumbnail_path_for(output).unlink()  # force the backfill path
+
+    thumb = _RecordingThumb(output, 1)
+    assert thumb._preview.text() == "🎥", "the fallback icon must show while the backfill is still running"
+
+    assert _wait_until(lambda: not thumb._preview.pixmap().isNull()), \
+        "the background-extracted thumbnail never arrived"
+    assert thumb._preview.text() == ""
+
+
+def test_recording_thumbnail_backfill_returns_none_without_raising_when_ffmpeg_is_unavailable(monkeypatch, isolate_home):
+    """The pure function underneath the backfill: never raises, whatever
+    goes wrong - the caller's job is to fall back to the icon, not to catch
+    an exception."""
+    import capture
+    import paths
+
+    video = paths.recordings_dir() / "test-recording-thumb-3.mp4"
+    video.write_bytes(b"fake mp4")
+
+    monkeypatch.setattr(
+        capture, "_resolve_ffmpeg_exe",
+        lambda: (_ for _ in ()).throw(RuntimeError("simulated: not found")),
+    )
+
+    assert capture.ensure_recording_thumbnail(video) is None
+
+
+def test_a_recording_thumb_falls_back_to_the_icon_when_extraction_fails(qapp, monkeypatch, isolate_home):
+    """The widget-level guarantee: a failed backfill must leave the tile
+    exactly as it started - the fallback icon, never a broken or blank
+    tile - and must never raise back into the gallery."""
+    import capture
+    import paths
+    from editor import _RecordingThumb
+
+    video = paths.recordings_dir() / "test-recording-thumb-4.mp4"
+    video.write_bytes(b"fake mp4")
+
+    calls: list[Path] = []
+
+    def fake_ensure(path, timeout=3.0):
+        calls.append(path)
+        return None
+
+    monkeypatch.setattr(capture, "ensure_recording_thumbnail", fake_ensure)
+
+    thumb = _RecordingThumb(video, 1)
+    assert _wait_until(lambda: bool(calls)), "the backfill worker never ran"
+    _pump_events(0.3)  # let the queued (None) result actually be delivered
+
+    assert thumb._preview.text() == "🎥", "a failed backfill must leave the fallback icon in place"
+    assert thumb._preview.pixmap().isNull()
+
+
+def test_a_kept_frame_sequence_never_attempts_a_thumbnail(qapp, tmp_path):
+    """There is no video to extract a frame from - the generic icon is the
+    only honest option, and no ffmpeg call should even be attempted."""
+    from editor import _RecordingThumb
+
+    frames_dir = tmp_path / "test-recording-thumb-5_frames"
+    frames_dir.mkdir()
+
+    thumb = _RecordingThumb(frames_dir, 1)
+
+    assert thumb._preview.text() == "🎞"
+
+
+def test_every_recording_tile_shows_a_play_badge(qapp, isolate_home, tmp_path):
+    """The camera icon used to be the only signal that a tile was a video;
+    once it can show a real thumbnail instead, nothing distinguishes it
+    from a screenshot without this badge - on every video tile, cached
+    thumbnail, backfilled thumbnail, or bare fallback icon alike."""
+    import paths
+    from editor import _RecordingThumb
+
+    video = paths.recordings_dir() / "test-recording-thumb-6.mp4"
+    video.write_bytes(b"fake mp4")
+    frames_dir = tmp_path / "test-recording-thumb-7_frames"
+    frames_dir.mkdir()
+
+    for recording in (video, frames_dir):
+        thumb = _RecordingThumb(recording, 1)
+        assert thumb._badge.text() == "▶"
+        assert thumb._badge.parent() is thumb
+
+
+def test_thumbnail_files_are_never_touched_by_history_pruning(qapp, isolate_home):
+    """Pinning the safety property PRE_BUILD_HANDOVER's recording work
+    already established for recordings themselves (HIS_12, above): a
+    thumbnail lives in history_dir() alongside snapshots, so it must be as
+    immune to _prune_unreadable_history() as a recording is, even though
+    (unlike a real recording) an unreadable one here would otherwise look
+    exactly like the corrupt PNGs that function exists to delete."""
+    import paths
+    from editor import EditorWindow
+
+    thumbnail = paths.history_dir() / "test-recording-thumb-8.thumb.jpg"
+    thumbnail.write_bytes(b"not a real jpeg")
+
+    EditorWindow()
+
+    assert thumbnail.exists(), "pruning must never delete a recording thumbnail"
 
 
 # ── 3.12 Floating launcher ───────────────────────────────────────────────────

@@ -25,6 +25,80 @@ def _recordings_dir() -> Path:
     return paths.recordings_dir()
 
 
+# A recording's gallery thumbnail is regenerable cache, not evidence, so it
+# lives in history_dir() (AppData) rather than alongside the recording in
+# recordings_dir() (Documents) - same split paths.py already draws between
+# the two. Named from the recording's own stem with a suffix that never
+# matches history's own "*.png" snapshot glob, so
+# EditorWindow._prune_unreadable_history() can neither mistake one for a
+# snapshot nor delete it.
+_THUMBNAIL_WIDTH = 320
+
+
+def thumbnail_path_for(recording: Path) -> Path:
+    """Where `recording`'s cached gallery thumbnail lives, whether or not
+    it has been generated yet."""
+    return paths.history_dir() / f"{recording.stem}.thumb.jpg"
+
+
+def _write_thumbnail(image: QImage, destination: Path) -> bool:
+    if image.isNull():
+        return False
+    if image.width() > _THUMBNAIL_WIDTH:
+        image = image.scaledToWidth(_THUMBNAIL_WIDTH, Qt.TransformationMode.SmoothTransformation)
+    return image.save(str(destination), "JPG", 80)
+
+
+def ensure_recording_thumbnail(recording: Path, timeout: float = 3.0) -> Path | None:
+    """Return the cached gallery thumbnail for `recording`, extracting one
+    with the bundled ffmpeg on first use if it is not already cached.
+
+    This is the backfill path for a recording saved before thumbnails
+    existed, or one whose frames are already gone - the cheap path (a
+    frame already on disk at record time) is FrameRecorder._save(), below.
+    Runs synchronously and can take real wall-clock time; callers that must
+    not block a UI thread are responsible for calling this off it (see
+    editor.py's _RecordingThumb). Never raises: ffmpeg missing, a timeout,
+    or a corrupt video all return None so the caller can fall back to a
+    generic icon rather than a broken tile.
+    """
+    destination = thumbnail_path_for(recording)
+    if destination.is_file():
+        return destination
+
+    try:
+        ffmpeg_exe = _resolve_ffmpeg_exe()
+    except Exception:
+        return None
+
+    import subprocess
+
+    cmd = [
+        ffmpeg_exe, "-y", "-loglevel", "error", "-nostdin",
+        "-i", str(recording),
+        "-frames:v", "1",
+        "-vf", f"scale={_THUMBNAIL_WIDTH}:-1",
+        str(destination),
+    ]
+    try:
+        result = subprocess.run(
+            cmd,
+            timeout=timeout,
+            # Same reasoning as _encode_frames(): console=False build, no
+            # window to flash, and a test runner's stdin may not be a real
+            # handle subprocess can duplicate.
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+            capture_output=True,
+            stdin=subprocess.DEVNULL,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+
+    if result.returncode == 0 and destination.is_file() and destination.stat().st_size > 0:
+        return destination
+    return None
+
+
 def _resolve_ffmpeg_exe() -> str:
     """Locate the ffmpeg binary bundled with imageio_ffmpeg.
 
@@ -380,6 +454,14 @@ class FrameRecorder(QObject):
         output = _recordings_dir() / f"test-recording-{self._stamp}.mp4"
 
         if self._encode_frames(frames_dir, output):
+            # The cheap path: frames[0] is still on disk and already
+            # exactly what the gallery needs a preview of, so this costs no
+            # extra ffmpeg call and no subprocess - unlike the backfill path
+            # for a recording saved before thumbnails existed (see
+            # ensure_recording_thumbnail()). A failure here (a corrupt
+            # first frame) just leaves no thumbnail; the gallery already
+            # falls back to a generic icon for that.
+            _write_thumbnail(QImage(str(frames[0])), thumbnail_path_for(output))
             # The frames were only ever an intermediate step to the video.
             for frame_path in frames:
                 frame_path.unlink(missing_ok=True)

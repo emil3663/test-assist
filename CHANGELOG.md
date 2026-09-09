@@ -138,6 +138,19 @@ release; only tagged versions appear as releases.
   extraction or annotation — discoverability only. Recordings are read from
   `recordings_dir()`, never `history_dir()`, so the auto-pruning that
   removes unreadable snapshots on launch can never reach one.
+  - **A recording's gallery tile now shows its first frame, not just a
+    generic camera icon.** A new recording writes its thumbnail for free —
+    the first captured frame is already on disk before it's deleted, so
+    saving a scaled copy costs no extra ffmpeg call. An older recording
+    with no cached thumbnail gets one backfilled with the bundled ffmpeg on
+    first view, off the UI thread so a gallery full of them doesn't stall,
+    then cached in `history_dir()` (regenerable cache, not evidence — never
+    alongside the recording itself in `recordings_dir()`) so it only costs
+    a subprocess once. Every video tile — thumbnail or fallback icon alike
+    — carries a play badge, since a real thumbnail alone would look
+    exactly like a screenshot. Extraction failing, ffmpeg being missing, or
+    the source frames already being gone all fall back to the original
+    generic icon rather than a broken tile.
 
 ### Changed
 

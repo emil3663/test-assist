@@ -1,7 +1,7 @@
 # 🔍 Test Assist — Desktop stability matrix
 
-**Version:** 1.12
-**Last updated:** 2026-09-07
+**Version:** 1.13
+**Last updated:** 2026-09-09
 **Applies to:** the PySide6 desktop build. The browser build has its own matrix
 in `STABILITY_MATRIX.md`.
 
@@ -25,13 +25,13 @@ not. This document is that check.
 
 | | Count |
 |---|---|
-| Cases in `DESKTOP_TEST_PLAN.md` v1.16 | 170 |
-| Automated and passing | 165 |
+| Cases in `DESKTOP_TEST_PLAN.md` v1.17 | 175 |
+| Automated and passing | 170 |
 | Blocked, documented as manual | 5 |
-| Automated tests | 262 collected — 262 pass everywhere, no skips |
+| Automated tests | 270 collected — 270 pass everywhere, no skips |
 | Wall clock | about 2-3 seconds warm; the first run is slower while the bundled ffmpeg loads |
 
-**A green run is `262 passed, 0 skipped`, everywhere.** MP4 assembly used to
+**A green run is `270 passed, 0 skipped`, everywhere.** MP4 assembly used to
 depend on `opencv-python`, an optional dependency the product deliberately
 shipped without, which made REC-05 skip itself on CI, the packaged build, and
 any clean checkout. It now shells out to a bundled `ffmpeg` binary via
@@ -151,7 +151,7 @@ These five are the manual pass to run against a release before trusting it.
 | 3.8 Zoom | 6 | Stable | ZOM-05 asserts that coordinates are in image space, not widget space. |
 | 3.9 Undo/redo | 6 | Stable | |
 | 3.10 Export | 9 | Stable | `QFileDialog` is substituted, so these prove what is written, not that the dialog appears. |
-| 3.11 History | 13 | Stable | HIS-05 back-dates a file's mtime rather than waiting. HIS-08 through HIS-12 (item 4) prove recordings appear in the gallery, get their own widget rather than being fed through `_SnapshotThumb`'s `QPixmap(path)` call, open externally rather than loading into the canvas, and are never touched by history pruning. |
+| 3.11 History | 18 | Moderate | HIS-05 back-dates a file's mtime rather than waiting. HIS-08 through HIS-12 (item 4) prove recordings appear in the gallery, get their own widget rather than being fed through `_SnapshotThumb`'s `QPixmap(path)` call, open externally rather than loading into the canvas, and are never touched by history pruning. HIS-13 through HIS-17 (recording thumbnails) shell out to the real bundled ffmpeg the same way REC-05 does, and HIS-14/HIS-15 poll for a background-thread result with a timeout rather than a fixed sleep - see the note on `QTest.qWait()` below. All five were verified to fail against the pre-fix code; HIS-17 (pruning vs. a thumbnail file) is a pinning test, not a regression test - the pruning glob already only ever matched `*.png`, thumbnail or not. |
 | 3.12 Launcher | 11 | Stable | LCH-07 asserts the always-on-top flag is set, not that the window is actually on top. LCH-08 substitutes `QApplication.screenAt()` to prove docking and positioning measure the screen the widget is actually on. DSP-12/13/14 were each verified to genuinely fail against the pre-fix code (reverted locally, run, restored) rather than trusted to discriminate on the strength of the arithmetic alone. |
 | 3.13 Shortcuts | 6 | Stable | KEY-05 exercises the real signal path rather than calling the setter directly. KEY-06 (the `help.html` pin, PRE_BUILD_HANDOVER item 5) is a deliberately partial mechanical check: the 9 tool-letter and 4 editing rows are compared against the real `QShortcut` objects `EditorWindow` registers, but the 3 launcher-only rows (Alt+P, Alt+Shift+P, Alt+V) are not pinned the same way. Those are inline `keyPressEvent` conditionals in `launcher.py`, not `QShortcut` objects - there is no non-hardcoded source of truth to check them against without either regex-parsing source (brittle to any refactor) or a second hardcoded list (which just moves the manual-sync burden rather than removing it). Their behaviour, not their documentation, is what `test_launcher_keyPressEvent_*` covers instead. |
 | 3.14 Lifecycle | 6 | Moderate | INS-01 binds a uniquely named local server so it cannot collide with a running app. INS-05 monkeypatches `QApplication.quit` at the class level (this suite shares one real `QApplication`) rather than calling it for real, verified to fail against the pre-fix code. INS-06 covers `restore()`'s off-screen repositioning, also verified to fail without it. |
@@ -160,6 +160,34 @@ These five are the manual pass to run against a release before trusting it.
 | 3.17 Diagnostics | 4 | Stable | ABT-02's clipboard assertion is the same shape as issue #1's own diagnosis - proving a reporter's monitor layout is now visible without a code read. |
 | 3.18 Data Locations | 7 | Stable | `QStandardPaths.writableLocation` is substituted, not the real Windows API, so these prove the resolution and migration logic; they do not prove `Documents\Test Assist\` looks right in actual Windows Explorer. |
 | 3.19 Editor Chrome | 2 | Stable | UI-01/UI-02 (items 2-3) check the stylesheet's own text, not rendered pixels - they prove no rule sets a sub-3:1-contrast colour or omits the shared small-icon-button rule, not that a button looks right on screen. |
+
+---
+
+## A `QTest.qWait()` gap found while testing recording thumbnails
+
+The recording-thumbnail backfill (`editor._RecordingThumb`) runs off the GUI
+thread via the standard `moveToThread()` worker idiom, and delivers its result
+back via a normal cross-thread signal-slot connection - the kind Qt is
+supposed to auto-queue onto the receiver's own thread. `QTest.qWait()`, this
+suite's usual tool for "wait for something async" (used elsewhere for
+timer-driven UI), was tried first to pump the event loop while waiting for
+that delivery. Under this suite's offscreen QPA platform it did not reliably
+deliver the queued signal - not flaky, consistently absent, confirmed over
+repeated runs of an isolated reproduction outside pytest entirely. A plain
+loop calling `QApplication.processEvents()` directly, with a short sleep
+between calls, delivered it every time, also confirmed over repeated runs.
+HIS-14 and HIS-15 use that pattern (`_wait_until()` / `_pump_events()` in
+`test_functional.py`) instead of `qWait()`, with a comment pointing at this
+section so it is not silently reintroduced.
+
+The same isolated reproduction also caught a real bug before it reached the
+test suite at all: the worker object passed to `moveToThread()` was kept
+alive only via `_pending_thumbnail_threads` holding the `QThread`, not the
+worker itself. `moveToThread()` does not extend an object's Python lifetime,
+so with no other reference the worker could be garbage-collected while the
+background thread was still using it - a genuine use-after-free (an access
+violation, not a hang, in the reproduction), not a hypothetical one. Fixed by
+keeping `(thread, worker)` pairs together.
 
 ---
 
@@ -456,7 +484,7 @@ yet on the packaged build.
 ```bash
 cd python
 pip install -r requirements.txt
-QT_QPA_PLATFORM=offscreen pytest -q      # 262 passed, about 2-3 seconds warm;
+QT_QPA_PLATFORM=offscreen pytest -q      # 270 passed, about 2-3 seconds warm;
                                           # slower on the first run while the
                                           # bundled ffmpeg loads
 ```

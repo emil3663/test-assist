@@ -9,7 +9,7 @@ from pathlib import Path
 import time
 import webbrowser
 
-from PySide6.QtCore import Qt, QSize, QSysInfo, QUrl, Signal
+from PySide6.QtCore import QObject, Qt, QSize, QSysInfo, QThread, QUrl, Signal
 from PySide6.QtGui import QColor, QDesktopServices, QIcon, QImage, QKeySequence, QPixmap, QShortcut
 from PySide6.QtWidgets import (
     QApplication,
@@ -912,14 +912,45 @@ class _SnapshotThumb(QFrame):
         super().mousePressEvent(event)
 
 
+class _ThumbnailBackfillWorker(QObject):
+    """Runs ensure_recording_thumbnail() off the GUI thread.
+
+    Standard Qt worker-object idiom (moveToThread(), not a QThread
+    subclass): ffmpeg extraction can take real wall-clock time, and a
+    gallery full of pre-thumbnail recordings must not stall the UI while
+    each one is backfilled. `finished` is connected directly to a bound
+    method on the requesting widget, never a bare lambda - Qt only
+    auto-queues a cross-thread connection back to the GUI thread when it
+    can see the receiver's own thread affinity, which a plain callable
+    does not carry.
+    """
+
+    finished = Signal(object)  # Path | None
+
+    def __init__(self, recording_path: Path) -> None:
+        super().__init__()
+        self._recording_path = recording_path
+
+    def run(self) -> None:
+        import capture
+        self.finished.emit(capture.ensure_recording_thumbnail(self._recording_path))
+
+
 class _RecordingThumb(QFrame):
     """Clickable card representing a recording in the gallery.
 
-    Deliberately never a decoded frame: the gallery used to assume every
-    entry was a loadable QPixmap, which a video is not. Clicking opens it in
-    the system's own player (or its containing folder, for a kept frame
-    sequence) rather than attempting any in-app playback, frame extraction
-    or annotation - discoverability only.
+    Shows the recording's first frame as a thumbnail once one is available -
+    from cache immediately, or backfilled in the background for a recording
+    saved before thumbnails existed - with a play badge always overlaid, so
+    a recording is never mistakable for a screenshot at a glance the way a
+    bare thumbnail would be. Falls back to (and never leaves worse than) the
+    original generic icon when no thumbnail can be produced: extraction
+    fails, ffmpeg is missing, or the source frames are already gone.
+
+    Deliberately never a decoded frame *for playback*: clicking still opens
+    the recording in the system's own player (or its containing folder, for
+    a kept frame sequence) rather than attempting any in-app playback -
+    discoverability only.
     """
 
     open_requested = Signal(Path)
@@ -934,6 +965,7 @@ class _RecordingThumb(QFrame):
         super().__init__(parent)
         self._recording_path = recording_path
         self._is_kept_frames = recording_path.is_dir()
+        self._thumb_width = thumb_width
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.setToolTip(
             (f"Click to open the containing folder\n{recording_path.name}")
@@ -953,11 +985,24 @@ class _RecordingThumb(QFrame):
         layout.setContentsMargins(4, 4, 4, 4)
         layout.setSpacing(2)
 
-        icon = QLabel("🎞" if self._is_kept_frames else "🎥")
-        icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        icon.setFixedHeight(max(60, thumb_width // 2))
-        icon.setStyleSheet("font-size: 28px; background: transparent;")
-        layout.addWidget(icon)
+        self._preview = QLabel()
+        self._preview.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._preview.setFixedHeight(max(60, thumb_width // 2))
+        layout.addWidget(self._preview)
+        self._show_fallback_icon()
+
+        # A fixed-size badge, always present, on top of whatever _preview
+        # is showing - a real thumbnail looks exactly like a screenshot
+        # without it. Parented directly to self (a sibling of _preview in
+        # the layout, not a child of it) and positioned in resizeEvent,
+        # since _preview's own geometry isn't final until layout runs.
+        self._badge = QLabel("▶", self)
+        self._badge.setStyleSheet(
+            "QLabel { color: #ffffff; background: rgba(0,0,0,0.55);"
+            " border-radius: 9px; font-size: 11px; padding: 1px 6px 1px 8px; }"
+        )
+        self._badge.adjustSize()
+        self._badge.raise_()
 
         stamp = datetime.fromtimestamp(recording_path.stat().st_mtime).strftime("%d %b %H:%M")
         kind = "Recording (frames)" if self._is_kept_frames else "Recording"
@@ -966,7 +1011,89 @@ class _RecordingThumb(QFrame):
         label.setWordWrap(True)
         layout.addWidget(label)
 
+        if not self._is_kept_frames:
+            # A kept-frames folder has no video to extract a frame from -
+            # the generic icon is the only honest option there.
+            self._load_thumbnail()
+
+    def _show_fallback_icon(self) -> None:
+        self._preview.setPixmap(QPixmap())
+        self._preview.setText("🎞" if self._is_kept_frames else "🎥")
+        self._preview.setStyleSheet("font-size: 28px; background: transparent;")
+
+    def _show_thumbnail(self, thumbnail_path: Path) -> None:
+        pixmap = QPixmap(str(thumbnail_path))
+        if pixmap.isNull():
+            return
+        self._preview.setStyleSheet("background: transparent;")
+        self._preview.setText("")
+        self._preview.setPixmap(
+            pixmap.scaledToWidth(self._thumb_width, Qt.TransformationMode.SmoothTransformation)
+        )
+
+    def _load_thumbnail(self) -> None:
+        """A cached thumbnail loads immediately, no subprocess involved. A
+        missing one is backfilled off the GUI thread - see
+        _ThumbnailBackfillWorker - and swapped in once ready; the fallback
+        icon is already showing while that runs, so there is nothing to
+        block on.
+        """
+        import capture
+
+        cached = capture.thumbnail_path_for(self._recording_path)
+        if cached.is_file():
+            self._show_thumbnail(cached)
+            return
+
+        thread = QThread()
+        worker = _ThumbnailBackfillWorker(self._recording_path)
+        worker.moveToThread(thread)
+        thread.started.connect(worker.run)
+        worker.finished.connect(self._on_thumbnail_backfilled)
+        worker.finished.connect(thread.quit)
+        worker.finished.connect(worker.deleteLater)
+        thread.finished.connect(lambda: _forget_thumbnail_thread(thread))
+        thread.finished.connect(thread.deleteLater)
+        # Both thread and worker, not just thread: moveToThread() does not
+        # keep worker alive on its own, and with no Python reference left
+        # once this method returns, worker could be garbage-collected while
+        # the background thread is still using it - a genuine
+        # use-after-free, not a hypothetical one (caught by a crash, not a
+        # hang, when this was tried with only `thread` kept).
+        _pending_thumbnail_threads.append((thread, worker))
+        thread.start()
+
+    def _on_thumbnail_backfilled(self, thumbnail_path) -> None:
+        if thumbnail_path is not None:
+            self._show_thumbnail(thumbnail_path)
+
+    def resizeEvent(self, event) -> None:
+        super().resizeEvent(event)
+        preview_rect = self._preview.geometry()
+        self._badge.move(
+            max(preview_rect.left(), preview_rect.right() - self._badge.width() - 6),
+            max(preview_rect.top(), preview_rect.bottom() - self._badge.height() - 6),
+        )
+
     def mousePressEvent(self, event) -> None:
         if event.button() == Qt.MouseButton.LeftButton:
             self.open_requested.emit(self._recording_path)
         super().mousePressEvent(event)
+
+
+# Kept alive here, not just as an attribute on the (possibly short-lived)
+# _RecordingThumb that started them: a QThread (and its worker) with no
+# Qt-parent and no remaining Python reference is a premature-collection
+# hazard, and parenting the thread to the thumb widget instead would risk
+# "QThread: Destroyed while thread is still running" if the gallery dialog
+# closes before a backfill finishes. Each (thread, worker) pair removes
+# itself once the thread's own `finished` fires - by which point run() has
+# genuinely returned, unlike worker.finished (emitted first, while the
+# thread is still tearing down).
+_pending_thumbnail_threads: list[tuple[QThread, "_ThumbnailBackfillWorker"]] = []
+
+
+def _forget_thumbnail_thread(thread: QThread) -> None:
+    for pair in list(_pending_thumbnail_threads):
+        if pair[0] is thread:
+            _pending_thumbnail_threads.remove(pair)
