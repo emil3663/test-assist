@@ -631,6 +631,131 @@ tests_e2e\requirements.txt` and `python -m pytest tests_e2e` from
 status committed separately, immediately, as `3074602` — see the
 investigation note below.
 
+### Follow-up — root cause found: a mouse-hook utility, not the environment — 2026-09-09
+
+Per `docs/ta228-synthetic-input-investigation-brief.md`, written after a
+first re-run on Emil's own real, interactive desktop reproduced the exact
+same checks-2/3 failure as the original non-interactive environment — the
+"needs real hardware" theory from the entry above was falsified by that
+re-run (recorded on `TESTASSIST_BACKLOG.md`'s TA-228 entry, commit
+`bfe1ee7`). This entry reports what the brief's three-step investigation
+actually found.
+
+**Step 0 — control test.** Notepad turned out to be the wrong control
+target: modern Windows 11 Notepad is single-instance/tabbed, exactly like
+TestAssist itself — a fresh launch hands off to the existing window rather
+than opening a clean one, which very nearly caused a real problem: the
+first attempt (`subprocess.Popen(["notepad.exe"])`) silently added a tab to
+the user's own already-open Notepad window (which had real, unsaved tabs —
+`Laptop.md`, `External.md`) rather than starting anything new. Caught
+before any damage (only the newly-spawned orphan helper processes were
+closed, by exact PID, never the user's own window), then abandoned Notepad
+entirely in favor of a minimal, purpose-built Tkinter window — genuinely
+separate, non-Qt, non-single-instance, a real native Win32 window
+underneath, with a button whose click handler sets the window's real title
+via `root.title()` (a real `SetWindowText`), read back independently of
+pywinauto.
+
+**Result: `click_input()` also failed against this plain, non-Qt window.**
+Verified the click wasn't simply mistargeted first — `WindowFromPoint` at
+the button's exact center returned the button's own real hwnd, and
+`GetForegroundWindow()` confirmed the Tk window was genuinely focused at
+click time — before concluding the click itself had no effect. Per the
+brief's own branching logic, this result means the cause is **system-wide,
+not Qt-specific.**
+
+**Step 3 — win32 backend retry (run in parallel, per the brief's
+sequencing).** Connected to the real, already-running TestAssist.exe
+(the user's own instance from the earlier manual re-run) rather than
+starting a second one — a second launch just hands off to the first and
+exits (`python/tests_e2e/README.md` already documents this). The win32
+backend's `child_window()` couldn't even locate Quick Capture — Qt paints
+its own widgets rather than creating native child HWNDs, so there was
+nothing for PostMessage-based control lookup to find, a structural fact
+about Qt on Windows rather than evidence either way. Retried with a
+coordinate-based click instead (the button's real screen center, read via
+the UIA backend, converted to the win32 top-level window's client
+coordinates, clicked via `top.click(coords=...)`): **still no effect** —
+consistent with Step 0's system-wide finding.
+
+**One level lower still, bypassing pywinauto entirely.** A raw
+`SendInput` mouse *move* to an absolute screen point, verified via
+`GetCursorPos` before/after: **the cursor genuinely moved to the exact
+target coordinates.** The same raw `SendInput` sequence but for a button
+down+up at that same point, against the Tk button, verified via the same
+window-title read-back as Step 0: **zero effect.** This pinned the block
+down precisely — synthetic input reaches the OS input stream and moves the
+real cursor; specifically the button-press portion of it doesn't register
+against a target window. That is a very different (and much narrower)
+claim than "no synthetic input reaches this environment," which is what
+every prior pass of this investigation had, reasonably, concluded.
+
+**Step 2 — chasing the system-wide cause.** `Get-MpComputerStatus` showed
+only Windows Defender, real-time protection on, no third-party AV/EDR
+product registered in `root/SecurityCenter2`; a scan of Defender's
+operational log and the Application log for the ~20 minutes around the
+test runs turned up nothing relevant. A full process listing of the
+interactive session, filtered down to real user-session processes,
+surfaced `XMouseButtonControl.exe` — X-Mouse Button Control 2.20.5
+(`C:\Program Files\Highresolution Enterprises\X-Mouse Button Control\`), a
+third-party mouse-button remapper. Its entire mechanism is a system-wide
+low-level mouse hook intercepting button press/release events
+specifically — not movement — which is exactly the split just measured.
+
+**Confirmed directly, with the user's explicit go-ahead before touching
+anything running on their machine** (it isn't security software, but it's
+real software they actively rely on, so this wasn't defaulted into): the
+process was running elevated and this session's own `taskkill` came back
+`Access is denied`, so the user exited it themselves. With it stopped, the
+exact same raw `SendInput` click test that had just failed **now
+succeeded** (`TK_TARGET_CLICKED`); pywinauto's own `click_input()` against
+the same Tk window also now succeeded. Re-ran the real `pytest tests_e2e`
+suite (against a freshly closed-and-relaunched `TestAssist.exe`, per its
+own documented prerequisite) with XMBC still stopped:
+
+- **Check 1 (launch): PASSED.**
+- **Check 2 (Quick Capture → real overlay window): PASSED** — genuinely,
+  for the first time, against the real build with no environment caveat.
+- **Check 3 (TA-icon minimize/restore): FAILED — consistently, re-run
+  once more to rule out a one-off flake, same failure both times.** This
+  is a *different* failure than before: input now reaches the app (check 2
+  proves that), so this is no longer the "nothing can click anything"
+  environment gap. It is either a genuine reproduction of TA-220's own
+  still-unconfirmed hypothesis (the editor's real OS window never entered
+  `is_minimized()` within the 5s deadline after the TA-icon click), or an
+  artifact of this specific test's own timing/focus assumptions — brief
+  says explicitly not to chase TA-220's or TA-217's gaps in this pass, so
+  this is reported as a real, live finding for a future ticket, not
+  investigated further here.
+
+The user relaunched X-Mouse Button Control immediately afterward (I could
+only relaunch it via a normal, non-elevated `Start-Process` — since the
+original instance ran elevated and I have no way to know if that was
+load-bearing for it, **it's worth a quick check that its button mappings
+still behave as expected**, in case it needs restarting a second time,
+elevated, to fully match its prior state).
+
+**Conclusion: root cause found and confirmed, not just ruled-out-around.**
+The "no synthetic input reaches the app" finding across every earlier pass
+of this investigation (original non-interactive environment, and the first
+real-hardware re-run) was real, but its cause was never the
+environment being non-interactive, Qt-specific, or this project's own
+code — it was a third-party mouse-button remapper's system-wide low-level
+mouse hook on this specific development machine, intercepting synthetic
+button-press events before they reached any target window, Qt or not.
+Checks 2 and 3 are, and always were, written correctly; check 2 is now
+genuinely verified passing. Check 3 surfaced what looks like a real,
+separate finding (TA-220's own hypothesis) worth its own follow-up ticket,
+not folded into this one per the brief's explicit scope boundary.
+
+**No change to the CI-vs-manual decision** — that call isn't reopened by
+this finding (a hosted CI runner without this specific machine's
+XMouseButtonControl install was never going to hit this same cause either
+way, but the decision itself stands as recorded).
+
+**No production code change.** Root-cause investigation only, per the
+brief.
+
 ---
 
 ## Investigation: what has been silently reverting `TESTASSIST_BACKLOG.md` — 2026-09-09
