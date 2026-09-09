@@ -17,3 +17,5 @@ python/dist/
 
 # Manual-test evidence, not source
 docs/*.mp4
+
+Claude outputs/
