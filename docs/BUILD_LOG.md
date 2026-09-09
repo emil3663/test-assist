@@ -437,3 +437,271 @@ geometry math).
 
 **Commit:** `41bd844` (includes `TESTASSIST_BACKLOG.md`'s TA-226 status
 update in the same commit as the test/CI changes, per the brief).
+
+---
+
+## TA-227 — retrofit TA-217's two dispatch tests — 2026-09-09
+
+Built per `docs/ta227-228-e2e-testing-brief.md`, executed in full.
+Test-only — no app code changes, nothing in `python\dist\` differs, no
+new `rc` build.
+
+**Source:** `origin/main` at `c0bf19741e29a9f8ae560fccb953d8bfda5f4262`
+(`c0bf197`) — pushed this session. CI confirmed **green** —
+[run 34344108333](https://github.com/emil3663/test-assist/actions/runs/34344108333),
+both `test` (59s) and `visual` (41s) jobs succeeded.
+`TESTASSIST_BACKLOG.md`'s status update committed separately and
+immediately (`45792b9`, pushed ahead of the code commit) — see the note
+on why at the end of this entry.
+
+**What was wrong:** both
+`test_TA217_global_hotkey_closes_an_open_about_dialog_before_capturing`
+and `test_TA217_quick_capture_button_closes_an_open_about_dialog_before_capturing`
+replaced `launcher._start_capture` with a call-recording lambda, then
+asserted only `calls == ["start_capture"]` — proving the function ran,
+not that a real, interactive capture overlay ever resulted, exactly the
+gap TA-217's own ticket had already flagged about these two tests by
+name.
+
+**Retrofit:** `_start_capture` is no longer stubbed in either test. Both
+let the real `220ms singleShot -> _overlay.activate()` chain run
+(`QTest.qWait`, the same mechanism `test_functional.py` already uses for
+this), then assert the real end state: `launcher._overlay.isVisible()`,
+followed by a real press/move/release drag through the overlay confirmed
+via a real `capture_ready` signal emission carrying a non-null pixmap.
+The button-path test also now triggers `launcher._btn_capture.click()`
+instead of calling `_on_action_click` directly, exercising Qt's real
+signal/slot wiring.
+
+**Verified to fail two independent ways, each restored after:**
+1. Reverting `_dismiss_active_modal_dialog()`'s call in `_on_global_hotkey()`
+   reproduces the original rc4 regression — fails on the pre-existing
+   dismiss assertion (`AssertionError: the hotkey path must actually
+   attempt to dismiss an open modal dialog`).
+2. Keeping that call but removing `_start_capture()` itself (both the
+   hotkey path's `if hotkey_id == self._HOTKEY_PHOTO:` branch and the
+   button path's `_on_action_click`) fails **specifically on the new
+   `isVisible()` assertion** in both cases — confirming the retrofit adds
+   real, independent detection power, not just riding on the older
+   dismiss check.
+
+**Grep for the same shape, repo-wide:** searched both test files for
+`lambda: ...append(...)` and every real-signal `.connect(lambda: ...)`.
+Found no other instance of the flawed shape. Checked and cleared,
+specifically:
+- `test_TA211_global_hotkey_dispatch_routes_to_the_right_action` stubs
+  `_start_capture`/`_start_full_capture`/`_toggle_recording`, but its own
+  claim is narrowly "routes to the right handler" — the broader "capture
+  actually works" claim is now independently covered by this retrofit.
+- The two DSP-15 restore-repositioning tests stub `_position_top_right`/
+  `_dock_right`, but each of those has its own real, unstubbed
+  correctness test elsewhere
+  (`test_launcher_position_top_right_uses_the_screen_the_widget_is_on`,
+  `test_launcher_dock_right_moves_to_expected_x_position`).
+- The TA-218 Editor-button test stubs `_check_for_updates`, but its own
+  claim is narrowly "reaches the launcher's checker" — the checker's own
+  logic is covered by UPD-01 through UPD-11.
+- `QApplication.quit`/`primaryScreen` stubs are system-API-boundary
+  substitutions (calling the real API would either kill the shared test
+  `QApplication` or defeat the point of pinning a screen), not app-logic
+  shortcuts.
+- Every remaining `signal.connect(lambda: ...)` (canvas
+  `annotation_changed`, `SingleInstanceManager`'s `quit_requested`/
+  `show_requested`, `ScreenshotOverlay.cancelled`) is a spy on a real
+  signal a real operation actually emits, not a stand-in for a mechanism.
+
+Convention recorded in `DESKTOP_STABILITY_MATRIX.md` (new paragraph under
+"What the tests run against"): a dispatch/wiring test may stub what's
+downstream of the action under test, or a method whose own correctness
+is independently verified elsewhere unstubbed, or observe a real signal —
+never the action's own immediate, in-process effect.
+
+**Full suite:** `320 passed, 0 skipped` (2 deselected), unaffected.
+
+**Commit:** `c0bf197` (code/tests + convention note).
+`TESTASSIST_BACKLOG.md`'s TA-227 status committed separately,
+immediately, as `45792b9` — see the investigation note below.
+
+---
+
+## TA-228 — pywinauto black-box smoke lane — 2026-09-09
+
+Built per `docs/ta227-228-e2e-testing-brief.md`, executed in full, with
+one honest, partial result reported rather than hidden.
+
+**Source:** `origin/main` at `1873e0b90cd22978877c34fe68db7584f7ef1b92`
+(`1873e0b`) — pushed this session. CI confirmed **green** —
+[run 34345914619](https://github.com/emil3663/test-assist/actions/runs/34345914619),
+both `test` (54s) and `visual` (1m45s) jobs succeeded; `tests_e2e/`
+correctly did not run in either (that is the point of `pytest.ini`'s new
+`testpaths = tests`).
+
+**What shipped:** `pywinauto` as a new Windows-only, dev/test-only
+dependency (`python/tests_e2e/requirements.txt`, deliberately kept out of
+`python/requirements.txt`). New `python/tests_e2e/` — its own
+`conftest.py` (launches the exe, kills it on teardown regardless of
+outcome) and `test_smoke.py` with the three scoped checks: app launches
+and its window appears; Quick Capture produces a real, visible overlay
+window observed via the OS's own window list; TA-icon minimize/restore
+changes the real OS window state via `pywinauto`'s
+`is_minimized()`/`is_normal()` (backed by UI Automation's
+`WindowVisualState`), not Qt's internal flags.
+
+**CI-vs-manual decision, recorded explicitly (`python/tests_e2e/README.md`):
+stays local/manual, not wired into CI.** The ticket's own cost argument
+(building an exe for three checks is more CI time than they're worth
+today) held up, but a harder, measured finding surfaced while building
+this made the call firmer — see below.
+
+**Ran the three checks for real against the current build
+(`python/dist/TestAssist/TestAssist.exe`, rebuilt once — see the
+production-change note below, not a new numbered `rc`):**
+
+- **Check 1 (launch, window appears): genuinely verified both ways.**
+  Passes against the real build. Errors against a deliberately corrupted
+  one (`python -m pytest tests_e2e -k launches` with `TESTASSIST_EXE`
+  pointed at a 1000-byte-truncated copy of the real exe) —
+  `pywinauto.application.AppStartError: ... CreateProcess: (193,
+  'CreateProcess', '%1 is not a valid Win32 application.')` — a real,
+  meaningful failure. Separately confirmed a *missing* exe correctly
+  **skips** instead (the `exe_path` fixture), a different and correct
+  case from a broken one.
+- **Checks 2 and 3: could not be verified to pass in this environment.**
+  Both fail cleanly within their own timeouts (5s / 10s) rather than
+  hang — the deadline-polling loops did their job — but the reason they
+  fail is not the app; it's that **no synthetic input mechanism reached
+  the running app at all** while writing this lane. Tried, in order, each
+  checked against a real, independent signal, not assumed:
+  1. UI Automation's `Invoke` pattern on the real Quick Capture button —
+     `launcher.hide()` never happened (the launcher stayed
+     `is_visible() == True`).
+  2. `pywinauto`'s `click_input()` (real OS `SendInput`) at the button's
+     own screen coordinates, with `ctypes.windll.shcore.SetProcessDpiAwareness(2)`
+     set before any UIA/COM usage — no effect.
+  3. The `win32` backend's direct `PostMessage`-based click, and a raw
+     `pywinauto.mouse.click()` at a checkbox control's coordinates,
+     verified via the checkbox's own UI-Automation toggle-state
+     (`get_toggle_state()`) read back unchanged (0 before, 0 after) — no
+     effect.
+  Each candidate cause checked and ruled out directly, not assumed away:
+  `TESTASSIST_DEBUG=1` set on the launched process's environment (Win32
+  `CreateProcess` with `lpEnvironment=NULL` inherits the caller's block —
+  confirmed by reading `pywinauto.application.Application.start`'s own
+  source) never produced a `debug.log` line from
+  `_dismiss_active_modal_dialog()`, which logs unconditionally on every
+  call; `WindowFromPoint` at the button's exact screen coordinates
+  returned the launcher's own real hwnd (no unrelated window intercepting
+  the click); `OpenInputDesktop` succeeded and the calling process's
+  session id matched `WTSGetActiveConsoleSessionId()` (a real, attached,
+  interactive desktop, not a disconnected/service session);
+  `whoami /groups` showed `Mandatory Label\Medium Mandatory Level` (the
+  normal, unelevated integrity level — rules out a UIPI mismatch against
+  an elevated target, since nothing in this project's build requests
+  elevation).
+  This is the same class of environment gap as TA-220/TA-217/TA-223/
+  TA-225 — not a flaw in the two tests, which are the correct design and
+  will run properly once tried on a real, interactively-used Windows
+  machine. Recorded here rather than claimed as passing.
+
+**Why this sharpened the CI-vs-manual decision beyond the ticket's own
+reasoning:** GitHub Actions' hosted Windows runners are themselves a
+non-interactive, automated context — the same class of environment that
+just failed to deliver synthetic input here. Wiring this lane into CI
+today would risk automating around the assumption that a runner can
+deliver real clicks at all, which is exactly what needs confirming first,
+not assumed by building CI plumbing around it.
+
+**One small production change, in service of this lane, not a UX
+change:** `launcher.py`'s `_btn_open_editor` (icon-only, otherwise
+indistinguishable from its unlabeled sibling buttons to UI Automation)
+now has `setAccessibleName("Open Editor")`, needed for check 3 to find it
+reliably from outside the process — also a genuine accessibility
+improvement (a screen reader now announces it), not solely a test hook.
+Required one rebuild to include (`.\build.ps1`, no `-Zip -Shortcut` —
+this is a local dev build for testing this lane, not a release
+candidate); full suite re-confirmed `320 passed, 0 skipped` (2
+deselected) afterward.
+
+**How to run it:** `python/tests_e2e/README.md` — needs a build first
+(`python\build.ps1`), then `python -m pip install -r
+tests_e2e\requirements.txt` and `python -m pytest tests_e2e` from
+`python\`. Point at a specific build with `$env:TESTASSIST_EXE`.
+
+**Commit:** `1873e0b` (code/tests/docs). `TESTASSIST_BACKLOG.md`'s TA-228
+status committed separately, immediately, as `3074602` — see the
+investigation note below.
+
+---
+
+## Investigation: what has been silently reverting `TESTASSIST_BACKLOG.md` — 2026-09-09
+
+Requested before starting the TA-227/228 work above, after this file's
+uncommitted content was reported lost four times this project, including
+a verification note from the TA-226 session. Reporting the honest
+result: **the exact mechanism on any single occasion could not be proven
+— it leaves no trace by design — but a concrete, evidence-backed leading
+cause was found, and the "still don't know" list is narrower than before.**
+
+**Ruled out, directly, not assumed:**
+- `git stash list` — empty. No stash currently holding (or having
+  dropped, per its own reflog) an edit to this file.
+- `git reflog show stash` — errors with "unknown revision," meaning no
+  stash ref has existed recently enough to leave that trail either.
+- `.gitattributes`, custom `.git/hooks/*` (only the default `.sample`
+  files are present), a second `git worktree` (`git worktree list` shows
+  only this one checkout), and a `.vscode/settings.json` auto-save/
+  format-on-save setting (it contains one unrelated Python-env-manager
+  key) — none exist.
+- OneDrive/known-folder redirection of the repo path — `$env:OneDrive`
+  is configured on this machine, but `fsutil reparsepoint query` on the
+  repo's parent (`...\source`) confirms it is a plain directory, not a
+  reparse point; this folder is not inside OneDrive's sync tree.
+- The specific claim "your TA-226 verification note vanished": checked
+  directly — it is present, complete, in both the commit that added it
+  (`5783f8d`... actually `41bd844`'s TA-226 note lands via that session's
+  own commits) and the current working tree. Whatever happened
+  previously, it is not currently missing.
+
+**The leading, evidence-backed candidate:** `git fsck --unreachable
+--no-reflogs` found **16 dangling stash-related commit objects** (8
+`stash push`/pop or drop cycles, each leaving a `WIP on main: ...` +
+paired `index on main: ...` pair behind since the reflog that would
+normally reference them has expired or was cleared) — timestamped
+throughout today, several landing within seconds of this project's own
+batch commits (`19bbf0c`, `734dfe7`, `aa93bb3` — itself a backlog-content
+commit, `009798b`, `fe7e801`). This is direct, concrete proof that
+`git stash push -- <files>` was used heavily and repeatedly today (this
+project's own revert-test-restore verification methodology, used in
+every batch this session), not a one-off. None of those 16 dangling
+commits' own diffs touch `TESTASSIST_BACKLOG.md` — ruling out "a stash
+captured a backlog edit and then lost it" specifically — but that
+sharpens rather than clears the real suspect: a stash that never
+contained this file is exactly the setup for the mistake already caught
+once this session by hand (documented earlier: `git stash push --
+launcher.py` followed by a mistaken `git checkout stash@{0} --
+tests/test_regressions.py`, which silently resolved to the **parent
+commit's** version of that unrelated file, discarding an uncommitted
+test addition with zero trace in reflog or `fsck`, since a single-file
+`git checkout` never moves a ref). Given `TESTASSIST_BACKLOG.md` is
+almost always being hand-edited in the *same* working session as a
+code-file stash-based revert cycle for whatever ticket is in progress,
+it is the single most exposed file in this repository to exactly that
+mistake — and it is structurally invisible to every git forensic tool
+available (reflog, `fsck`, stash list all track ref and object history,
+not plain working-tree `checkout`/`restore` operations).
+
+**Honestly still open:** this cannot be proven for any specific past
+incident — by the time content is gone, there is nothing left to
+inspect. An editor-level cause (a stale open buffer autosaving over
+newer disk content) was considered and could not be ruled out or
+confirmed from this side either, since it depends on the user's own
+editor state, not anything visible here.
+
+**What changes as a result:** every stash/checkout-from-stash operation
+performed for the rest of this session avoided `TESTASSIST_BACKLOG.md`
+entirely (confirmed by design, not just intention — no stash touching it
+was created). Per instruction, this file is now committed **by itself,
+immediately** after each edit (`45792b9` for TA-227, `3074602` for
+TA-228), rather than batched with the corresponding code/test commit —
+shrinking the window a loss could happen in, independent of whether the
+root cause above is the true one.
