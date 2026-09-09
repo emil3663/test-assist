@@ -373,6 +373,16 @@ class FloatingLauncher(QWidget):
         self._status_lbl.show()
 
     def _on_global_hotkey(self, hotkey_id: int) -> None:
+        # TA-217: a global hotkey is a native OS message, not routed
+        # through Qt's own event queue, so it still fires (and the overlay
+        # still shows) while one of Test Assist's own dialogs - About, the
+        # History gallery, Clear Annotations - is exec()'d application-
+        # modal. Qt's modal blocking then keeps the freshly-shown overlay
+        # from ever receiving the mouse input needed to drag a selection.
+        # Pressing a capture hotkey clearly means "capture now" - closing
+        # whatever dialog is in the way matches that intent better than
+        # leaving the user with a silently non-interactive overlay.
+        self._dismiss_active_modal_dialog()
         if hotkey_id == self._HOTKEY_PHOTO:
             self._set_mode("photo")
             self._start_capture()
@@ -386,6 +396,16 @@ class FloatingLauncher(QWidget):
         if self._hotkeys is not None:
             self._hotkeys.unregister_all()
         super().closeEvent(event)
+
+    @staticmethod
+    def _dismiss_active_modal_dialog() -> None:
+        """Close whichever of Test Assist's own dialogs currently owns
+        Qt's application-modal input block, if any - not hardcoded to
+        About specifically, so any future modal dialog is covered the
+        same way without needing its own fix (TA-217)."""
+        modal = QApplication.activeModalWidget()
+        if modal is not None:
+            modal.close()
 
     # ── Action dispatch ───────────────────────────────────────────────────────
 

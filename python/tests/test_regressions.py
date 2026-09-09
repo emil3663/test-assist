@@ -562,6 +562,59 @@ def test_TA211_an_unrelated_native_message_is_ignored(qapp) -> None:
         launcher.close()
 
 
+def test_TA217_global_hotkey_closes_an_open_about_dialog_before_capturing(qapp, monkeypatch) -> None:
+    """Confirmed mechanism: EditorWindow._open_about() shows its QDialog
+    with setModal(True) (QDialog.exec() is a nested Qt event loop, which
+    is why a global hotkey - a native OS message, not routed through
+    Qt's own event queue - still reaches _on_global_hotkey() while it
+    runs). Qt's own application-modal blocking would otherwise leave the
+    freshly-shown capture overlay unable to receive the mouse input
+    needed to drag a selection. The hotkey path must close the dialog
+    before dispatching, not leave the user with a silently
+    non-interactive overlay.
+    """
+    from PySide6.QtCore import QTimer
+
+    editor = EditorWindow()
+    launcher = FloatingLauncher(editor)
+
+    calls: list[str] = []
+    launcher._start_capture = lambda: calls.append("start_capture")
+
+    # Spied rather than only checked by end state: without this, a
+    # regression would still eventually "pass" once the safety net below
+    # force-closes the dialog on its own timeout, masking exactly the
+    # failure this test exists to catch.
+    dismiss_calls: list[bool] = []
+    real_dismiss = FloatingLauncher._dismiss_active_modal_dialog
+    def _spy_dismiss():
+        dismiss_calls.append(True)
+        real_dismiss()
+    monkeypatch.setattr(FloatingLauncher, "_dismiss_active_modal_dialog", staticmethod(_spy_dismiss))
+
+    # Fires once the About dialog's nested event loop is actually
+    # spinning - scheduling it before dlg.exec() even starts (rather than
+    # calling it directly beforehand) is what exercises the real
+    # reentrant mechanism, not just the end state.
+    QTimer.singleShot(0, lambda: launcher._on_global_hotkey(launcher._HOTKEY_PHOTO))
+    # Safety net, not part of the behaviour under test: verified by hand
+    # while writing this test that without the fix, nothing ever closes
+    # the dialog and _open_about() blocks forever, hanging the whole
+    # suite rather than failing this one test. Force it closed well after
+    # the hotkey path should have, so a regression fails this test in
+    # ~2s instead of hanging indefinitely.
+    QTimer.singleShot(2000, lambda: QApplication.activeModalWidget() and QApplication.activeModalWidget().close())
+    editor._open_about()  # blocks until the dialog closes
+
+    assert dismiss_calls, "the hotkey path must actually attempt to dismiss an open modal dialog"
+    assert calls == ["start_capture"], \
+        "the hotkey must still dispatch to a capture while the About dialog is open"
+    assert QApplication.activeModalWidget() is None, \
+        "the About dialog must be closed, not left open and still input-blocking"
+    editor.close()
+    launcher.close()
+
+
 def test_TA211_a_failed_registration_is_surfaced_and_not_advertised(qapp) -> None:
     """RegisterHotKey fails when another application already owns the
     combination - simulated here by claiming Alt+P from the test itself
