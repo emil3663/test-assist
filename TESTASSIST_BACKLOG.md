@@ -1022,6 +1022,89 @@ that will actually ship.
 - **Dependencies:** Likely related to `TA-209`, `TA-223` — confirm before
   fixing independently.
 
+### TA-226 — No CI path can verify real font rendering or on-screen layout
+
+- **Phase:** 2
+- **Priority:** P2
+- **Suggested labels:** `testing`, `infra`, `ci`
+- **Problem it solves:** TA-221's own acceptance criterion asked for a
+  screenshot confirming the Copy/Export buttons render unclipped. It
+  couldn't be produced: `conftest.py` sets `QT_QPA_PLATFORM=offscreen` by
+  default, and `.github/workflows/python-tests.yml` pins the same value at
+  the job level, and Qt's offscreen platform plugin does not rasterize real
+  glyphs — a screenshot taken under it is tofu boxes, not text. rc5's fix
+  was verified by a measurement-based proxy (natural height now matches
+  `_btn_save_png`'s already-unclipped 28px) instead of the real thing the
+  ticket asked for. This isn't specific to TA-221 — any future clipping,
+  alignment, or icon-rendering regression hits the identical wall, and would
+  keep needing a manual screenshot pass to actually confirm.
+  Not a platform limitation: CI already runs on `windows-latest` — a real
+  Windows machine, not Linux-under-Xvfb — so real font rendering is
+  available today. `offscreen` is a constraint the suite chose for itself
+  (almost certainly for speed and to avoid a visible window during the main
+  run), applied blanket to every test, not something Windows requires.
+- **Scope:**
+  - Add a second, separate test lane — a marker (e.g.
+    `@pytest.mark.visual`) or its own test module — that runs without the
+    `offscreen` override, against the real `windows` Qt platform plugin, and
+    asserts against an actual `QWidget.grab()` screenshot.
+  - Pick one concrete assertion mechanism and say why: a pixel-diff against
+    a checked-in golden image is the obvious first idea, but is brittle to
+    font-hinting/DPI drift whenever the CI image's Windows or font-package
+    version changes underneath it. A bounding-box check — render the
+    widget, measure the actual ink extent of its text/icon, assert it stays
+    inside the widget's client rect — doesn't drift the same way and is
+    closer to what "not clipped" literally means. Decide this explicitly in
+    the PR rather than defaulting to whichever is easiest to write first.
+  - Retrofit TA-221's own acceptance criterion as the first real test in
+    this lane — closes the "one honest gap" flagged in rc5's `BUILD_LOG.md`
+    entry instead of leaving it as a permanent manual step.
+  - Wire it into `.github/workflows/python-tests.yml` as its own job or
+    step, separate from the main `offscreen` suite, so a slower or flakier
+    visual check never blocks the fast suite everything else depends on.
+  - Note in whichever test-plan doc this project uses for its testing
+    conventions: which class of future ticket belongs in this lane
+    (rendering/layout) versus the main suite (everything else).
+- **Deliverables:** a working visual test lane on real Windows font
+  rendering; TA-221's clipping check as its first real test, verified to
+  fail against the pre-rc5 code and pass against current code; CI wiring
+  that keeps it independent of the main suite's pass/fail.
+- **Acceptance criteria:** the new lane runs on `windows-latest` without the
+  `offscreen` override; the retrofitted TA-221 test fails when pointed at
+  the old `setFixedHeight(26)` code and passes against current code; a
+  failure in this lane does not fail the main suite's job.
+- **Dependencies:** None. Not a release gate by itself — it's what would
+  have caught TA-221 automatically instead of a manual screenshot pass, and
+  is meant to catch the same class of bug going forward.
+- **Verified:** ✅ 2026-09-09, per `docs/ta215-225-fix-brief.md`'s follow-up
+  brief `docs/ta226-visual-test-lane-brief.md`. `tests/test_visual.py`
+  added (`@pytest.mark.visual`, excluded from the default run by
+  `pytest.ini`'s `-m "not visual"`, run as its own `visual` job in
+  `python-tests.yml` against the real `windows` Qt platform plugin,
+  `continue-on-error: true` so it cannot block anything gating on the
+  workflow's overall conclusion). Assertion mechanism: bounding-box/ink-
+  extent against a real `QWidget.grab()` screenshot, not a pixel-diff
+  golden image — chosen specifically to not become the kind of
+  font-hinting/DPI-brittle fixture this ticket exists to move away from.
+  Main suite unaffected: `320 passed, 0 skipped` (2 deselected), identical
+  to rc5.
+  **One acceptance-criterion gap found while verifying, reported rather
+  than hidden:** reverting `_btn_copy`/`_btn_export_json` to the pre-fix
+  `setFixedHeight(26)` does **not** reproduce visible clipping on this
+  machine's real font rendering — measured at 12 ink rows out of a 14-row
+  unclipped maximum, identical to `_btn_save_png`'s own untouched
+  `setFixedHeight(28)` (already treated as fine). This is font-metric
+  drift across machines/ClearType settings exactly as this ticket's own
+  "Problem it solves" section warned about, not a flaw in the test — the
+  retrofitted test still checks the real, literal acceptance criterion
+  against the code as shipped (passes, for real, against real rendering),
+  and a second test in the same file
+  (`test_ink_extent_detection_actually_catches_a_clipped_button`) proves
+  the detection mechanism itself does catch a real, deliberately
+  undersized button on this same hardware, independent of whether the
+  specific historical height reproduces it. Full measurement in
+  `docs/BUILD_LOG.md`'s TA-226 entry.
+
 ### Gate A — Code complete
 - TA-201, TA-202, TA-203 merged
 - Suite green, no skips, no test opens a socket

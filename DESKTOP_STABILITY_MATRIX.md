@@ -111,6 +111,28 @@ What that does **not** prove: that Qt dispatches those events to the right
 widget in a real window, that the layout is usable, or that anything is legible.
 Those are properties of a running desktop and remain manual.
 
+**One exception, since TA-226: `tests/test_visual.py`.** A separate lane,
+excluded from the count above by `pytest.ini`'s default `-m "not visual"` and
+run as its own `visual` job in `python-tests.yml` against the real `windows`
+Qt platform plugin (CI already runs on `windows-latest`, a real Windows
+machine - `offscreen` was a self-imposed constraint every other test accepts
+for speed and isolation, not something the platform requires). A future
+ticket belongs here, not the main suite, when the thing actually being
+claimed is that pixels render a certain way - text isn't clipped, a color
+contrast holds up, an icon reads as what it's supposed to at real size -
+rather than that a handler ran or a value came out right. Everything else
+(logic, state, wiring, geometry math) belongs in the main offscreen suite,
+where it is faster and does not need a real display. Run it explicitly with
+`pytest -m visual` and `QT_QPA_PLATFORM=windows` set (not just left unset -
+`conftest.py`'s `os.environ.setdefault` fills in `offscreen` otherwise).
+Real font rasterization costs real time: TA-221's retrofitted clipping check
+and the mechanism-validation test alongside it ran in 0.23s and 0.13s
+respectively on a warm run - noticeably slower per test than the main
+suite's ~30-40ms average, though the absolute cost is still small at two
+tests. `continue-on-error: true` on the job means a failure here cannot
+block anything gating on the workflow's overall conclusion; only the main
+`test` job's own status does that.
+
 ---
 
 ## The blocked six
