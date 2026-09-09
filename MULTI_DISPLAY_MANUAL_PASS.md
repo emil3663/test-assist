@@ -58,6 +58,7 @@ you already have it: negative coordinates *and* mixed DPI at once.
 | PKG-05 | Right-click exe → Properties → Details | Product name and version populated | ⬜ |
 | UPD-12 | Check for Updates | Reaches GitHub and reports correctly | ⬜ |
 | REC-console | Watch closely as a recording saves | **No console window flashes** | ⬜ |
+| LCH-13 | Focus a browser (or any other window), then press Alt+P / Alt+Shift+P / Alt+V | Each captures or toggles recording exactly as its launcher button would, with Test Assist not the focused window | ⬜ |
 
 **Before/after evidence:** repeat DSP-03 once from `C:\TestAssist-1.3.0`. It
 should return EXTERNAL — the bug. Keep both images for the issue thread.

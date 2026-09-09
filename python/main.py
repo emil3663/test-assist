@@ -232,7 +232,7 @@ def main() -> None:
     single.quit_requested.connect(app.quit)
 
     editor   = EditorWindow(version=__version__)
-    launcher = FloatingLauncher(editor, version=__version__)
+    launcher = FloatingLauncher(editor, version=__version__, register_global_hotkeys=True)
     tray = _setup_tray(app, launcher, editor)
     app.setProperty("trayIcon", tray)
 

@@ -1,6 +1,6 @@
 # 🔍 Test Assist — Desktop stability matrix
 
-**Version:** 1.16
+**Version:** 1.17
 **Last updated:** 2026-09-09
 **Applies to:** the PySide6 desktop build. The browser build has its own matrix
 in `STABILITY_MATRIX.md`.
@@ -25,13 +25,13 @@ not. This document is that check.
 
 | | Count |
 |---|---|
-| Cases in `DESKTOP_TEST_PLAN.md` v1.20 | 183 |
-| Automated and passing | 178 |
-| Blocked, documented as manual | 5 |
-| Automated tests | 283 collected — 283 pass everywhere, no skips |
+| Cases in `DESKTOP_TEST_PLAN.md` v1.21 | 188 |
+| Automated and passing | 182 |
+| Blocked, documented as manual | 6 |
+| Automated tests | 287 collected — 287 pass everywhere, no skips |
 | Wall clock | about 2-3 seconds warm; the first run is slower while the bundled ffmpeg loads |
 
-**A green run is `283 passed, 0 skipped`, everywhere.** MP4 assembly used to
+**A green run is `287 passed, 0 skipped`, everywhere.** MP4 assembly used to
 depend on `opencv-python`, an optional dependency the product deliberately
 shipped without, which made REC-05 skip itself on CI, the packaged build, and
 any clean checkout. It now shells out to a bundled `ffmpeg` binary via
@@ -92,7 +92,7 @@ mocking `virtualGeometry()` to look like the reported hardware while the
 real platform integration sizes `showFullScreen()` to the real screen
 regardless; verified to fail against the old code and pass against the fix.
 
-Thirteen defects have been found so far: seven by writing these tests, two
+Fourteen defects have been found so far: seven by writing these tests, three
 following a user bug report, and four following real-hardware verification
 that went beyond what these tests alone could prove — see **Defects found**
 below.
@@ -113,7 +113,7 @@ Those are properties of a running desktop and remain manual.
 
 ---
 
-## The blocked five
+## The blocked six
 
 | ID | Case | Why it cannot be automated here |
 |----|------|--------------------------------|
@@ -122,6 +122,7 @@ Those are properties of a running desktop and remain manual.
 | PKG-04 | First launch on a machine without Python | Needs a clean Windows machine. The release workflow proves the exe runs on a runner, which is close but not the same as a machine that never had Python. |
 | PKG-05 | Windows file properties show product name and version | Readable only from a Windows build; the version resource is ignored on Linux, where the validation build runs. |
 | UPD-12 | A real round-trip to the GitHub API | Would make the suite depend on the network and GitHub's rate limits - "a suite that reaches the internet is a suite that fails on a train." `build.ps1` and the release workflow separately prove the packaged build *can* do TLS at all (PKG-07); nothing proves the request itself succeeds. |
+| LCH-13 | Pressing Alt+P with a browser (or any other application) focused, Test Assist unfocused | Needs a real desktop and real OS-injected keyboard input across a focus change - the offscreen platform has neither. LCH-09/LCH-10 prove the mechanism (`RegisterHotKey` succeeds, a real `WM_HOTKEY` dispatches to the right action) with real Win32 calls; only the literal cross-focus keypress is left to a human. |
 
 CAP-12 (a capture spanning or landing on a real high-DPI secondary monitor)
 was on this list until 2026-09-07: exercised on real hardware, it turned up
@@ -132,7 +133,7 @@ turned the remaining risk into pure geometry the suite can actually reach,
 so CAP-12 moved off this list rather than staying Blocked for a risk that no
 longer exists.
 
-These five are the manual pass to run against a release before trusting it.
+These six are the manual pass to run against a release before trusting it.
 
 ---
 
@@ -152,7 +153,7 @@ These five are the manual pass to run against a release before trusting it.
 | 3.9 Undo/redo | 6 | Stable | |
 | 3.10 Export | 9 | Stable | `QFileDialog` is substituted, so these prove what is written, not that the dialog appears. |
 | 3.11 History | 18 | Moderate | HIS-05 back-dates a file's mtime rather than waiting. HIS-08 through HIS-12 (item 4) prove recordings appear in the gallery, get their own widget rather than being fed through `_SnapshotThumb`'s `QPixmap(path)` call, open externally rather than loading into the canvas, and are never touched by history pruning. HIS-13 through HIS-17 (recording thumbnails) shell out to the real bundled ffmpeg the same way REC-05 does, and HIS-14/HIS-15 poll for a background-thread result with a timeout rather than a fixed sleep - see the note on `QTest.qWait()` below. All five were verified to fail against the pre-fix code; HIS-17 (pruning vs. a thumbnail file) is a pinning test, not a regression test - the pruning glob already only ever matched `*.png`, thumbnail or not. |
-| 3.12 Launcher | 11 | Stable | LCH-07 asserts the always-on-top flag is set, not that the window is actually on top. LCH-08 substitutes `QApplication.screenAt()` to prove docking and positioning measure the screen the widget is actually on. DSP-12/13/14 were each verified to genuinely fail against the pre-fix code (reverted locally, run, restored) rather than trusted to discriminate on the strength of the arithmetic alone. |
+| 3.12 Launcher | 16 (1 Blocked) | Moderate | LCH-07 asserts the always-on-top flag is set, not that the window is actually on top. LCH-08 substitutes `QApplication.screenAt()` to prove docking and positioning measure the screen the widget is actually on. DSP-12/13/14 were each verified to genuinely fail against the pre-fix code (reverted locally, run, restored) rather than trusted to discriminate on the strength of the arithmetic alone. LCH-09 through LCH-12 (TA-211) make real, unmocked `RegisterHotKey`/`UnregisterHotKey` calls against the real Win32 API and dispatch a real `WM_HOTKEY` through the actual `QAbstractNativeEventFilter` - a synthetic message, since this suite cannot inject real OS keyboard input, but the registration, conflict-detection and release calls are all genuine. `register_global_hotkeys` defaults to False specifically so the other 20+ tests that construct a launcher for unrelated reasons never touch this shared, process-wide OS state. LCH-13 (the literal cross-focus keypress) is Blocked - see the note below on why LCH-09/LCH-10 are the closest thing to it this suite can do. |
 | 3.13 Shortcuts | 6 | Stable | KEY-05 exercises the real signal path rather than calling the setter directly. KEY-06 (the `help.html` pin, PRE_BUILD_HANDOVER item 5) is a deliberately partial mechanical check: the 9 tool-letter and 4 editing rows are compared against the real `QShortcut` objects `EditorWindow` registers, but the 3 launcher-only rows (Alt+P, Alt+Shift+P, Alt+V) are not pinned the same way. Those are inline `keyPressEvent` conditionals in `launcher.py`, not `QShortcut` objects - there is no non-hardcoded source of truth to check them against without either regex-parsing source (brittle to any refactor) or a second hardcoded list (which just moves the manual-sync burden rather than removing it). Their behaviour, not their documentation, is what `test_launcher_keyPressEvent_*` covers instead. |
 | 3.14 Lifecycle | 11 | Moderate | INS-01 binds a uniquely named local server so it cannot collide with a running app. INS-05 monkeypatches `QApplication.quit` at the class level (this suite shares one real `QApplication`) rather than calling it for real, verified to fail against the pre-fix code. INS-06 covers `restore()`'s off-screen repositioning, also verified to fail without it. INS-07 (the editor's own way back to the launcher) monkeypatches `FloatingLauncher.restore`/`.show` at the class level the same way, specifically to prove the button routes through `restore()` rather than `show()` - INS-06's repositioning has to keep applying from this new route too. INS-08/INS-09 exercise `EditorWindow.load_image_path()` directly against real files on disk (a valid PNG, a missing path, a non-image file), `QMessageBox.warning` substituted so a bad-path test does not block on a real dialog. INS-10/INS-11 run two real `SingleInstanceManager`s against real local sockets under a test-unique server name - no substitution - one of them (INS-11) binds a raw non-cooperating `QLocalServer` to stand in for a hung instance; see the note on same-process handoff timing below for a quirk this surfaced. |
 | 3.15 Packaging | 7 | Blocked (3) | PKG-01, PKG-02, PKG-06 and PKG-07 are automated. PKG-07's "True" assertion is also exercised for real, once, against an actual PyInstaller build - see below. |
@@ -486,6 +487,33 @@ tooltips, to leave real margin rather than an exact-pixel fit). Verified to
 fail against the pre-fix code (the settings bar did not exist inside the
 dock-based layout at all) before being trusted.
 
+**14. Alt+P, Alt+Shift+P and Alt+V were advertised in three tooltips, the
+launcher's hint label, and `help.html`, and bound to nothing anywhere
+(TA-211).** Found by a user pressing Alt+P while working in a browser and
+nothing happening - it would not have worked with Test Assist focused
+either, since no `QShortcut`, key handler or hotkey registration existed
+for any of the three. Three tests in `test_regressions.py` asserted only
+that the tooltip *strings* contained "Alt+P" etc., so the suite was
+actively protecting the advertisement of a feature that did not exist -
+this is the same class of failure as defect 13's naive geometry check,
+just for a claim instead of a layout: a test that checks the label rather
+than the thing the label claims will stay green while the claim is false.
+Fixed with real Windows global hotkeys (`RegisterHotKey` via `ctypes`,
+dispatched through a `QAbstractNativeEventFilter` watching for
+`WM_HOTKEY`) rather than `QShortcut` - a window-focused shortcut cannot
+satisfy "capture whatever else has focus," which is the entire premise of
+an always-on-top capture widget having shortcuts at all. A tooltip or the
+hint label now claims a combination only once it has actually registered;
+a combination another application already owns fails registration
+explicitly (surfaced in the launcher's status line, not silently) rather
+than being advertised anyway, and the other two combinations are
+unaffected by one conflicting. All three old tooltip-string assertions
+were replaced with tests that exercise the real binding - registration,
+dispatch via a synthetic `WM_HOTKEY`, conflict handling, and release on
+close - verified to fail against the pre-fix code before being trusted.
+See 3.12 Launcher above for why `register_global_hotkeys` defaults to
+False everywhere except the tests that specifically exercise it.
+
 ---
 
 ## The selection model
@@ -531,7 +559,7 @@ yet on the packaged build.
 ```bash
 cd python
 pip install -r requirements.txt
-QT_QPA_PLATFORM=offscreen pytest -q      # 283 passed, about 2-3 seconds warm;
+QT_QPA_PLATFORM=offscreen pytest -q      # 287 passed, about 2-3 seconds warm;
                                           # slower on the first run while the
                                           # bundled ffmpeg loads
 ```

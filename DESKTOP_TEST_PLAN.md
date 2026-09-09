@@ -1,6 +1,6 @@
 # 🔍 Test Assist — Desktop Test Plan
 
-**Version:** 1.20
+**Version:** 1.21
 **Last updated:** 2026-09-09
 **Status:** In active development
 **Applies to:** the PySide6 desktop build under `python/`. The browser build has
@@ -42,6 +42,7 @@ history that survives restarts.
 | Recordings in the gallery | ✅ Done | Listed alongside snapshots with a real thumbnail and play badge (backfilled with ffmpeg for older recordings, falls back to a generic icon); opens externally (no in-app playback) |
 | History filters | ✅ Done | Recent 5 / Today / This Week / This Month |
 | Floating launcher | ✅ Done | Always on top; drag to reposition |
+| Global capture hotkeys | ✅ Done | Alt+P, Alt+Shift+P, Alt+V via `RegisterHotKey` - fire regardless of which application has focus. A combination another app already owns fails registration explicitly rather than silently, and is no longer advertised in the launcher's tooltips or hint label |
 | Edge docking | ✅ Done | Compact vertical strip |
 | System tray icon and menu | ✅ Done | Show launcher, open editor, exit |
 | A route back to the launcher from the editor | ✅ Done | Toolbar button beside About/Help, since the tray icon Windows hides by default was otherwise the only way back |
@@ -270,10 +271,15 @@ inside changes the words.
 | LCH-02 | Drag the launcher | It moves to the dragged position | ✅ |
 | LCH-03 | Drag to the right edge | It docks as a compact vertical strip | ✅ |
 | LCH-04 | Undock | It returns to the expanded layout | ✅ |
-| LCH-05 | Keyboard shortcuts on the launcher | Documented keys trigger their actions | ✅ |
+| LCH-05 | Alt+P / Alt+Shift+P / Alt+V as **system-wide** hotkeys (TA-211) | Fire the same action as their launcher buttons regardless of which application has focus - a `QShortcut` (window-focused only) does not satisfy this; see LCH-09 through LCH-13 | ✅ |
 | LCH-06 | Open the editor with no capture taken | Editor opens without an image and does not crash | ✅ |
 | LCH-07 | Launcher stays above other windows | Always-on-top flag is set | ✅ |
 | LCH-08 | Dock / position while on a secondary screen | Measures and docks against that screen, not always the primary | ✅ |
+| LCH-09 | Registering Alt+P / Alt+Shift+P / Alt+V via `RegisterHotKey` | All three succeed and are then reflected in the button tooltips and the hint label | ✅ |
+| LCH-10 | A registered hotkey firing (`WM_HOTKEY`) | Routes to the same action as pressing its launcher button - photo capture, full-screen capture, or the record toggle | ✅ |
+| LCH-11 | A combination another application already owns | `RegisterHotKey` fails for that one only; surfaced in the launcher's status line, and its tooltip/hint stop claiming it - the other two combinations are unaffected | ✅ |
+| LCH-12 | Closing the launcher | Releases every hotkey it registered (`UnregisterHotKey`), immediately - not only at process exit | ✅ |
+| LCH-13 | Pressing Alt+P with a browser (or any other application) focused, Test Assist unfocused | Captures - the mechanism LCH-09/LCH-10 prove is genuinely global, exercised for real | 🚫 |
 | DSP-12 | Drag onto a screen from its right side | Does not auto-dock on arrival - only within a narrow band of that screen's own right edge | ✅ |
 | DSP-13 | Widget's centre in a gap belonging to no screen | Resolves to the screen the widget's frame mostly overlaps, not the primary | ✅ |
 | DSP-14 | Dock, then undock | Returns to the same screen it was docked on | ✅ |
@@ -297,7 +303,7 @@ launcher back to the wrong display on undock.
 | KEY-03 | Ctrl+S | Save PNG | ✅ |
 | KEY-04 | Delete | Delete the selected annotation | ✅ |
 | KEY-05 | Shortcuts while typing a text annotation | Tool shortcuts are suppressed | ✅ |
-| KEY-06 | `help.html`'s shortcuts table vs. registered `QShortcut`s | The 13 editor-scope rows match exactly; the 3 launcher-only rows are documented but not mechanically pinned (see DESKTOP_STABILITY_MATRIX.md) | ✅ |
+| KEY-06 | `help.html`'s shortcuts table vs. registered `QShortcut`s | The 13 editor-scope rows match exactly. The 3 launcher-only rows (Alt+P, Alt+Shift+P, Alt+V) are no longer `QShortcut`s at all as of TA-211 - they are real global hotkeys (LCH-09/LCH-10) - so this specific cross-check does not apply to them; nothing here automatically pins help.html's copy against what actually registered (see DESKTOP_STABILITY_MATRIX.md and TA-213) | ✅ |
 
 ### 3.14 Application Lifecycle
 

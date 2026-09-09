@@ -28,6 +28,7 @@ from PySide6.QtWidgets import (
 )
 
 from capture import FrameRecorder, ScreenshotOverlay
+from global_hotkeys import MOD_ALT, MOD_SHIFT, GlobalHotkeyManager
 from screen_geometry import is_within_dock_band, screen_for_rect
 from update_check import UpdateChecker
 
@@ -47,11 +48,34 @@ class FloatingLauncher(QWidget):
     Right-click for a context menu with a Quit option.
     """
 
-    def __init__(self, editor, version: str = "0.0.0", parent: QWidget | None = None) -> None:
+    # Ids this process picks for its own hotkeys - arbitrary, but must be
+    # distinct from each other within this process.
+    _HOTKEY_PHOTO = 1
+    _HOTKEY_FULL_CAPTURE = 2
+    _HOTKEY_VIDEO = 3
+
+    def __init__(
+        self,
+        editor,
+        version: str = "0.0.0",
+        parent: QWidget | None = None,
+        register_global_hotkeys: bool = False,
+    ) -> None:
         super().__init__(parent)
         self._editor  = editor
         self._mode    = "photo"
         self._version = version
+        # Off by default: real Win32 RegisterHotKey calls are shared,
+        # global OS state - every test in this suite that just needs *a*
+        # launcher would otherwise fight over the literal same Alt+P/
+        # Alt+Shift+P/Alt+V combinations. main.py's real launcher passes
+        # True; the handful of tests in test_regressions.py that exercise
+        # the hotkey mechanism itself do too, deliberately.
+        self._register_global_hotkeys = register_global_hotkeys
+        self._hotkeys: GlobalHotkeyManager | None = None
+        self._hotkey_registered: dict[str, bool] = {
+            "photo": False, "full_capture": False, "video": False,
+        }
 
         # Window chrome
         self.setWindowFlags(
@@ -84,6 +108,7 @@ class FloatingLauncher(QWidget):
         self._build_ui()
         self._set_mode("photo")
         self._position_top_right()
+        self._register_hotkeys()
 
     # ── UI construction ──────────────────────────────────────────────────────
 
@@ -166,13 +191,17 @@ class FloatingLauncher(QWidget):
         self._btn_photo.setFixedSize(36, 36)
         self._btn_photo.setCheckable(True)
         self._btn_photo.setChecked(True)
-        self._btn_photo.setToolTip("Photo mode — capture screenshot (Alt+P)")
+        # The "(Alt+P)" suffix is appended only once _register_hotkeys()
+        # knows whether that combination actually registered - see
+        # _apply_hotkey_labels(). Advertising a shortcut that did not bind
+        # is exactly the bug (TA-211) this exists to not repeat.
+        self._btn_photo.setToolTip("Photo mode — capture screenshot")
         self._btn_photo.setStyleSheet(self._style_mode_icon(active=True))
 
         self._btn_video = QPushButton()
         self._btn_video.setFixedSize(36, 36)
         self._btn_video.setCheckable(True)
-        self._btn_video.setToolTip("Video mode — record screen (Alt+V)")
+        self._btn_video.setToolTip("Video mode — record screen")
         self._btn_video.setStyleSheet(self._style_mode_icon(active=False))
 
         self._btn_full_capture = QPushButton()
@@ -180,7 +209,7 @@ class FloatingLauncher(QWidget):
         self._btn_full_capture.setIcon(self._make_screen_icon("#b88d6f"))
         self._btn_full_capture.setIconSize(QSize(18, 18))
         self._btn_full_capture.setToolTip(
-            "Capture full primary screen including taskbar/time (Alt+Shift+P)"
+            "Capture full primary screen including taskbar/time"
         )
         self._btn_full_capture.setStyleSheet(self._style_mode_icon(active=False))
 
@@ -192,11 +221,14 @@ class FloatingLauncher(QWidget):
         action_row.addWidget(self._btn_video)
         float_layout.addLayout(action_row)
 
-        # Shortcut hint line below action row
-        hint = QLabel("Alt+P · capture   ·   Alt+V · record")
-        hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        hint.setStyleSheet("color:#7a6050; font-size:10px; background:transparent;")
-        float_layout.addWidget(hint)
+        # Shortcut hint line below action row - text filled in by
+        # _apply_hotkey_labels() once registration outcomes are known;
+        # starts empty and hidden rather than claiming anything upfront.
+        self._hint_lbl = QLabel("")
+        self._hint_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._hint_lbl.setStyleSheet("color:#7a6050; font-size:10px; background:transparent;")
+        self._hint_lbl.hide()
+        float_layout.addWidget(self._hint_lbl)
 
         # Recording timer (hidden until recording starts)
         self._rec_label = QLabel()
@@ -270,6 +302,90 @@ class FloatingLauncher(QWidget):
 
         self._dock_panel.hide()
         outer.addWidget(self._dock_panel)
+
+    # ── Global hotkeys ───────────────────────────────────────────────────────
+    #
+    # TA-211: Alt+P, Alt+Shift+P and Alt+V used to be advertised in these
+    # same tooltips and this hint label, and in help.html, while being bound
+    # to nothing anywhere - not even a QShortcut, which would have been the
+    # wrong tool anyway: the entire point of an always-on-top capture widget
+    # is capturing whatever else has focus, so a shortcut that only fires
+    # while Test Assist itself is focused does not satisfy that claim.
+
+    def _register_hotkeys(self) -> None:
+        if not self._register_global_hotkeys:
+            self._apply_hotkey_labels()
+            return
+
+        self._hotkeys = GlobalHotkeyManager(QApplication.instance(), self)
+        self._hotkeys.triggered.connect(self._on_global_hotkey)
+        QApplication.instance().aboutToQuit.connect(self._hotkeys.unregister_all)
+
+        attempts = [
+            ("photo", self._HOTKEY_PHOTO, MOD_ALT, ord("P"), "Alt+P"),
+            ("full_capture", self._HOTKEY_FULL_CAPTURE, MOD_ALT | MOD_SHIFT, ord("P"), "Alt+Shift+P"),
+            ("video", self._HOTKEY_VIDEO, MOD_ALT, ord("V"), "Alt+V"),
+        ]
+        failed_labels = []
+        for name, hotkey_id, modifiers, virtual_key, label in attempts:
+            ok = self._hotkeys.register(hotkey_id, modifiers, virtual_key)
+            self._hotkey_registered[name] = ok
+            if not ok:
+                failed_labels.append(label)
+
+        self._apply_hotkey_labels()
+        if failed_labels:
+            self._report_hotkey_registration_failure(failed_labels)
+
+    def _apply_hotkey_labels(self) -> None:
+        """Append "(Alt+P)" etc. to a tooltip only for a combination that
+        actually registered - never advertise one that did not, whether
+        because registration failed or was never attempted at all (most
+        test-constructed launchers skip it entirely; see
+        register_global_hotkeys)."""
+        if self._hotkey_registered["photo"]:
+            self._btn_photo.setToolTip(self._btn_photo.toolTip() + " (Alt+P)")
+        if self._hotkey_registered["full_capture"]:
+            self._btn_full_capture.setToolTip(self._btn_full_capture.toolTip() + " (Alt+Shift+P)")
+        if self._hotkey_registered["video"]:
+            self._btn_video.setToolTip(self._btn_video.toolTip() + " (Alt+V)")
+
+        hints = []
+        if self._hotkey_registered["photo"]:
+            hints.append("Alt+P · capture")
+        if self._hotkey_registered["video"]:
+            hints.append("Alt+V · record")
+        self._hint_lbl.setText("   ·   ".join(hints))
+        self._hint_lbl.setVisible(bool(hints))
+
+    def _report_hotkey_registration_failure(self, failed_labels: list[str]) -> None:
+        """Surfaced in the status line rather than a modal dialog - this
+        runs at construction time, before the window is necessarily even
+        shown, and a conflict with another application is not urgent
+        enough to interrupt every launch with a dialog to dismiss."""
+        combos = ", ".join(failed_labels)
+        plural = "s" if len(failed_labels) > 1 else ""
+        self._status_lbl.setText(
+            f"Global shortcut{plural} {combos} could not be registered - "
+            f"probably already used by another application. "
+            f"Test Assist still works from its own window."
+        )
+        self._status_lbl.show()
+
+    def _on_global_hotkey(self, hotkey_id: int) -> None:
+        if hotkey_id == self._HOTKEY_PHOTO:
+            self._set_mode("photo")
+            self._start_capture()
+        elif hotkey_id == self._HOTKEY_FULL_CAPTURE:
+            self._start_full_capture()
+        elif hotkey_id == self._HOTKEY_VIDEO:
+            self._set_mode("video")
+            self._toggle_recording()
+
+    def closeEvent(self, event) -> None:
+        if self._hotkeys is not None:
+            self._hotkeys.unregister_all()
+        super().closeEvent(event)
 
     # ── Action dispatch ───────────────────────────────────────────────────────
 
@@ -519,25 +635,14 @@ class FloatingLauncher(QWidget):
         act.triggered.connect(QApplication.instance().quit)
         menu.exec(event.globalPos())
 
-    def keyPressEvent(self, event) -> None:
-        key = event.key()
-        mods = event.modifiers()
-        if mods == Qt.KeyboardModifier.AltModifier and key == Qt.Key.Key_P:
-            self._set_mode("photo")
-            self._start_capture()
-            return
-        if (
-            mods
-            == (Qt.KeyboardModifier.AltModifier | Qt.KeyboardModifier.ShiftModifier)
-            and key == Qt.Key.Key_P
-        ):
-            self._start_full_capture()
-            return
-        if mods == Qt.KeyboardModifier.AltModifier and key == Qt.Key.Key_V:
-            self._set_mode("video")
-            self._toggle_recording()
-            return
-        super().keyPressEvent(event)
+    # Alt+P/Alt+Shift+P/Alt+V used to be handled here via keyPressEvent -
+    # removed (TA-211): a window-focused key handler cannot satisfy "capture
+    # whatever else has focus", which is the entire premise of these
+    # shortcuts, and once a combination is claimed via RegisterHotKey the
+    # OS delivers it as WM_HOTKEY instead of a normal key event to whichever
+    # window has focus anyway - this would never have fired for a
+    # successfully-registered hotkey even while Test Assist itself was
+    # focused. See _on_global_hotkey().
 
     # ── Custom background paint ────────────────────────────────────────────────
 

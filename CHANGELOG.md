@@ -27,6 +27,30 @@ release; only tagged versions appear as releases.
     only timing quirk, not a real defect in the mechanism itself: see
     `DESKTOP_STABILITY_MATRIX.md` for why `_handoff_to_existing()` calls
     `QCoreApplication.processEvents()` after writing its request.
+- **Alt+P, Alt+Shift+P and Alt+V were advertised everywhere and bound to
+  nothing (TA-211).** The photo button's tooltip said "(Alt+P)", the video
+  button's said "(Alt+V)", the full-capture button's said "(Alt+Shift+P)",
+  the launcher's own hint label repeated the first two, and `help.html`'s
+  shortcuts table listed all three — none of them was bound to anything
+  anywhere, not even a `QShortcut`. Found by a user pressing Alt+P while
+  working in a browser and nothing happening; it would not have worked with
+  Test Assist focused either. A `QShortcut` would have been the wrong fix
+  regardless — the entire point of an always-on-top capture widget is
+  capturing whatever else has focus, and a shortcut that only fires while
+  Test Assist itself is focused does not satisfy that. Fixed with real
+  Windows global hotkeys instead: `RegisterHotKey` via `ctypes`, dispatched
+  through a `QAbstractNativeEventFilter` watching for `WM_HOTKEY`, released
+  on close. A combination another application already owns now fails
+  registration explicitly — surfaced in the launcher's status line, and its
+  tooltip and hint text stop claiming it — rather than being silently
+  advertised anyway; the other two combinations are unaffected by one
+  conflicting. `register_global_hotkeys` defaults to off so the many other
+  tests that construct a launcher for unrelated reasons never touch this
+  shared, process-wide OS state; the real production launcher opts in.
+  Three existing tests that asserted only the tooltip *strings* — the
+  reason this shipped unbound and still read green — were replaced with
+  tests against the real binding: registration, dispatch via a synthetic
+  `WM_HOTKEY`, conflict handling, and release on close.
 - **The launcher's X quit the whole application, taking the tray icon down
   with it.** `_close_launcher()` called `QApplication.instance().quit()`, so
   closing the floating widget made `Show Launcher` unreachable and left

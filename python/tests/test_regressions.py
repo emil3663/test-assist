@@ -470,11 +470,163 @@ def test_launcher_build_ui_buttons_include_shortcut_hints(qapp) -> None:
 
     # Action button shows "Quick Capture" in photo mode
     assert launcher._btn_capture.text() == "Quick Capture"
-    # Mode icon buttons carry Alt shortcut hints in their tooltips
-    assert "Alt+P" in launcher._btn_photo.toolTip()
-    assert "Alt+V" in launcher._btn_video.toolTip()
-    assert "Alt+Shift+P" in launcher._btn_full_capture.toolTip()
+    # register_global_hotkeys defaults to False (see TA-211 tests below for
+    # why - real, shared OS state that every other launcher-constructing
+    # test in this suite would otherwise fight over) - so nothing is
+    # actually bound here, and the tooltips must not claim otherwise.
+    assert "Alt+P" not in launcher._btn_photo.toolTip()
+    assert "Alt+V" not in launcher._btn_video.toolTip()
+    assert "Alt+Shift+P" not in launcher._btn_full_capture.toolTip()
     launcher.close()
+
+
+# ── TA-211: global hotkeys ───────────────────────────────────────────────────
+#
+# Alt+P, Alt+Shift+P and Alt+V were advertised in these same tooltips, the
+# hint label below the action row, and help.html's shortcut table, while
+# bound to nothing anywhere - the previous version of the test just above
+# this section asserted the tooltip *strings*, which is exactly how a claim
+# with nothing behind it shipped and stayed green. Every test below
+# exercises the real Win32 RegisterHotKey/UnregisterHotKey API - no
+# substitution - since that binding, not a label, is the actual claim.
+
+def test_TA211_global_hotkeys_register_and_are_advertised(qapp) -> None:
+    launcher = FloatingLauncher(_EditorStub(), register_global_hotkeys=True)
+    try:
+        assert launcher._hotkey_registered == {
+            "photo": True, "full_capture": True, "video": True,
+        }
+        assert "(Alt+P)" in launcher._btn_photo.toolTip()
+        assert "(Alt+Shift+P)" in launcher._btn_full_capture.toolTip()
+        assert "(Alt+V)" in launcher._btn_video.toolTip()
+        assert "Alt+P" in launcher._hint_lbl.text()
+        assert "Alt+V" in launcher._hint_lbl.text()
+    finally:
+        launcher.close()
+
+
+def test_TA211_global_hotkey_dispatch_routes_to_the_right_action(qapp) -> None:
+    """The actual binding: a synthetic WM_HOTKEY (not a real OS-delivered
+    key event, which this suite has no way to inject) must reach the same
+    actions the old window-focused keyPressEvent used to call directly."""
+    import ctypes
+    from ctypes import wintypes
+
+    from global_hotkeys import WM_HOTKEY
+
+    launcher = FloatingLauncher(_EditorStub(), register_global_hotkeys=True)
+    try:
+        calls: list[str] = []
+        launcher._start_capture = lambda: calls.append("photo")
+        launcher._start_full_capture = lambda: calls.append("full_capture")
+        launcher._toggle_recording = lambda: calls.append("video")
+
+        for hotkey_id, expected_mode, expected_call in [
+            (launcher._HOTKEY_PHOTO, "photo", "photo"),
+            (launcher._HOTKEY_FULL_CAPTURE, "photo", "full_capture"),
+            (launcher._HOTKEY_VIDEO, "video", "video"),
+        ]:
+            msg = wintypes.MSG()
+            msg.message = WM_HOTKEY
+            msg.wParam = hotkey_id
+            launcher._hotkeys.nativeEventFilter(b"windows_generic_MSG", ctypes.addressof(msg))
+            assert calls[-1] == expected_call
+            assert launcher._mode == expected_mode
+    finally:
+        launcher.close()
+
+
+def test_TA211_an_unrelated_native_message_is_ignored(qapp) -> None:
+    """The event filter must not react to every native message - only
+    WM_HOTKEY, and only for a registered id."""
+    import ctypes
+    from ctypes import wintypes
+
+    launcher = FloatingLauncher(_EditorStub(), register_global_hotkeys=True)
+    try:
+        calls: list[str] = []
+        launcher._start_capture = lambda: calls.append("photo")
+
+        msg = wintypes.MSG()
+        msg.message = 0x0010  # WM_CLOSE, not WM_HOTKEY
+        msg.wParam = launcher._HOTKEY_PHOTO
+        handled, _ = launcher._hotkeys.nativeEventFilter(b"windows_generic_MSG", ctypes.addressof(msg))
+
+        assert calls == []
+        assert handled is False
+    finally:
+        launcher.close()
+
+
+def test_TA211_a_failed_registration_is_surfaced_and_not_advertised(qapp) -> None:
+    """RegisterHotKey fails when another application already owns the
+    combination - simulated here by claiming Alt+P from the test itself
+    before construction. The failure must be visible (not silent) and the
+    tooltip/hint must stop claiming that specific shortcut, without
+    affecting the other two that still registered fine."""
+    import ctypes
+
+    from global_hotkeys import MOD_ALT, MOD_NOREPEAT
+
+    user32 = ctypes.windll.user32
+    claim_id = 0xF00D
+    assert user32.RegisterHotKey(None, claim_id, MOD_ALT | MOD_NOREPEAT, ord("P")), \
+        "test setup: could not claim Alt+P to simulate a conflicting application"
+
+    try:
+        launcher = FloatingLauncher(_EditorStub(), register_global_hotkeys=True)
+        try:
+            assert launcher._hotkey_registered["photo"] is False
+            assert launcher._hotkey_registered["full_capture"] is True, \
+                "a conflict on one combination must not block the other two"
+            assert launcher._hotkey_registered["video"] is True
+
+            assert "Alt+P" not in launcher._btn_photo.toolTip()
+            assert "(Alt+Shift+P)" in launcher._btn_full_capture.toolTip()
+            assert "Alt+P" not in launcher._hint_lbl.text()
+
+            assert launcher._status_lbl.isVisible()
+            assert "Alt+P" in launcher._status_lbl.text()
+        finally:
+            launcher.close()
+    finally:
+        user32.UnregisterHotKey(None, claim_id)
+
+
+def test_TA211_hotkeys_are_released_on_close(qapp) -> None:
+    """A hotkey left registered after the launcher is gone would permanently
+    deny that combination to every other application until the process
+    exits - close() must release it immediately, not just at process exit."""
+    import ctypes
+
+    from global_hotkeys import MOD_ALT, MOD_NOREPEAT
+
+    launcher = FloatingLauncher(_EditorStub(), register_global_hotkeys=True)
+    assert launcher._hotkey_registered["photo"] is True
+    launcher.close()
+
+    user32 = ctypes.windll.user32
+    probe_id = 0xF00E
+    reclaimed = user32.RegisterHotKey(None, probe_id, MOD_ALT | MOD_NOREPEAT, ord("P"))
+    try:
+        assert reclaimed, "Alt+P was not released when the launcher closed"
+    finally:
+        if reclaimed:
+            user32.UnregisterHotKey(None, probe_id)
+
+
+def test_TA211_hotkeys_are_not_touched_without_opting_in(qapp) -> None:
+    """register_global_hotkeys defaults to False - the many other tests in
+    this suite that construct a launcher for unrelated reasons must never
+    reach into real, process-wide OS hotkey state."""
+    launcher = FloatingLauncher(_EditorStub())
+    try:
+        assert launcher._hotkeys is None
+        assert not any(launcher._hotkey_registered.values())
+        assert "Alt+P" not in launcher._btn_photo.toolTip()
+        assert not launcher._hint_lbl.isVisible()
+    finally:
+        launcher.close()
 
 
 def test_launcher_dock_right_moves_to_expected_x_position(qapp) -> None:
@@ -752,23 +904,6 @@ def test_open_folder_opens_the_frame_folder_itself_when_encoding_fell_back(qapp,
     launcher._btn_open_folder.click()
 
     assert [Path(p) for p in opened] == [frames_dir]
-    launcher.close()
-
-
-def test_launcher_keyPressEvent_alt_v_toggles_recording_mode(qapp) -> None:
-    launcher = FloatingLauncher(_EditorStub())
-    launcher.show()
-    qapp.processEvents()
-
-    launcher.keyPressEvent(_key_event(Qt.Key.Key_V, Qt.KeyboardModifier.AltModifier))
-
-    assert launcher._mode == "video"
-    assert launcher._rec_timer.isActive()
-    # Action button text changes to stop indicator while recording
-    assert "Stop" in launcher._btn_capture.text()
-
-    launcher.keyPressEvent(_key_event(Qt.Key.Key_V, Qt.KeyboardModifier.AltModifier))
-    assert not launcher._rec_timer.isActive()
     launcher.close()
 
 
@@ -1105,28 +1240,6 @@ def test_update_check_button_click_disables_it_until_the_result_arrives(qapp, mo
 
     assert not launcher._btn_check_updates.isEnabled(), "must disable immediately, before any result arrives"
     assert len(calls) == 1
-    launcher.close()
-
-
-def test_launcher_keyPressEvent_alt_shift_p_triggers_full_capture(qapp) -> None:
-    launcher = FloatingLauncher(_EditorStub())
-    launcher.show()
-    qapp.processEvents()
-
-    called = {"count": 0}
-
-    def _fake_full_capture() -> None:
-        called["count"] += 1
-
-    launcher._start_full_capture = _fake_full_capture  # type: ignore[method-assign]
-    launcher.keyPressEvent(
-        _key_event(
-            Qt.Key.Key_P,
-            Qt.KeyboardModifier.AltModifier | Qt.KeyboardModifier.ShiftModifier,
-        )
-    )
-
-    assert called["count"] == 1
     launcher.close()
 
 
