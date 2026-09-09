@@ -1346,6 +1346,33 @@ that will actually ship.
   ignores this* on a session that accepts real mouse input from Windows
   itself, not another "try it somewhere more interactive" attempt.
 
+  **Root cause found and confirmed, 2026-09-09, per
+  `docs/ta228-synthetic-input-investigation-brief.md`.** Not Qt-specific,
+  not this project's code, not the environment: a raw `SendInput` mouse
+  *move* was confirmed reaching the OS (`GetCursorPos` moved to the exact
+  target), but a raw `SendInput` button click at the same point had zero
+  effect against a from-scratch, non-Qt Tkinter test window — pinning the
+  block to button-press delivery specifically, system-wide, independent of
+  Qt entirely. Traced to `XMouseButtonControl.exe` (X-Mouse Button Control
+  2.20.5), a third-party mouse-button remapper whose entire mechanism is a
+  system-wide low-level mouse hook on button press/release events, not
+  movement — exactly the split measured. Confirmed directly, with the
+  user's go-ahead: stopping it made the identical `SendInput` click, and
+  `pywinauto`'s own `click_input()`, work immediately; restarted afterward.
+  Re-ran the real `pytest tests_e2e` suite with it stopped: **check 1
+  passes, check 2 now genuinely passes for the first time (Quick Capture
+  produces a real overlay, no caveat), check 3 fails — consistently,
+  re-run twice — for a new and different reason.** Input delivery is no
+  longer the blocker (check 2 proves that), so check 3's failure now looks
+  like a real reproduction of this ticket's own still-unconfirmed
+  minimize-toggle hypothesis, or a test-timing artifact — not chased
+  further here per the investigation brief's explicit scope boundary; see
+  `docs/BUILD_LOG.md`'s TA-228 follow-up entry for the full account and
+  flag a new ticket before investigating check 3 further. Acceptance
+  criteria: checks 1 and 2 now met for real; check 3 still open, but for
+  an app-behavior reason rather than an infrastructure one. CI-vs-manual
+  decision unchanged.
+
 ### Gate A — Code complete
 - TA-201, TA-202, TA-203 merged
 - Suite green, no skips, no test opens a socket
