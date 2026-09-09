@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PySide6.QtCore import QPoint, QSize, Qt, QTimer, QUrl
+from PySide6.QtCore import QPoint, QRectF, QSize, Qt, QTimer, QUrl
 from PySide6.QtGui import (
     QBrush,
     QColor,
@@ -942,16 +942,22 @@ class FloatingLauncher(QWidget):
 
     @staticmethod
     def _make_update_icon(color: str = "#f8d3ad") -> QIcon:
+        """A circular refresh arrow - the standard visual convention for
+        "check for updates". The previous icon (a plain arrow into a
+        tray) was a generic download shape with no such convention behind
+        it, indistinguishable from its neighbours at 14x14 (TA-218)."""
         pix = QPixmap(14, 14)
         pix.fill(Qt.GlobalColor.transparent)
         p = QPainter(pix)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
         pen = QPen(QColor(color), 1.6)
+        pen.setCapStyle(Qt.PenCapStyle.RoundCap)
         p.setPen(pen)
-        p.drawLine(7, 2, 7, 9)
-        p.drawLine(4, 6, 7, 9)
-        p.drawLine(10, 6, 7, 9)
-        p.drawLine(3, 12, 11, 12)
+        p.setBrush(Qt.BrushStyle.NoBrush)
+        p.drawArc(QRectF(2, 2, 10, 10), 20 * 16, 280 * 16)
+        p.setBrush(QColor(color))
+        p.setPen(Qt.PenStyle.NoPen)
+        p.drawPolygon(QPolygonF([QPoint(12, 1), QPoint(14, 6), QPoint(9, 5)]))
         p.end()
         return QIcon(pix)
 

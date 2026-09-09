@@ -1193,6 +1193,60 @@ def test_show_launcher_button_routes_through_restore_not_show(qapp, monkeypatch)
     editor.close()
 
 
+def test_TA218_check_updates_button_uses_the_shared_small_icon_button_style(qapp) -> None:
+    editor = EditorWindow()
+    assert editor._btn_check_updates.property("smallIconButton") is True
+    editor.close()
+
+
+def test_TA218_check_updates_button_is_a_noop_without_a_wired_callback(qapp) -> None:
+    """A standalone EditorWindow (as most tests construct one) has nothing
+    wired yet - clicking must not raise."""
+    editor = EditorWindow()
+    editor._btn_check_updates.click()
+    editor.close()
+
+
+def test_TA218_check_updates_button_reaches_the_launchers_own_checker(qapp) -> None:
+    """Check for Updates existed only on the launcher - a user working
+    from the Editor had no path to it without switching back. Reuses the
+    launcher's own _check_for_updates() (and its one UpdateChecker/
+    QNetworkAccessManager) rather than the Editor building a second
+    network stack."""
+    from launcher import FloatingLauncher
+
+    editor = EditorWindow()
+    launcher = FloatingLauncher(editor)
+
+    calls: list[str] = []
+    launcher._check_for_updates = lambda: calls.append("checked")
+    editor.set_check_updates_callback(launcher._check_for_updates)
+
+    editor._btn_check_updates.click()
+
+    assert calls == ["checked"]
+    editor.close()
+    launcher.close()
+
+
+def test_TA218_update_icon_is_not_the_old_plain_arrow_shape(qapp) -> None:
+    """Pins that the icon-drawing code actually changed to something other
+    than the old plain arrow-into-a-tray glyph - not a claim that the new
+    shape reads as "refresh" at a glance, which is a human judgement this
+    suite cannot make (see TA-206 for the same kind of limit)."""
+    from launcher import FloatingLauncher
+
+    icon = FloatingLauncher._make_update_icon()
+    pixmap = icon.pixmap(14, 14)
+    image = pixmap.toImage()
+
+    old_shape_pixels = {(7, 2), (7, 9), (3, 12), (11, 12)}  # the old icon's line endpoints
+    old_shape_survives = all(
+        image.pixelColor(x, y).alpha() > 0 for x, y in old_shape_pixels
+    )
+    assert not old_shape_survives, "the update icon still matches the old plain-arrow shape's pixels"
+
+
 def test_TA220_bring_forward_toggles_minimize_when_already_active(qapp) -> None:
     """Clicking the TA icon while the Editor is already open and focused
     used to be a no-op re-raise; it must minimize instead, and a further

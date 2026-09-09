@@ -68,6 +68,10 @@ def _setup_tray(app: QApplication, launcher: FloatingLauncher, editor: EditorWin
     # create an import cycle (launcher.py already takes an EditorWindow
     # instance without importing editor.py for it).
     editor.set_show_launcher_callback(launcher.restore)
+    # Same reasoning (TA-218): reuses the launcher's own _check_for_updates()
+    # and its one UpdateChecker/QNetworkAccessManager rather than the editor
+    # building a second network stack.
+    editor.set_check_updates_callback(launcher._check_for_updates)
 
     tray = QSystemTrayIcon(_make_tray_icon(), app)
     tray.setToolTip("Test Assist")

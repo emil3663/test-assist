@@ -103,6 +103,13 @@ class EditorWindow(QMainWindow):
         # the tray - editor.py takes a plain callable rather than importing
         # FloatingLauncher, which would create an import cycle.
         self._show_launcher_callback: Callable[[], None] | None = None
+        # Same reasoning, for Check for Updates (TA-218): it previously
+        # existed only on the launcher, so a user working from the Editor
+        # had no path to it without switching back. Wired to the
+        # launcher's own _check_for_updates() (and its one shared
+        # UpdateChecker/QNetworkAccessManager, not a duplicate) rather
+        # than the Editor building its own network stack.
+        self._check_updates_callback: Callable[[], None] | None = None
 
         scroll = QScrollArea()
         scroll.setWidget(self._canvas)
@@ -235,6 +242,17 @@ class EditorWindow(QMainWindow):
         """
         self._show_launcher_callback = callback
 
+    def set_check_updates_callback(self, callback: Callable[[], None]) -> None:
+        """Wire up the editor's "Check for Updates" button (TA-218) -
+        Check for Updates existed only on the launcher, so a user working
+        from the Editor had no path to it without switching back. Takes a
+        plain callable (in practice the launcher's own
+        _check_for_updates(), reusing its one UpdateChecker rather than
+        building a second network stack) so editor.py never has to
+        import launcher.py.
+        """
+        self._check_updates_callback = callback
+
     # ── Top tools bar ─────────────────────────────────────────────────────────
 
     def _build_tools_bar(self) -> QFrame:
@@ -330,6 +348,18 @@ class EditorWindow(QMainWindow):
         self._btn_open_image.setToolTip("Open Image…")
         self._btn_open_image.clicked.connect(self._open_image_file)
         layout.addWidget(self._btn_open_image, 0, Qt.AlignmentFlag.AlignVCenter)
+
+        # Check for Updates button — previously reachable only from the
+        # launcher, so a user working from the Editor had no path to it
+        # without switching back (TA-218). No-op until
+        # set_check_updates_callback() is wired, same as Show Launcher.
+        self._btn_check_updates = QPushButton("🔄")
+        self._btn_check_updates.setObjectName("btn_check_updates")
+        self._btn_check_updates.setProperty("smallIconButton", True)
+        self._btn_check_updates.setFixedSize(28, 28)
+        self._btn_check_updates.setToolTip("Check for Updates")
+        self._btn_check_updates.clicked.connect(self._on_check_updates_clicked)
+        layout.addWidget(self._btn_check_updates, 0, Qt.AlignmentFlag.AlignVCenter)
 
         # Show Launcher button — beside About and Help, far right of toolbar.
         # Once the launcher is hidden (its own X, or the tray), this is the
@@ -692,6 +722,10 @@ class EditorWindow(QMainWindow):
     def _on_show_launcher_clicked(self) -> None:
         if self._show_launcher_callback is not None:
             self._show_launcher_callback()
+
+    def _on_check_updates_clicked(self) -> None:
+        if self._check_updates_callback is not None:
+            self._check_updates_callback()
 
     def _open_image_file(self) -> None:
         """TA-214: the discoverable control for bringing an external file
