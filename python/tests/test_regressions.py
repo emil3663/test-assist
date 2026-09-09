@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 
+import pytest
 from PySide6.QtCore import QEvent, QPoint, QPointF, QRect, Qt
 from PySide6.QtGui import QColor, QKeyEvent, QPixmap
 from PySide6.QtWidgets import QApplication, QDialog, QFrame, QLabel, QMessageBox, QPushButton, QTabWidget, QWidget
@@ -494,6 +496,7 @@ def test_launcher_build_ui_buttons_include_shortcut_hints(qapp) -> None:
 # exercises the real Win32 RegisterHotKey/UnregisterHotKey API - no
 # substitution - since that binding, not a label, is the actual claim.
 
+@pytest.mark.skipif(sys.platform != "win32", reason="RegisterHotKey is a Win32 API")
 def test_TA211_global_hotkeys_register_and_are_advertised(qapp) -> None:
     launcher = FloatingLauncher(_EditorStub(), register_global_hotkeys=True)
     try:
@@ -509,6 +512,7 @@ def test_TA211_global_hotkeys_register_and_are_advertised(qapp) -> None:
         launcher.close()
 
 
+@pytest.mark.skipif(sys.platform != "win32", reason="RegisterHotKey is a Win32 API")
 def test_TA211_global_hotkey_dispatch_routes_to_the_right_action(qapp) -> None:
     """The actual binding: a synthetic WM_HOTKEY (not a real OS-delivered
     key event, which this suite has no way to inject) must reach the same
@@ -540,6 +544,7 @@ def test_TA211_global_hotkey_dispatch_routes_to_the_right_action(qapp) -> None:
         launcher.close()
 
 
+@pytest.mark.skipif(sys.platform != "win32", reason="RegisterHotKey is a Win32 API")
 def test_TA211_an_unrelated_native_message_is_ignored(qapp) -> None:
     """The event filter must not react to every native message - only
     WM_HOTKEY, and only for a registered id."""
@@ -615,6 +620,7 @@ def test_TA217_global_hotkey_closes_an_open_about_dialog_before_capturing(qapp, 
     launcher.close()
 
 
+@pytest.mark.skipif(sys.platform != "win32", reason="RegisterHotKey is a Win32 API")
 def test_TA211_a_failed_registration_is_surfaced_and_not_advertised(qapp) -> None:
     """RegisterHotKey fails when another application already owns the
     combination - simulated here by claiming Alt+P from the test itself
@@ -650,6 +656,7 @@ def test_TA211_a_failed_registration_is_surfaced_and_not_advertised(qapp) -> Non
         user32.UnregisterHotKey(None, claim_id)
 
 
+@pytest.mark.skipif(sys.platform != "win32", reason="RegisterHotKey is a Win32 API")
 def test_TA211_hotkeys_are_released_on_close(qapp) -> None:
     """A hotkey left registered after the launcher is gone would permanently
     deny that combination to every other application until the process
