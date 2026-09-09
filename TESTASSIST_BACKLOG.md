@@ -1264,6 +1264,52 @@ that will actually ship.
   Complements rather than replaces TA-220's and TA-217's still-open
   investigate-first gaps; a passing check here is what would let those
   finally close without waiting on a manual pass.
+- **Verified:** ⚠️ 2026-09-09, per `docs/ta227-228-e2e-testing-brief.md` —
+  partially, honestly. `pywinauto` added (`python/tests_e2e/requirements.txt`,
+  kept out of `python/requirements.txt`); new `python/tests_e2e/` lane with
+  the three checks, kept out of the default `pytest`/`pytest -q` run via
+  `pytest.ini`'s new `testpaths = tests`. **Decision recorded (not
+  defaulted into):** stays local/manual, not CI-wired — see
+  `python/tests_e2e/README.md` for the full reasoning, including a harder
+  finding than the ticket's own cost argument (below).
+  Check 1 (launch, window appears) is genuinely verified both ways: passes
+  against the real build, and errors against a deliberately corrupted exe
+  (`CreateProcess` / "not a valid Win32 application") — a real, meaningful
+  failure, not a skip (a *missing* exe correctly skips instead, a
+  different and correct case).
+  **Checks 2 and 3 could not be verified end-to-end in this environment.**
+  While building this lane, no synthetic input mechanism tried — UI
+  Automation's Invoke pattern, `pywinauto`'s `click_input()` (real OS
+  `SendInput`), and the `win32` backend's direct `PostMessage`-based click
+  — had any observable effect on the real, correctly-identified running
+  app, each checked via an independent real signal (a
+  `TESTASSIST_DEBUG=1` log line that never appeared; a UI-Automation
+  checkbox toggle-state read-back that never changed). Ruled out, not
+  assumed: process DPI awareness (set explicitly), click coordinates
+  (confirmed landing on the right window via `WindowFromPoint`), desktop/
+  session attachment (`OpenInputDesktop` succeeded, session id matched the
+  active console session), and a UIPI mismatch (`whoami /groups` confirmed
+  Medium integrity, the normal, unelevated level, for the calling
+  process). Both tests are written correctly — verified to fail cleanly
+  within their own timeouts (not hang) when input has no effect — but
+  "passes against the current build" could not be shown here. This is the
+  same class of hardware/environment gap as TA-220/TA-217/TA-223/TA-225,
+  not a flaw in the tests, and is exactly why the CI-vs-manual decision
+  above went further than the ticket's own cost argument: GitHub Actions'
+  hosted Windows runners are a similarly non-interactive automated
+  context, so wiring this into CI before confirming synthetic input
+  actually works there would risk building on the same false assumption
+  that just failed here. Needs running once on a real, interactively-used
+  Windows machine to confirm checks 2 and 3 for real. Full account in
+  `docs/BUILD_LOG.md`'s TA-228 entry.
+  One small production change made in service of this lane, not a UX
+  change: `launcher.py`'s `_btn_open_editor` (icon-only, previously
+  indistinguishable from its unlabeled siblings to UI Automation) now has
+  `setAccessibleName("Open Editor")`, needed for check 3 to reliably find
+  it from outside the process — also a real accessibility improvement
+  (screen readers now announce it), not solely a test hook. Required a
+  rebuild to include; not a new numbered `rc`, since nothing else
+  app-facing changed.
 
 ### Gate A — Code complete
 - TA-201, TA-202, TA-203 merged
