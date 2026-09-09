@@ -17,7 +17,6 @@ from PySide6.QtWidgets import (
     QComboBox,
     QColorDialog,
     QDialog,
-    QDockWidget,
     QFileDialog,
     QFrame,
     QGridLayout,
@@ -106,16 +105,31 @@ class EditorWindow(QMainWindow):
         scroll.setWidgetResizable(False)
         self._scroll = scroll
 
-        # Central widget: tools bar at top + canvas below
+        # Central widget: tool row, settings row, then canvas beside the
+        # controls panel. Both top rows are full window width - a real
+        # QDockWidget for the controls panel would claim its own 185px
+        # ahead of the central widget's own layout, leaving no way for a
+        # row inside that central widget to ever reach full window width;
+        # a plain QWidget panel placed in the same QHBoxLayout as the
+        # canvas does not have that effect. The panel had
+        # NoDockWidgetFeatures set anyway (no float/move/close), so this
+        # changes nothing behaviourally.
         central = QWidget()
         central_layout = QVBoxLayout(central)
         central_layout.setContentsMargins(0, 0, 0, 0)
         central_layout.setSpacing(0)
         central_layout.addWidget(self._build_tools_bar())
-        central_layout.addWidget(scroll, 1)
+        central_layout.addWidget(self._build_settings_bar())
+
+        body = QHBoxLayout()
+        body.setContentsMargins(0, 0, 0, 0)
+        body.setSpacing(0)
+        body.addWidget(scroll, 1)
+        body.addWidget(self._build_right_panel())
+        central_layout.addLayout(body)
+
         self.setCentralWidget(central)
 
-        self._build_right_dock()
         self._connect_signals()
         self._register_shortcuts()
         self._load_history()
@@ -248,15 +262,133 @@ class EditorWindow(QMainWindow):
 
         return bar
 
-    # ── Right controls dock ───────────────────────────────────────────────────
+    # ── Settings bar (zoom, style, export) ──────────────────────────────────────
 
-    def _build_right_dock(self) -> None:
-        dock = QDockWidget("Controls", self)
-        dock.setFeatures(QDockWidget.DockWidgetFeature.NoDockWidgetFeatures)
-        dock.setFixedWidth(185)
+    def _build_settings_bar(self) -> QFrame:
+        """Zoom, stroke, arrow style, fill opacity and the export actions.
 
-        container = QWidget()
-        layout = QVBoxLayout(container)
+        Moved here from the right dock: at a fixed 185px, that dock had to
+        fit Edit, all of this, and History, which squeezed History in
+        particular. This is a full-width row rather than being squeezed
+        into the gap between the tool row and the About/Help buttons on the
+        row above - that gap is under 400px on a wide window and zero at
+        the 960px minimum window width, and these controls need close to
+        the full width to lay out horizontally at all.
+        """
+        bar = QFrame()
+        bar.setObjectName("settings_bar")
+        bar.setStyleSheet(
+            f"QFrame#settings_bar {{ background-color: {BG_800};"
+            f" border-bottom: 1px solid {LINE}; }}"
+        )
+        bar.setFixedHeight(40)
+
+        layout = QHBoxLayout(bar)
+        layout.setContentsMargins(10, 5, 10, 5)
+        layout.setSpacing(5)
+
+        # ── Zoom ──────────────────────────────────────────────────────────
+        # No text label: at this width, a tooltip on each control carries the
+        # meaning that a "Zoom"/"Stroke"/"Arrow"/"Fill" label used to - the
+        # same tradeoff the launcher's own icon buttons already make.
+        self._btn_zoom_out = QPushButton("-")
+        self._btn_zoom_out.setObjectName("btn_zoom_out")
+        self._btn_zoom_out.setProperty("smallIconButton", True)
+        self._btn_zoom_out.setFixedSize(22, 22)
+        self._btn_zoom_out.setToolTip("Zoom out")
+        self._zoom_slider = QSlider(Qt.Orientation.Horizontal)
+        self._zoom_slider.setRange(25, 300)
+        self._zoom_slider.setValue(100)
+        self._zoom_slider.setFixedWidth(60)
+        self._zoom_slider.setToolTip("Zoom")
+        self._btn_zoom_in = QPushButton("+")
+        self._btn_zoom_in.setObjectName("btn_zoom_in")
+        self._btn_zoom_in.setProperty("smallIconButton", True)
+        self._btn_zoom_in.setFixedSize(22, 22)
+        self._btn_zoom_in.setToolTip("Zoom in")
+        self._zoom_pct = QLabel("100 %")
+        self._zoom_pct.setFixedWidth(38)
+        self._btn_fit = QPushButton("Fit")
+        self._btn_fit.setObjectName("btn_fit")
+        self._btn_fit.setProperty("smallIconButton", True)
+        self._btn_fit.setFixedSize(30, 22)
+        self._btn_fit.setToolTip("Fit to window")
+        layout.addWidget(self._btn_zoom_out)
+        layout.addWidget(self._zoom_slider)
+        layout.addWidget(self._btn_zoom_in)
+        layout.addWidget(self._zoom_pct)
+        layout.addWidget(self._btn_fit)
+
+        layout.addWidget(self._vseparator())
+
+        # ── Stroke size ───────────────────────────────────────────────────
+        self._size_slider = QSlider(Qt.Orientation.Horizontal)
+        self._size_slider.setRange(1, 20)
+        self._size_slider.setValue(3)
+        self._size_slider.setFixedWidth(55)
+        self._size_slider.setToolTip("Stroke size")
+        self._size_lbl = QLabel("3 px")
+        self._size_lbl.setFixedWidth(32)
+        layout.addWidget(self._size_slider)
+        layout.addWidget(self._size_lbl)
+
+        layout.addWidget(self._vseparator())
+
+        # ── Arrow style ───────────────────────────────────────────────────
+        self._arrow_style_combo = QComboBox()
+        self._arrow_style_combo.addItem("Classic", "classic")
+        self._arrow_style_combo.addItem("Double", "double")
+        self._arrow_style_combo.addItem("Dashed", "dashed")
+        self._arrow_style_combo.setCurrentIndex(0)
+        self._arrow_style_combo.setFixedWidth(126)  # fits "Classic"/"Dashed" without eliding
+        self._arrow_style_combo.setToolTip("Arrow style")
+        layout.addWidget(self._arrow_style_combo)
+
+        layout.addWidget(self._vseparator())
+
+        # ── Fill opacity ──────────────────────────────────────────────────
+        self._opacity_slider = QSlider(Qt.Orientation.Horizontal)
+        self._opacity_slider.setRange(0, 100)
+        self._opacity_slider.setValue(30)
+        self._opacity_slider.setFixedWidth(55)
+        self._opacity_slider.setToolTip("Highlight fill opacity")
+        self._opacity_lbl = QLabel("30 %")
+        self._opacity_lbl.setFixedWidth(32)
+        layout.addWidget(self._opacity_slider)
+        layout.addWidget(self._opacity_lbl)
+
+        layout.addStretch(1)
+
+        # ── Export ────────────────────────────────────────────────────────
+        self._btn_copy = QPushButton("Copy")
+        self._btn_copy.setFixedHeight(26)
+        self._btn_copy.setToolTip("Copy annotated image to clipboard")
+        layout.addWidget(self._btn_copy)
+
+        self._btn_export_json = QPushButton("Export")
+        self._btn_export_json.setFixedHeight(26)
+        self._btn_export_json.setToolTip("Export annotations as JSON")
+        layout.addWidget(self._btn_export_json)
+
+        # Kept visually primary via the accent-filled btn_primary style and
+        # a taller, wider button than the strip around it - this is still
+        # the main action of the screen, not just another button in a row.
+        self._btn_save_png = QPushButton("💾  Save PNG")
+        self._btn_save_png.setObjectName("btn_primary")
+        self._btn_save_png.setFixedHeight(28)
+        layout.addWidget(self._btn_save_png)
+
+        return bar
+
+    # ── Right controls panel ─────────────────────────────────────────────────
+
+    def _build_right_panel(self) -> QWidget:
+        panel = QWidget()
+        panel.setObjectName("right_panel")
+        panel.setFixedWidth(185)
+        panel.setStyleSheet(f"QWidget#right_panel {{ border-left: 1px solid {LINE}; }}")
+
+        layout = QVBoxLayout(panel)
         layout.setSpacing(5)
         layout.setContentsMargins(10, 10, 10, 10)
 
@@ -289,91 +421,11 @@ class EditorWindow(QMainWindow):
 
         layout.addWidget(self._separator())
 
-        zoom_row = QHBoxLayout()
-        zoom_row.addWidget(QLabel("Zoom"))
-        self._btn_zoom_out = QPushButton("-")
-        self._btn_zoom_out.setObjectName("btn_zoom_out")
-        self._btn_zoom_out.setProperty("smallIconButton", True)
-        self._btn_zoom_out.setFixedSize(24, 24)
-        self._btn_zoom_in = QPushButton("+")
-        self._btn_zoom_in.setObjectName("btn_zoom_in")
-        self._btn_zoom_in.setProperty("smallIconButton", True)
-        self._btn_zoom_in.setFixedSize(24, 24)
-        self._zoom_slider = QSlider(Qt.Orientation.Horizontal)
-        self._zoom_slider.setRange(25, 300)
-        self._zoom_slider.setValue(100)
-        self._zoom_pct = QLabel("100 %")
-        self._zoom_pct.setFixedWidth(48)
-        self._btn_fit = QPushButton("Fit")
-        self._btn_fit.setObjectName("btn_fit")
-        self._btn_fit.setProperty("smallIconButton", True)
-        self._btn_fit.setFixedHeight(24)
-        zoom_row.addWidget(self._btn_zoom_out)
-        zoom_row.addWidget(self._zoom_slider, 1)
-        zoom_row.addWidget(self._btn_zoom_in)
-        zoom_row.addWidget(self._zoom_pct)
-        zoom_row.addWidget(self._btn_fit)
-        layout.addLayout(zoom_row)
-
-        layout.addWidget(self._separator())
-
-        # ── Stroke size ───────────────────────────────────────────────────
-        size_row = QHBoxLayout()
-        size_row.addWidget(QLabel("Stroke"))
-        self._size_lbl = QLabel("3 px")
-        self._size_lbl.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-        size_row.addWidget(self._size_lbl)
-        layout.addLayout(size_row)
-
-        self._size_slider = QSlider(Qt.Orientation.Horizontal)
-        self._size_slider.setRange(1, 20)
-        self._size_slider.setValue(3)
-        layout.addWidget(self._size_slider)
-
-        # ── Arrow style ───────────────────────────────────────────────────
-        arrow_row = QHBoxLayout()
-        arrow_row.addWidget(QLabel("Arrow"))
-        self._arrow_style_combo = QComboBox()
-        self._arrow_style_combo.addItem("Classic", "classic")
-        self._arrow_style_combo.addItem("Double", "double")
-        self._arrow_style_combo.addItem("Dashed", "dashed")
-        self._arrow_style_combo.setCurrentIndex(0)
-        arrow_row.addWidget(self._arrow_style_combo, 1)
-        layout.addLayout(arrow_row)
-
-        # ── Fill opacity ──────────────────────────────────────────────────
-        opacity_row = QHBoxLayout()
-        opacity_row.addWidget(QLabel("Highlight Fill"))
-        self._opacity_lbl = QLabel("30 %")
-        self._opacity_lbl.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-        opacity_row.addWidget(self._opacity_lbl)
-        layout.addLayout(opacity_row)
-
-        self._opacity_slider = QSlider(Qt.Orientation.Horizontal)
-        self._opacity_slider.setRange(0, 100)
-        self._opacity_slider.setValue(30)
-        layout.addWidget(self._opacity_slider)
-
-        layout.addWidget(self._separator())
-
-        # ── Export ────────────────────────────────────────────────────────
-        self._btn_save_png = QPushButton("💾  Save PNG")
-        self._btn_save_png.setObjectName("btn_primary")
-        self._btn_save_png.setFixedHeight(34)
-        layout.addWidget(self._btn_save_png)
-
-        self._btn_copy = QPushButton("⧉  Copy")
-        self._btn_copy.setFixedHeight(30)
-        self._btn_copy.setToolTip("Copy annotated image to clipboard")
-        layout.addWidget(self._btn_copy)
-
-        self._btn_export_json = QPushButton("📋  Export JSON")
-        self._btn_export_json.setFixedHeight(30)
-        layout.addWidget(self._btn_export_json)
-
-        layout.addWidget(self._separator())
-
-        # ── History / Snapshots ───────────────────────────────────────────
+        # ── History / Snapshots ─────────────────────────────────────────
+        # Zoom, Stroke, Arrow, Highlight Fill and the export actions moved
+        # to a full-width settings bar under the tool row (see
+        # _build_settings_bar()) - this dock now holds only Edit and
+        # History, which is what lets History take the height freed up.
         history_header = self._add_section(layout, "History", clickable=True)
         history_header.clicked.connect(self._show_history_overlay)
 
@@ -399,8 +451,7 @@ class EditorWindow(QMainWindow):
         snap_scroll.setWidget(self._snap_container)
         layout.addWidget(snap_scroll, 1)
 
-        dock.setWidget(container)
-        self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, dock)
+        return panel
 
     # ── Signal wiring ─────────────────────────────────────────────────────────
 
@@ -800,6 +851,14 @@ class EditorWindow(QMainWindow):
         line = QFrame()
         line.setFrameShape(QFrame.Shape.HLine)
         line.setStyleSheet(f"background-color: {LINE}; border: none; max-height: 1px;")
+        return line
+
+    @staticmethod
+    def _vseparator() -> QFrame:
+        line = QFrame()
+        line.setFrameShape(QFrame.Shape.VLine)
+        line.setStyleSheet(f"background-color: {LINE}; border: none; max-width: 1px;")
+        line.setFixedWidth(1)
         return line
 
     @staticmethod

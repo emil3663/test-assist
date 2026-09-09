@@ -1,6 +1,6 @@
 # 🔍 Test Assist — Desktop stability matrix
 
-**Version:** 1.13
+**Version:** 1.14
 **Last updated:** 2026-09-09
 **Applies to:** the PySide6 desktop build. The browser build has its own matrix
 in `STABILITY_MATRIX.md`.
@@ -25,13 +25,13 @@ not. This document is that check.
 
 | | Count |
 |---|---|
-| Cases in `DESKTOP_TEST_PLAN.md` v1.17 | 175 |
-| Automated and passing | 170 |
+| Cases in `DESKTOP_TEST_PLAN.md` v1.18 | 178 |
+| Automated and passing | 173 |
 | Blocked, documented as manual | 5 |
-| Automated tests | 270 collected — 270 pass everywhere, no skips |
+| Automated tests | 274 collected — 274 pass everywhere, no skips |
 | Wall clock | about 2-3 seconds warm; the first run is slower while the bundled ffmpeg loads |
 
-**A green run is `270 passed, 0 skipped`, everywhere.** MP4 assembly used to
+**A green run is `274 passed, 0 skipped`, everywhere.** MP4 assembly used to
 depend on `opencv-python`, an optional dependency the product deliberately
 shipped without, which made REC-05 skip itself on CI, the packaged build, and
 any clean checkout. It now shells out to a bundled `ffmpeg` binary via
@@ -92,7 +92,7 @@ mocking `virtualGeometry()` to look like the reported hardware while the
 real platform integration sizes `showFullScreen()` to the real screen
 regardless; verified to fail against the old code and pass against the fix.
 
-Twelve defects have been found so far: six by writing these tests, two
+Thirteen defects have been found so far: seven by writing these tests, two
 following a user bug report, and four following real-hardware verification
 that went beyond what these tests alone could prove — see **Defects found**
 below.
@@ -159,7 +159,7 @@ These five are the manual pass to run against a release before trusting it.
 | 3.16 Update check | 12 | Stable (11) / Blocked (1) | UPD-01 through UPD-11 are pure-function and substituted-result tests, no network. UPD-12 (the real round-trip) is blocked. |
 | 3.17 Diagnostics | 4 | Stable | ABT-02's clipboard assertion is the same shape as issue #1's own diagnosis - proving a reporter's monitor layout is now visible without a code read. |
 | 3.18 Data Locations | 7 | Stable | `QStandardPaths.writableLocation` is substituted, not the real Windows API, so these prove the resolution and migration logic; they do not prove `Documents\Test Assist\` looks right in actual Windows Explorer. |
-| 3.19 Editor Chrome | 2 | Stable | UI-01/UI-02 (items 2-3) check the stylesheet's own text, not rendered pixels - they prove no rule sets a sub-3:1-contrast colour or omits the shared small-icon-button rule, not that a button looks right on screen. |
+| 3.19 Editor Chrome | 5 | Stable | UI-01/UI-02 (items 2-3) check the stylesheet's own text, not rendered pixels - they prove no rule sets a sub-3:1-contrast colour or omits the shared small-icon-button rule, not that a button looks right on screen. UI-03/UI-04/UI-05 (item 2's settings-row move) do measure real, laid-out geometry: UI-04 resizes the window to the literal 960px minimum and asserts every settings-row widget's actual width is at least its own fixed/natural size, which is what caught Save PNG being silently squeezed from 162px to 124px during development - a real defect this test would have shipped if it had only checked that widgets stayed inside the bar's own rect. All three were verified to fail against the pre-fix code (the settings bar did not exist), except UI-05, which is a pinning test - Save PNG's primary styling predates this move. |
 
 ---
 
@@ -439,6 +439,32 @@ so `test_plan_capture_diagonal_layout_is_pinned_not_incidental` exists to
 pin the horizontal-default choice as deliberate rather than leave it to
 sort-order incidence, the same trap defect 12 itself was.
 
+**13. Moving the settings row (item 2) out of the fixed-width right dock
+into what was meant to be a full-width row silently squeezed the Save PNG
+button instead of actually being full width.** The right panel had always
+been a real `QDockWidget`, and a `QDockWidget` claims its own width ahead of
+the central widget's own layout - so a row placed inside that central
+widget, beside a still-present 185px-wide dock, can only ever be as wide as
+`window width - 185px`, never the window's own width. At the 960px minimum
+that is 771px, not 960px, against roughly 900px of controls the row
+actually needs - Qt's layout engine resolved the shortfall by silently
+shrinking the one non-fixed-width widget (Save PNG, no `setFixedWidth()`)
+from its natural 162px down to 124px rather than raising an error, which is
+exactly the kind of quiet degradation a naive "does any widget's rect poke
+outside the bar" check would have missed entirely - it did not poke outside
+anything, it was just rendered too narrow. Caught by measuring geometry
+against a real, laid-out `EditorWindow` resized to exactly 960px rather than
+trusting the row's own reported width, during the same pass that wrote
+UI-04. Fixed by replacing the right dock with a plain `QWidget` panel placed
+in a `QHBoxLayout` beside the canvas instead of via `addDockWidget()` - the
+panel already had `NoDockWidgetFeatures` set, so nothing about its
+behaviour changes, only what claims window width ahead of the settings row.
+That alone freed enough width that no control needed a text label sacrificed
+to fit (Zoom/Stroke/Arrow/Fill's labels were dropped anyway, in favour of
+tooltips, to leave real margin rather than an exact-pixel fit). Verified to
+fail against the pre-fix code (the settings bar did not exist inside the
+dock-based layout at all) before being trusted.
+
 ---
 
 ## The selection model
@@ -484,7 +510,7 @@ yet on the packaged build.
 ```bash
 cd python
 pip install -r requirements.txt
-QT_QPA_PLATFORM=offscreen pytest -q      # 270 passed, about 2-3 seconds warm;
+QT_QPA_PLATFORM=offscreen pytest -q      # 274 passed, about 2-3 seconds warm;
                                           # slower on the first run while the
                                           # bundled ffmpeg loads
 ```

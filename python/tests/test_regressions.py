@@ -237,6 +237,89 @@ def test_editor_tools_bar_row_alignment_top_middle_bottom(qapp) -> None:
     editor.close()
 
 
+def test_settings_bar_holds_the_controls_moved_out_of_the_right_panel(qapp) -> None:
+    """Zoom, Stroke, Arrow, Highlight Fill, Save PNG, Copy and Export JSON
+    moved out of the fixed-width right panel into a full-width row under
+    the tool row - the panel had to fit them plus Edit and History, which
+    squeezed History in particular."""
+    editor = EditorWindow()
+    editor.show()
+    qapp.processEvents()
+
+    bar = editor.findChild(QFrame, "settings_bar")
+    assert bar is not None, "no settings_bar was built"
+    for widget in (
+        editor._btn_zoom_out, editor._zoom_slider, editor._btn_zoom_in,
+        editor._zoom_pct, editor._btn_fit, editor._size_slider, editor._size_lbl,
+        editor._arrow_style_combo, editor._opacity_slider, editor._opacity_lbl,
+        editor._btn_copy, editor._btn_export_json, editor._btn_save_png,
+    ):
+        assert widget.parentWidget() is bar, f"{widget} is not in the settings bar"
+
+    panel = editor.findChild(QWidget, "right_panel")
+    assert panel is not None, "no right_panel was built"
+    assert editor._btn_zoom_out.parentWidget() is not panel
+    assert editor._btn_save_png.parentWidget() is not panel
+
+    editor.close()
+
+
+def test_settings_bar_spans_the_full_window_width_not_just_the_dock_constrained_central_widget(qapp) -> None:
+    """A real QDockWidget for the right panel claims its own width ahead of
+    the central widget's layout, so a row placed inside that central widget
+    can never reach full window width while the panel is a dock - that is
+    exactly why the panel is a plain QWidget beside the canvas now, not a
+    QDockWidget."""
+    editor = EditorWindow()
+    editor.resize(1400, 640)
+    editor.show()
+    qapp.processEvents()
+
+    bar = editor.findChild(QFrame, "settings_bar")
+    assert bar.width() == editor.centralWidget().width(), \
+        "the settings bar should span the same width as the central widget, not be narrowed by a docked side panel"
+    editor.close()
+
+
+def test_settings_bar_does_not_clip_at_the_960_minimum_window_width(qapp) -> None:
+    """"Do NOT put them between the tool row and the info/help buttons" -
+    that gap is zero at the 960px minimum window width. A full-width row is
+    what actually fits close to 900px of controls; this pins that it still
+    does at the smallest window the app allows, rather than silently
+    squeezing something (e.g. Save PNG) narrower than its own content."""
+    editor = EditorWindow()
+    editor.resize(960, 640)
+    editor.show()
+    qapp.processEvents()
+    qapp.processEvents()
+
+    bar = editor.findChild(QFrame, "settings_bar")
+    assert bar.width() == 960
+    assert bar.minimumSizeHint().width() <= bar.width(), \
+        "the settings bar needs more room than the 960px minimum window provides"
+
+    for widget in bar.findChildren(QWidget):
+        if widget.parent() is not bar:
+            continue
+        natural = widget.minimumWidth() if widget.minimumWidth() > 0 else widget.sizeHint().width()
+        assert widget.width() >= natural, \
+            f"{widget!r} was squeezed to {widget.width()}px, narrower than its own {natural}px - that is the clipping bug"
+
+    editor.close()
+
+
+def test_save_png_stays_visually_primary_in_the_settings_bar(qapp) -> None:
+    """Moving Save PNG into a strip of other buttons must not demote it to
+    just another button in that strip."""
+    editor = EditorWindow()
+
+    assert editor._btn_save_png.objectName() == "btn_primary"
+    assert editor._btn_save_png.height() > editor._btn_copy.height()
+    assert editor._btn_save_png.height() > editor._btn_export_json.height()
+
+    editor.close()
+
+
 def test_editor_history_header_opens_overlay(qapp, monkeypatch) -> None:
     editor = EditorWindow()
     editor.show()

@@ -204,6 +204,33 @@ release; only tagged versions appear as releases.
     patches `paths.QStandardPaths.writableLocation` instead and asserts the
     redirect actually took effect, rather than assuming a patched seam still
     does anything.
+- **Zoom, Stroke, Arrow, Highlight Fill, Save PNG, Copy and Export JSON
+  moved out of the fixed 185px right panel into a full-width row under the
+  tool row.** That panel had to fit those controls plus Edit and History,
+  which squeezed History in particular; the panel now holds only Edit and
+  History, and History takes the height freed up. The new row could not go
+  between the tool row and the About/Help buttons instead — those controls
+  need close to 900px laid out horizontally, and that gap is under 400px on
+  a wide window and zero at the 960px minimum window width. Save PNG stays
+  visually primary (accent colour, taller) rather than becoming just
+  another button in the row.
+  - **Getting a row to genuinely reach full window width turned up its own
+    bug.** The right panel had always been a real `QDockWidget`, which
+    claims its own width ahead of the central widget's layout — so a row
+    placed inside that central widget could only ever be `window width -
+    185px` wide, never the window's own width. At the 960px minimum that's
+    771px against roughly 900px of controls, and Qt's layout resolved the
+    shortfall by silently shrinking Save PNG from 162px to 124px rather
+    than erroring — a squeeze that never poked outside its container, so
+    it would have passed a naive "nothing overflows its box" check. Fixed
+    by replacing the dock with a plain `QWidget` panel placed beside the
+    canvas in a normal layout instead of `addDockWidget()` — it already had
+    `NoDockWidgetFeatures` set, so nothing about its behaviour changes,
+    only what claims window width ahead of the settings row. Zoom, Stroke,
+    Arrow and Highlight Fill's text labels were dropped in favour of
+    tooltips (the same tradeoff the launcher's own icon buttons already
+    make) so the row has real margin at 960px rather than an exact-pixel
+    fit.
 
 ## [1.3.0] — 2026-08-31
 

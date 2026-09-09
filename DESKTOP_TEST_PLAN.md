@@ -1,6 +1,6 @@
 # 🔍 Test Assist — Desktop Test Plan
 
-**Version:** 1.17
+**Version:** 1.18
 **Last updated:** 2026-09-09
 **Status:** In active development
 **Applies to:** the PySide6 desktop build under `python/`. The browser build has
@@ -377,6 +377,9 @@ install folder would be deleted by the documented update procedure. See
 |----|------|-----------------|--------|
 | UI-01 | Small fixed-size buttons (About, zoom out/in, Fit) | Opt into a shared zero-padding rule rather than drawing as empty shapes | ✅ |
 | UI-02 | Every stylesheet rule with an explicit text colour and background | Contrast is at least 3:1 (WCAG large-text/icon floor) | ✅ |
+| UI-03 | Zoom, Stroke, Arrow, Highlight Fill, Save PNG, Copy, Export JSON | Live in a full-width settings row under the tool row, not the fixed-width right panel | ✅ |
+| UI-04 | The settings row at the 960px minimum window width | Fits without clipping or squeezing any control narrower than its own content | ✅ |
+| UI-05 | Save PNG among the other settings-row buttons | Stays visually primary (accent colour, taller) rather than becoming just another button in the row | ✅ |
 
 ---
 
