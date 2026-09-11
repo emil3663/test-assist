@@ -2182,3 +2182,77 @@ def test_MENU_05_help_and_about_are_reachable_from_the_menu(qapp) -> None:
         assert "Show Launcher" in _items(bar, "Window")
     finally:
         editor.close()
+
+
+# ── Text annotation backing plate ────────────────────────────────────────────
+
+
+def _text_canvas(bg_opacity, base_colour="#ff0000"):
+    """A text annotation in the annotation colour, over a background of the
+    same colour - the case where a missing plate makes it invisible."""
+    from canvas import AnnotationCanvas
+    canvas = AnnotationCanvas()
+    base = QPixmap(400, 120)
+    base.fill(QColor(base_colour))
+    canvas.set_pixmap(base)
+    canvas._annotations.append({
+        "type": "text", "x1": 20, "y1": 20, "width": 300, "height": 40,
+        "color": base_colour, "size": 3, "text": "Total ignores the discount",
+        "bgColor": "#000000", "bgOpacity": bg_opacity,
+    })
+    return canvas
+
+
+def test_TEXT_BG_01_committed_text_is_legible_over_its_own_colour(qapp) -> None:
+    """The defect: the backing plate existed only while typing, so text was
+    readable as you authored it and lost its backing the moment you
+    committed - including in the exported PNG, which is the artefact that
+    gets attached to a defect report.
+
+    Asserting on the export rather than the on-screen widget on purpose:
+    the export is what the bug actually damaged."""
+    exported = _text_canvas(0.55).export_pixmap().toImage()
+
+    # Somewhere inside the text box there must be pixels darkened away from
+    # the base colour. Without a plate every pixel there is either the base
+    # colour or the identically-coloured glyphs.
+    darkened = sum(
+        1
+        for x in range(24, 310, 3)
+        for y in range(24, 56, 3)
+        if exported.pixelColor(x, y).red() < 200
+    )
+    assert darkened > 0, "no backing plate: annotation is invisible against its own colour"
+
+
+def test_TEXT_BG_02_zero_opacity_restores_bare_text(qapp) -> None:
+    """0 must genuinely mean off, not "nearly off" - it is the escape hatch
+    for anyone annotating a plain area who wants nothing behind the glyphs."""
+    exported = _text_canvas(0.0).export_pixmap().toImage()
+    darkened = sum(
+        1
+        for x in range(24, 310, 3)
+        for y in range(24, 56, 3)
+        if exported.pixelColor(x, y).red() < 200
+    )
+    assert darkened == 0, "a plate was painted at zero opacity"
+
+
+def test_TEXT_BG_03_the_plate_is_stored_on_the_annotation(qapp) -> None:
+    """Read from the annotation at paint time, not from the canvas, so an
+    exported JSON layer re-renders the way it looked when it was made -
+    changing the default later must not restyle evidence already taken."""
+    from canvas import AnnotationCanvas
+    canvas = AnnotationCanvas()
+    canvas.set_pixmap(QPixmap(200, 100))
+    canvas.text_bg_opacity = 0.8
+    canvas._text_editing = True
+    canvas._text_buffer = "note"
+    canvas._text_pos = QPointF(10, 10)
+    canvas._text_width, canvas._text_height = 100, 20
+    canvas._commit_text()
+
+    anno = canvas._annotations[-1]
+    assert anno["bgOpacity"] == 0.8
+    assert anno["bgColor"] == "#000000"
+    assert "bgOpacity" in canvas.serialisable_annotations()[-1], "must survive JSON export"

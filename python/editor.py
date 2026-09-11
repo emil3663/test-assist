@@ -690,6 +690,28 @@ class EditorWindow(QMainWindow):
         # Apply this tool's colour to the canvas
         if tool_id in self._tool_colors:
             self._canvas.color = self._tool_colors[tool_id]
+        self._sync_opacity_slider(tool_id)
+
+    def _sync_opacity_slider(self, tool_id: str) -> None:
+        """Point the one opacity slider at whichever fill the current tool
+        actually has.
+
+        Highlight and Text are the only two tools with a fill, and they are
+        never both active, so a second slider would sit disabled for every
+        tool but one. This follows the same per-tool pattern the colour
+        swatches already use. Signals are blocked while the value is set,
+        or restoring the stored value would immediately write it back as if
+        the user had dragged the slider.
+        """
+        is_text = tool_id == "text"
+        value = self._canvas.text_bg_opacity if is_text else self._canvas.fill_opacity
+        self._opacity_slider.setToolTip(
+            "Text background opacity" if is_text else "Highlight fill opacity"
+        )
+        self._opacity_slider.blockSignals(True)
+        self._opacity_slider.setValue(round(value * 100))
+        self._opacity_slider.blockSignals(False)
+        self._opacity_lbl.setText(f"{round(value * 100)} %")
 
     def _on_tool_color_changed(self, tool_id: str, color: str) -> None:
         self._tool_colors[tool_id] = color
@@ -749,8 +771,14 @@ class EditorWindow(QMainWindow):
         self._canvas.update_selected_style(arrow_style=style)
 
     def _on_opacity_changed(self, value: int) -> None:
-        self._canvas.fill_opacity = value / 100.0
         self._opacity_lbl.setText(f"{value} %")
+        if self._canvas.tool == "text":
+            # 0 gives bare glyphs over the screenshot - the old behaviour,
+            # now a choice rather than the only option.
+            self._canvas.text_bg_opacity = value / 100.0
+            self._canvas.update_selected_style(bgOpacity=self._canvas.text_bg_opacity)
+            return
+        self._canvas.fill_opacity = value / 100.0
         self._canvas.update_selected_style(opacity=self._canvas.fill_opacity)
 
     def _confirm_clear(self) -> None:
