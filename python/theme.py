@@ -2,7 +2,7 @@
 
 import sys
 
-from PySide6.QtGui import QFont
+from PySide6.QtGui import QColor, QFont, QIcon
 
 # A fallback chain, not a change of font: whichever platform you are on,
 # its own UI face is asked for first and the rest follow as backstops.
@@ -382,3 +382,127 @@ QMessageBox QPushButton {{
     min-width: 80px;
 }}
 """
+
+# ── Icons ────────────────────────────────────────────────────────────────────
+#
+# Material Icons (Apache-2.0, see assets/MaterialIcons-LICENSE.txt) as a font
+# rather than image assets.
+#
+# The editor previously used emoji characters as button labels. Emoji render
+# through the platform's colour-emoji font, which is a *bitmap* face: it
+# pixelates at any size the bitmaps were not cut for, and - the reason this
+# mattered once there were two palettes - it ignores the stylesheet `color`
+# entirely, because each glyph carries its own. Light mode therefore turned
+# the chrome pale while the icons stayed exactly as they were, which is the
+# "light on light" everyone could see and nobody could fix by editing a
+# colour.
+#
+# A font fixes both at once: glyphs are outlines, so they are crisp at every
+# size, and they take the colour of the text they are, so they follow the
+# palette for free and will keep doing so for any palette added later.
+# Codepoints rather than the font's ligature names ("home"), which depend on
+# ligature shaping being on and fail silently to tofu when it is not.
+
+ICON_FONT_FAMILY = ""
+
+ICONS = {
+    "open":        "\ue2c8",  # folder_open
+    "updates":     "\ue5d5",  # refresh
+    "home":        "\ue88a",  # home
+    "about":       "\ue88e",  # info
+    "help":        "\ue887",  # help
+    "save":        "\ue161",  # save
+    "copy":        "\ue14d",  # content_copy
+    "export":      "\ue2c4",  # file_download
+    "undo":        "\ue166",  # undo
+    "redo":        "\ue15a",  # redo
+    "delete":      "\ue872",  # delete
+    "to_front":    "\ue883",  # flip_to_front
+    "backward":    "\ue5db",  # arrow_downward
+    "to_back":     "\ue882",  # flip_to_back
+    "clear":       "\ue872",  # delete
+    "zoom_in":     "\ue145",  # add
+    "zoom_out":    "\ue15b",  # remove
+    "select":      "\ue323",  # mouse
+    "crop":        "\ue3be",  # crop
+    "blur":        "\ue3a5",  # blur_on
+    "text":        "\ue262",  # text_fields
+    "highlight":   "\ue3ae",  # brush
+    "circle":      "\ue836",  # radio_button_unchecked
+    "arrow":       "\ue5c8",  # arrow_forward
+    "rect":        "\ue835",  # check_box_outline_blank
+    "pen":         "\ue3c9",  # edit
+}
+
+
+def load_icon_font(path) -> str:
+    """Register the icon font and return its family name.
+
+    Needs a live QApplication, so it is called at startup rather than on
+    import. Returns "" if the font cannot be loaded - callers then fall back
+    to a text label, because an icon-only button showing tofu is worse than
+    a word.
+    """
+    global ICON_FONT_FAMILY
+    from PySide6.QtGui import QFontDatabase
+
+    font_id = QFontDatabase.addApplicationFont(str(path))
+    if font_id == -1:
+        return ""
+    families = QFontDatabase.applicationFontFamilies(font_id)
+    ICON_FONT_FAMILY = families[0] if families else ""
+    return ICON_FONT_FAMILY
+
+
+def icon_font(pixel_size: int) -> QFont:
+    """The icon face at a given size, in pixels rather than points: these are
+    glyphs sized to a box, not text sized to a reading measure."""
+    font = QFont(ICON_FONT_FAMILY)
+    font.setPixelSize(pixel_size)
+    return font
+
+
+def icon(name: str) -> str:
+    """The character for an icon, or "" when the font is unavailable."""
+    return ICONS.get(name, "") if ICON_FONT_FAMILY else ""
+
+
+def icon_pixmap(name: str, pixel_size: int = 18, colour: str | None = None) -> QIcon:
+    """One icon glyph rendered into a QIcon, tinted.
+
+    setIcon() rather than putting the glyph in the button's text, because a
+    button like "Save PNG" needs the label in the UI face and the mark in
+    the icon face, and a widget has only one font. Rendering also makes the
+    colour explicit: passing the palette's TEXT is what keeps these
+    following light and dark, which is the whole reason for moving off
+    emoji.
+
+    Returns an empty QIcon when the font is unavailable, which QPushButton
+    draws as no icon at all - so a button falls back to its text label
+    rather than to tofu.
+    """
+    from PySide6.QtCore import Qt
+    from PySide6.QtGui import QPainter, QPixmap
+
+    glyph = icon(name)
+    if not glyph:
+        return QIcon()
+
+    # Rendered at 3x and scaled down: a glyph drawn straight into a small
+    # pixmap picks up the hinting of that exact size, and these are also
+    # used on HiDPI screens where the same QIcon is asked for more pixels.
+    scale = 3
+    pixmap = QPixmap(pixel_size * scale, pixel_size * scale)
+    pixmap.fill(Qt.GlobalColor.transparent)
+    painter = QPainter(pixmap)
+    painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+    painter.setRenderHint(QPainter.RenderHint.TextAntialiasing)
+    painter.setFont(icon_font(pixel_size * scale))
+    painter.setPen(QColor(colour or TEXT))
+    painter.drawText(pixmap.rect(), Qt.AlignmentFlag.AlignCenter, glyph)
+    painter.end()
+    return QIcon(pixmap.scaled(
+        pixel_size, pixel_size,
+        Qt.AspectRatioMode.KeepAspectRatio,
+        Qt.TransformationMode.SmoothTransformation,
+    ))
