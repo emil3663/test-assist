@@ -1,7 +1,7 @@
 # 🔍 Test Assist — Desktop stability matrix
 
-**Version:** 1.17
-**Last updated:** 2026-09-09
+**Version:** 1.18
+**Last updated:** 2026-09-12
 **Applies to:** the PySide6 desktop build. The browser build has its own matrix
 in `STABILITY_MATRIX.md`.
 
@@ -25,18 +25,27 @@ not. This document is that check.
 
 | | Count |
 |---|---|
-| Cases in `DESKTOP_TEST_PLAN.md` v1.21 | 188 |
-| Automated and passing | 182 |
+| Cases in `DESKTOP_TEST_PLAN.md` v1.22 | 190 |
+| Automated and passing | 183 |
+| Automated, documented known limitation (`xfail`) | 1 |
 | Blocked, documented as manual | 6 |
-| Automated tests | 287 collected — 287 pass everywhere, no skips |
+| Automated tests | 332 collected (2 deselected: `visual`-marked, TA-226) — 331 pass, 1 `xfail`, no unexplained skips |
 | Wall clock | about 2-3 seconds warm; the first run is slower while the bundled ffmpeg loads |
 
-**A green run is `287 passed, 0 skipped`, everywhere.** MP4 assembly used to
-depend on `opencv-python`, an optional dependency the product deliberately
-shipped without, which made REC-05 skip itself on CI, the packaged build, and
-any clean checkout. It now shells out to a bundled `ffmpeg` binary via
-`imageio-ffmpeg`, a real entry in `requirements.txt` — so REC-05 runs and
-passes in every environment, and there is no longer a skip to explain away.
+**A green run is `331 passed, 2 deselected, 1 xfailed`, everywhere.** The 2
+deselected are `test_visual.py`'s real-rendering cases (TA-226), which need
+the real "windows" Qt platform plugin rather than "offscreen" and are run
+explicitly, separately - see `pytest.ini`. The 1 `xfail` is
+`test_three_piece_layout_can_seam_at_a_fractional_ratio` (CAP-20, TA-229): a
+deliberately-documented failure, not a skip, so a fix that accidentally makes
+it pass is caught (`strict=True`) rather than silently welcomed.
+
+MP4 assembly used to depend on `opencv-python`, an optional dependency the
+product deliberately shipped without, which made REC-05 skip itself on CI,
+the packaged build, and any clean checkout. It now shells out to a bundled
+`ffmpeg` binary via `imageio-ffmpeg`, a real entry in `requirements.txt` — so
+REC-05 runs and passes in every environment, and there is no longer a skip to
+explain away.
 
 **The update check's network round-trip is not in that number.** UPD-01
 through UPD-11 test the pure parsing and comparison functions, and the
@@ -558,6 +567,34 @@ dispatch via a synthetic `WM_HOTKEY`, conflict handling, and release on
 close - verified to fail against the pre-fix code before being trusted.
 See 3.12 Launcher above for why `register_global_hotkeys` defaults to
 False everywhere except the tests that specifically exercise it.
+
+**15. A full-screen capture wrote a device-sized file holding only
+logical-sized content (PR #8, alongside the region-capture HiDPI fix
+above).** `_grab_full_capture()` handed `canvas.py` the pixmap
+`grabWindow(0)` returns as-is, still tagged with the screen's
+`devicePixelRatio`. `canvas.py` measures its own geometry and every
+annotation's coordinates from the pixmap's `width()`, which is device
+pixels, so the tagged pixmap painted at its device-independent size
+inside a device-sized surface - a 1920x1080 file holding 1536x864 of
+picture on a 125% display, black filling the remaining column and row.
+The full-screen path never goes through `capture.py`, so the region fix
+did not cover it; it needed the same `setDevicePixelRatio(1.0)`
+normalisation applied separately. `test_HIDPI_04` (CAP-19) is the
+regression test, verified to fail before the fix and pass after; manually
+confirmed on real 125% hardware, PNG dimensions checked directly.
+
+**While completing this fix, a related but distinct rounding defect was
+found and deliberately left open (CAP-20, TA-229).** `to_device_rect()`
+rounds each composited piece's x, y, w and h independently. For two
+pieces - the only layout any hardware here can produce - this is safe by
+construction: the second piece's `dest.x` equals the first piece's width,
+so both the per-piece rounding and the whole-result rounding round the
+same expression. For three or more pieces that guarantee does not hold;
+`test_three_piece_layout_can_seam_at_a_fractional_ratio` demonstrates a
+1px gap at ratio 1.25 and a 1px overlap at 1.5 using three synthetic
+297/297/298px screens, and is marked `xfail(strict=True)` rather than
+fixed - it needs three real screens at fractional scaling to reach, which
+is not available, and 1.4.0 does not claim three-screen spans.
 
 ---
 

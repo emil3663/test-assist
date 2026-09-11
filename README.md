@@ -50,7 +50,7 @@ are in the left rail.*
 | **Install** | None — open the live URL | Download the release zip and run `TestAssist.exe`, or run from source |
 | **Capture** | `getDisplayMedia`, `MediaRecorder` | Native screenshot overlay, frame recorder |
 | **Best for** | Trying the full capture → annotate → export loop in ten seconds, with nothing to install | Long test sessions — a tray launcher that stays above the application under test |
-| **Tests** | 55 Playwright tests — smoke suite in CI, regression suite on demand | 229 pytest tests across a regression and a functional suite, in CI |
+| **Tests** | 55 Playwright tests — smoke suite in CI, regression suite on demand | 331 pytest tests across a regression and a functional suite, in CI |
 
 Both produce the same two outputs: a composited PNG for attaching to a defect,
 and a structured JSON annotation layer.
@@ -243,7 +243,7 @@ is browser chrome that no automation can drive, so capture and recording tests
 substitute a canvas-backed `MediaStream`. They prove what the app does with a
 stream, not that the picker appears.
 
-**Desktop build — 229 pytest tests**
+**Desktop build — 331 pytest tests**
 
 ```bash
 cd python
@@ -257,10 +257,15 @@ zoom, undo/redo, all three export paths, capture history, the launcher,
 shortcuts and the capture overlay; `test_screen_geometry.py` and
 `test_update_check.py` cover the pure multi-display and update-check logic
 with no display or network involved. Tests drive real widgets offscreen
-rather than asserting on internals where a real path exists.
+rather than asserting on internals where a real path exists. 2 tests marked
+`visual` (real font rendering, TA-226) are excluded from the default run and
+must be run explicitly — see `DESKTOP_STABILITY_MATRIX.md`. 1 test is a
+documented `xfail`: `test_screen_geometry.py`'s three-piece fractional-ratio
+seam case, a known limitation tracked as TA-229.
 
-`DESKTOP_STABILITY_MATRIX.md` triages all 151 cases — 145 automated, 6
-blocked — and says plainly what offscreen testing does not prove: that Qt
+`DESKTOP_STABILITY_MATRIX.md` triages all 190 cases — 184 automated (1 a
+documented known limitation, not a clean pass), 6 blocked — and says plainly
+what offscreen testing does not prove: that Qt
 dispatches events correctly in a real window, that the layout is usable, that
 anything is legible, or that a capture on real mixed-DPI hardware comes out
 the right size. Those stay manual.

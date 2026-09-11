@@ -1,7 +1,7 @@
 # 🔍 Test Assist — Desktop Test Plan
 
-**Version:** 1.21
-**Last updated:** 2026-09-09
+**Version:** 1.22
+**Last updated:** 2026-09-12
 **Status:** In active development
 **Applies to:** the PySide6 desktop build under `python/`. The browser build has
 its own plan in `TEST_PLAN.md`.
@@ -63,8 +63,9 @@ history that survives restarts.
 
 ## 3. Test Cases
 
-**Status key:** ✅ covered by an automated test that passes · 🚫 blocked from
-automation, manual only.
+**Status key:** ✅ covered by an automated test that passes · ⚠️ covered by an
+automated test, but a documented known limitation (`xfail`) rather than a
+clean pass · 🚫 blocked from automation, manual only.
 
 Every case that can be automated is. The blocked ones need either a built
 executable on real Windows, a real second monitor, or the real network, and
@@ -98,6 +99,8 @@ regression test for that; see `docs/overlay-geometry-fix-brief.md`.
 | CAP-16 | A selection spanning a horizontal gap between two screens (DSP-08) | Composited side by side, no black band; the true vertical offset between screens is kept | ✅ |
 | CAP-17 | A selection spanning a vertical gap between two screens, above or below (DSP-04) | Composited stacked, no black band; the true horizontal offset between screens is kept | ✅ |
 | CAP-18 | A selection spanning screens separated on both axes (diagonal layout) | Packed horizontally as a deliberate, tested choice - not gap-free, but not left to sort-order incidence either | ✅ |
+| CAP-19 | Full-screen capture on a display above 100% scaling (e.g. 125%) | Result is normalised to devicePixelRatio 1.0, matching the region-capture path - no black padding from a device/logical size mismatch | ✅ |
+| CAP-20 | A composited capture of three or more pieces at a fractional device pixel ratio (1.25, 1.5) | **Known limitation, not yet fixed** - `to_device_rect()` rounds each piece independently, which can leave a 1px gap or overlap once there are three or more pieces. Two-piece layouts (everything real hardware here can produce) are unaffected and covered by the existing property test at every ratio including 1.25/1.5. Tracked as TA-229. | ⚠️ |
 
 ### 3.2 Screen Recording
 
