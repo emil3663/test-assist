@@ -13,7 +13,7 @@ from pathlib import Path
 
 import pytest
 from PySide6.QtCore import QEvent, QPoint, QPointF, QRect, QSize, Qt
-from PySide6.QtGui import QColor, QImage, QKeyEvent, QPixmap
+from PySide6.QtGui import QAction, QColor, QImage, QKeyEvent, QPixmap
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication
 
@@ -2087,3 +2087,98 @@ def test_KEY_05_tool_shortcuts_are_suppressed_while_typing(editor):
 
     assert all(s.isEnabled() for s in editor._tool_shortcuts), \
         "tool shortcuts were not restored after the text was committed"
+
+
+# ── Application menu bar ─────────────────────────────────────────────────────
+
+
+def _menu_titles(bar):
+    return [a.text().replace("&", "") for a in bar.actions()]
+
+
+def _items(bar, title):
+    for action in bar.actions():
+        if action.text().replace("&", "") == title:
+            return [a.text() for a in action.menu().actions() if not a.isSeparator()]
+    raise AssertionError(f"no {title} menu")
+
+
+def test_MENU_01_the_menu_bar_is_parentless(qapp) -> None:
+    """It must be the application-wide menu bar, not one owned by a window.
+
+    Test Assist normally starts with the editor constructed but not shown -
+    an editor-owned menu bar would leave the macOS menu strip empty in
+    exactly the case that matters, which is what this guards."""
+    editor = EditorWindow()
+    try:
+        bar = editor.build_menu_bar()
+        assert bar.parent() is None
+    finally:
+        editor.close()
+
+
+def test_MENU_02_menus_follow_the_platform_convention(qapp) -> None:
+    """File / Edit / Window / Help, in that order - the convention on both
+    macOS and Windows."""
+    editor = EditorWindow()
+    try:
+        assert _menu_titles(editor.build_menu_bar()) == ["File", "Edit", "Window", "Help"]
+    finally:
+        editor.close()
+
+
+def test_MENU_03_about_and_quit_carry_the_roles_that_relocate_them(qapp) -> None:
+    """On macOS these two belong in the application menu, not under Help and
+    File. Setting the role is what moves them there - without it they stay
+    put and a Mac user finds them in the wrong place. The role is the whole
+    mechanism, so it is the thing worth pinning."""
+    editor = EditorWindow()
+    try:
+        bar = editor.build_menu_bar()
+        roles = {
+            a.text(): a.menuRole()
+            for menu in bar.actions()
+            for a in menu.menu().actions()
+        }
+        assert roles["About Test Assist"] == QAction.MenuRole.AboutRole
+        assert roles["Quit Test Assist"] == QAction.MenuRole.QuitRole
+    finally:
+        editor.close()
+
+
+def test_MENU_04_clear_all_keeps_its_confirmation(qapp) -> None:
+    """Clear All is the one irreversible action in the Edit menu. Reaching
+    it a second way must not be a way around the confirmation the dock
+    button goes through."""
+    editor = EditorWindow()
+    try:
+        bar = editor.build_menu_bar()
+        clear = next(
+            a for menu in bar.actions() for a in menu.menu().actions()
+            if a.text() == "Clear All Annotations"
+        )
+        called = []
+        editor._confirm_clear = lambda: called.append(True)
+        # rebuild so the action binds to the replacement
+        clear = next(
+            a for menu in editor.build_menu_bar().actions() for a in menu.menu().actions()
+            if a.text() == "Clear All Annotations"
+        )
+        clear.trigger()
+        assert called == [True], "Clear All bypassed _confirm_clear"
+    finally:
+        editor.close()
+
+
+def test_MENU_05_help_and_about_are_reachable_from_the_menu(qapp) -> None:
+    """The complaint this menu bar answers: File, Help and About existed
+    only as buttons inside a window the user had not necessarily opened."""
+    editor = EditorWindow()
+    try:
+        bar = editor.build_menu_bar()
+        assert "Test Assist Help" in _items(bar, "Help")
+        assert "Check for Updates…" in _items(bar, "Help")
+        assert "Open Image…" in _items(bar, "File")
+        assert "Show Launcher" in _items(bar, "Window")
+    finally:
+        editor.close()

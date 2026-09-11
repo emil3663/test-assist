@@ -11,7 +11,7 @@ import time
 import webbrowser
 
 from PySide6.QtCore import QObject, Qt, QSize, QSysInfo, QThread, QUrl, Signal
-from PySide6.QtGui import QColor, QDesktopServices, QIcon, QImage, QKeySequence, QPixmap, QShortcut
+from PySide6.QtGui import QAction, QColor, QDesktopServices, QIcon, QImage, QKeySequence, QPixmap, QShortcut
 from PySide6.QtWidgets import (
     QApplication,
     QButtonGroup,
@@ -24,6 +24,7 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QMainWindow,
+    QMenuBar,
     QMessageBox,
     QPushButton,
     QScrollArea,
@@ -421,7 +422,7 @@ class EditorWindow(QMainWindow):
         help_btn.setObjectName("btn_help")
         help_btn.setFixedSize(28, 28)
         help_btn.setToolTip("Open Help")
-        help_btn.clicked.connect(self._open_help)
+        help_btn.clicked.connect(self.open_help)
         layout.addWidget(help_btn, 0, Qt.AlignmentFlag.AlignVCenter)
 
         return bar
@@ -764,6 +765,103 @@ class EditorWindow(QMainWindow):
         if reply == QMessageBox.StandardButton.Yes:
             self._canvas.clear_annotations()
 
+    # ── Application menu bar ──────────────────────────────────────────────────
+
+    def build_menu_bar(self) -> QMenuBar:
+        """The application's menu bar, deliberately built with no parent.
+
+        A QMenuBar owned by a window only becomes the macOS menu bar while
+        that window is active. Test Assist normally starts with the editor
+        constructed but *not shown* - the floating launcher is the surface
+        you get - so an editor-owned menu bar left the menu strip empty in
+        the case that matters most: the app's own menu showed nothing but
+        the interpreter's name, and File/Help/About were reachable only
+        from a toolbar inside a window the user had not opened yet.
+
+        A parentless menu bar is Qt's documented answer to exactly that: it
+        becomes the application-wide default, used whenever no window
+        supplies one of its own. On Windows a parentless menu bar draws
+        nowhere, which is why the toolbar buttons stay - there the toolbar
+        is the primary affordance and a menu strip would be the unusual
+        thing.
+
+        Caller keeps the reference: nothing else owns it, so letting it go
+        out of scope takes the menu bar with it.
+        """
+        bar = QMenuBar()
+
+        file_menu = bar.addMenu("&File")
+        self._add_action(file_menu, "Open Image\u2026", QKeySequence.StandardKey.Open,
+                         self._open_image_file)
+        file_menu.addSeparator()
+        self._add_action(file_menu, "Save PNG\u2026", QKeySequence.StandardKey.Save,
+                         self._save_png)
+        self._add_action(file_menu, "Export JSON\u2026", None, self._export_json)
+        file_menu.addSeparator()
+        # QuitRole moves this into the application menu on macOS, where a
+        # Mac user looks for it; on Windows it stays under File, which is
+        # where a Windows user looks. One action, both conventions.
+        self._add_action(file_menu, "Quit Test Assist", QKeySequence.StandardKey.Quit,
+                         QApplication.quit, role=QAction.MenuRole.QuitRole)
+
+        # Order is File / Edit / Window / Help, which is the convention on
+        # both platforms - every one of these actions already exists in the
+        # right-hand dock; the menu is a second, conventional route to them,
+        # not a new capability.
+        edit_menu = bar.addMenu("&Edit")
+        self._add_action(edit_menu, "Undo", QKeySequence.StandardKey.Undo,
+                         self._canvas.undo)
+        self._add_action(edit_menu, "Redo", QKeySequence.StandardKey.Redo,
+                         self._canvas.redo)
+        edit_menu.addSeparator()
+        self._add_action(edit_menu, "Delete Selected", QKeySequence.StandardKey.Delete,
+                         self._canvas.delete_selected)
+        edit_menu.addSeparator()
+        self._add_action(edit_menu, "Bring to Front", None,
+                         self._canvas.bring_selected_to_front)
+        self._add_action(edit_menu, "Send Backward", None,
+                         self._canvas.send_selected_backward)
+        self._add_action(edit_menu, "Send to Back", None,
+                         self._canvas.send_selected_to_back)
+        edit_menu.addSeparator()
+        # Behind its own separator, and routed through _confirm_clear rather
+        # than the canvas directly - the one irreversible action here should
+        # not sit flush against Send to Back, and must not lose its
+        # confirmation by being reachable a second way.
+        self._add_action(edit_menu, "Clear All Annotations", None, self._confirm_clear)
+
+        window_menu = bar.addMenu("&Window")
+        self._add_action(window_menu, "Show Launcher", None, self._on_show_launcher_clicked)
+        self._add_action(window_menu, "Show Editor", None, self.bring_forward)
+
+        help_menu = bar.addMenu("&Help")
+        self._add_action(help_menu, "Test Assist Help", QKeySequence.StandardKey.HelpContents,
+                         self.open_help)
+        self._add_action(help_menu, "Check for Updates\u2026", None,
+                         self._on_check_updates_clicked)
+        help_menu.addSeparator()
+        # AboutRole likewise relocates to the application menu on macOS.
+        self._add_action(help_menu, "About Test Assist", None, self._open_about,
+                         role=QAction.MenuRole.AboutRole)
+
+        self._menu_bar = bar
+        return bar
+
+    def _add_action(self, menu, text: str, shortcut, slot, role=None) -> QAction:
+        """One action, wired the same way every time.
+
+        Parented to the window rather than the menu so its shortcut stays
+        live even on macOS, where the menu bar itself is not in the window.
+        """
+        action = QAction(text, self)
+        if shortcut is not None:
+            action.setShortcut(shortcut)
+        if role is not None:
+            action.setMenuRole(role)
+        action.triggered.connect(slot)
+        menu.addAction(action)
+        return action
+
     def _on_show_launcher_clicked(self) -> None:
         if self._show_launcher_callback is not None:
             self._show_launcher_callback()
@@ -803,7 +901,7 @@ class EditorWindow(QMainWindow):
             return
         self.load_pixmap(QPixmap.fromImage(image), background=False)
 
-    def _open_help(self) -> None:
+    def open_help(self) -> None:
         # resolves both from a source checkout and from a PyInstaller bundle
         base = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent))
         help_file = base / "help.html"
