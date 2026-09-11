@@ -119,6 +119,22 @@ And `aca5463` exists *solely* to repair the Windows-only TA-211 tests the rebuil
 
 **Real cost of rejecting the rebuild:** unpick `ca71881` + `5c5e0a1` + `aca5463` + the docstring and thumbnail-fallback work in `cc5d893` + the launcher and strip diagrams in `1eb6421`. That is a considered decision, not a one-commit revert, and it should be made knowing that.
 
+**Measured afterwards, confirming the above.** `git revert --no-commit ca71881` on a detached `origin/ui-polish` worktree (full transcript in `BUILD_LOG.md`, 2026-09-11):
+
+```
+CONFLICT (content): Merge conflict in python/launcher.py
+CONFLICT (content): Merge conflict in python/tests/test_regressions.py
+error: could not revert ca71881... feat(launcher): rebuild the floating panel and docked strip
+```
+
+Three conflicting hunks in `launcher.py` (the capture-button row, the full-screen button, and the whole recording-status/Stop/RECENT block) and one in `test_regressions.py` spanning lines 2525–2734 — recorded as *"the whole 'Launcher redesign' test section added by `ca71881` and extended by later commits (`5c5e0a1`, `aca5463`)"*, which is the dependency chain above, independently observed. `theme.py` auto-merged cleanly, its 12 added tokens having no later edits to collide with.
+
+**And the conflicts are not the dangerous part.** Inspected on the mid-revert tree: `_apply_hotkey_labels()` sits entirely **outside** every conflict hunk and merges silently, still calling `self._btn_record.setToolTip(...)` — while `grep` found **zero** `_btn_record = ` creation lines, those having been removed cleanly with no conflict at all.
+
+Confirmed against `ui-polish`'s own line positions: `_btn_record` is created at `launcher.py:240`, which falls between the 216–229 and 265–340 conflict hunks and so is untouched by any marker; `_apply_hotkey_labels()` is at `:487` with its surviving call at `:500`, far outside all three. `ca71881`'s own references to the widget revert away with it; the one that survives is the reference `5c5e0a1` introduced, because that is a different commit and reverting `ca71881` does not touch it.
+
+So a fully hand-resolved revert produces a tree that **still crashes** on `register_global_hotkeys=True` — the real startup path, and precisely the one the suite structurally avoids. **A conflict-free resolution is the worse outcome here**, because the four conflicts at least demand attention, while the dangling reference announces itself to nothing.
+
 **What the commit actually does, measured:**
 
 | | `main` | `ui-polish` |
@@ -131,7 +147,16 @@ And `aca5463` exists *solely* to repair the Windows-only TA-211 tests the rebuil
 
 The mode concept is genuinely gone, not softened — confirmed by attribute count, not by reading the summary. Stop is a real separate full-width control (`launcher.py:271–278`), hidden by default and shown on `_set_recording_state` (`:604`), styled `DANGER` with a red frame border (`:901`) — matching the commit body's description exactly. `refresh_recent()` does read `paths.history_dir()` directly (`:630`, `:641`) rather than asking the editor, as claimed, and guards with `getattr(self, "_recent_slots", [])`.
 
-Two small imprecisions: the commit says "eleven hand-drawn icon factories" where I count **ten** matching `_make_*icon` (possibly one under a different name), and "launcher.py loses ~150 lines" where the net across the whole branch is **−5** — that claim is about this commit alone, which I could not isolate without `git show ca71881 --stat`.
+**Two imprecisions in the commit body, both now isolated and confirmed** (`git show ca71881 --stat/--numstat`, transcript in `BUILD_LOG.md`):
+
+| Commit body says | Measured for `ca71881` alone |
+|---|---|
+| "launcher.py loses ~150 lines" | `392 409 python/launcher.py` — net **−17**, an overstatement of roughly 9× |
+| "Eleven hand-drawn icon factories and `_style_mode_icon`" | **Ten** `_make_*icon` functions, listed by line at `ca71881^`, plus `_style_mode_icon` — eleven *functions*, ten *factories* |
+
+The whole commit is 596 insertions / 446 deletions across three files; `launcher.py` is churn rather than reduction — 801 of its lines changed for a net of −17. Neither imprecision affects the change's substance, but "loses ~150 lines" is the kind of claim a reviewer uses to size a diff before reading it.
+
+*(`BUILD_LOG.md`'s own entry states the overstatement as "roughly 30×" — that figure is 150 ÷ −5, the whole-branch net, rather than 150 ÷ −17, this commit's. The correct factor is ~9×.)*
 
 **A new coupling worth knowing about.** RECENT now reads `paths.history_dir()` — the same directory `_prune_unreadable_history()` deletes from on every launch. The panel's "confirm a capture worked without opening the editor" affordance is therefore coupled to history retention policy: prune aggressively and RECENT goes blank. Not a defect, but a dependency that did not exist before and is not documented.
 
@@ -155,4 +180,4 @@ Revised from §5's, on the basis of the above:
 
 ## What I didn't do
 
-I did not run the test suite on any branch — the "351 tests, ~12s" and "315 of 320 on a Mac" figures are unverified, though nothing measured contradicts them. I did not run the app or capture anything on real hardware, so the HiDPI fix is verified by reading and by its tests, not by a measured before/after on a HiDPI display — that measurement is still owed. I did not read `ui-polish.diff` in full (230KB, and it includes `macos-support`'s changes by virtue of the stacking), so the launcher rebuild in `ca71881` has been reasoned about from its commit message and the handover's account, not reviewed line by line. Issue creation timestamps were not captured, so the explanation for 13 → 15 open issues is inference. And no PR was merged, rebased, modified or pushed in the course of this — the five worktrees under `artifacts/review/` are detached and read-only.
+I did not run the test suite on any branch — the "351 tests, ~12s" and "315 of 320 on a Mac" figures are unverified, though nothing measured contradicts them. I did not run the app or capture anything on real hardware, so the HiDPI fix is verified by reading and by its tests, not by a measured before/after on a HiDPI display — that measurement is still owed. `ca71881` was subsequently isolated — `git show --stat/--numstat` and a trial `git revert --no-commit` on a detached worktree, both transcribed in `BUILD_LOG.md` — so §6's line-count, factory-count and unpick-cost findings are now measured rather than inferred. What that revert could *not* establish is whether a hand-resolved unpick yields a running application; the conflicts stop it before a tree exists. I did not judge the rebuilt launcher visually — nobody has; it has not been run on Windows, and three-times-the-height is a claim about a screen, not a diff. Issue creation timestamps were not captured, so the explanation for 13 → 15 open issues is inference. And no PR was merged, rebased, modified or pushed in the course of this — the five worktrees under `artifacts/review/` are detached and read-only.
