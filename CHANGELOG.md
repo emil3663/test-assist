@@ -5,6 +5,8 @@ release; only tagged versions appear as releases.
 
 ## [Unreleased]
 
+## [1.4.0] — 2026-09-12
+
 ### Fixed
 
 - **A second launch silently killed the first, losing unsaved annotation
@@ -169,6 +171,26 @@ release; only tagged versions appear as releases.
   (`set_show_launcher_callback()`) rather than importing `FloatingLauncher`
   directly, which would create an import cycle; `main.py` wires it to
   `launcher.restore` in `_setup_tray()`, alongside the tray's own wiring.
+- **A HiDPI capture discarded three quarters of the pixels it grabbed.** A
+  region selection on a display above 100% scaling — every Retina Mac, and
+  every Windows machine at 125% or 150% — was composited into a pixmap sized
+  in logical pixels, resampling the device pixels `grabWindow()` returned down
+  to roughly the selection's on-screen size. A 400×300 selection on a 2.0
+  screen grabbed 800×600 real pixels and exported 400×300. For a tool whose
+  output is evidence that is a correctness problem rather than a cosmetic one:
+  1px borders and antialiased small text are exactly what a tester circles,
+  and exactly what does not survive the downsample. Captures are now sized in
+  device pixels at the highest ratio among the contributing screens, so a
+  selection spanning a sharp screen and a coarse one keeps the sharp half at
+  full detail. Ordinary 1.0-ratio hardware is unaffected, with a regression
+  test pinning that.
+- **A full-screen capture wrote a device-sized file containing logical-sized
+  content.** On a 125% display the result was a 1920×1080 PNG holding only
+  1536×864 of picture in the top-left with black filling the rest, because the
+  full-screen path emitted a pixmap still tagged with the screen's device
+  pixel ratio, and the canvas measures its own geometry in device pixels. The
+  full-screen path now applies the same ratio normalisation the region path
+  does. Single-monitor reproducible; present since before 1.3.0.
 
 ### Added
 
@@ -297,6 +319,8 @@ release; only tagged versions appear as releases.
     tooltips (the same tradeoff the launcher's own icon buttons already
     make) so the row has real margin at 960px rather than an exact-pixel
     fit.
+- `.gitignore`'s fifth line merged two patterns onto one line, so neither
+  `.venv/` nor `.claude/` was actually ignored.
 
 ## [1.3.0] — 2026-08-31
 
