@@ -25,7 +25,8 @@ from PySide6.QtGui import QColor
 from PySide6.QtWidgets import QApplication, QPushButton
 
 from editor import EditorWindow
-from theme import BG_700, EDITOR_STYLE
+import theme
+from theme import BG_700
 
 pytestmark = pytest.mark.visual
 
@@ -111,7 +112,7 @@ def test_TA221_copy_and_export_render_full_text_with_no_clipped_descenders(qapp)
     """
     app = QApplication.instance()
     app.setStyle("Fusion")
-    app.setStyleSheet(EDITOR_STYLE)
+    app.setStyleSheet(theme.editor_style())
 
     editor = EditorWindow()
     editor.show()
@@ -160,7 +161,7 @@ def test_ink_extent_detection_actually_catches_a_clipped_button(qapp) -> None:
     """
     app = QApplication.instance()
     app.setStyle("Fusion")
-    app.setStyleSheet(EDITOR_STYLE)
+    app.setStyleSheet(theme.editor_style())
     background = QColor(BG_700)
 
     control = QPushButton("Copy")

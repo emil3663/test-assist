@@ -67,35 +67,110 @@ def ui_font(point_size: int, weight: QFont.Weight = QFont.Weight.Normal) -> QFon
     font.setWeight(weight)
     return font
 
-# Colour tokens
-ACCENT      = "#7c83fd"
-DANGER      = "#e94560"
+# ── Colour tokens ────────────────────────────────────────────────────────────
+#
+# Two palettes, chosen once at startup from whatever the OS is set to (see
+# use_scheme()). Deliberately a binary: light or dark, no in-app toggle and
+# nothing persisted, because a third state is a preference to store, migrate
+# and keep in step with the OS, and this does not need one.
+#
+# SCOPE, and the line that keeps this small: these tokens style the
+# application's own chrome only - the launcher panel, the editor's toolbars
+# and docks. They do NOT reach canvas.py. Annotations are painted on top of
+# the user's screenshot, not on app background, so their colours must not
+# depend on the tester's OS setting: the same defect marked up on two
+# machines has to export the same evidence. canvas.py solves "unknown
+# background" its own way already - see the black dashed line drawn under
+# the white one for the selection marquee, which is legible over anything.
+#
+# The launcher is a frameless panel painted by hand, so it needs PANEL_* as
+# RGBA values rather than stylesheet rules.
 
-# Interaction states for the two action colours. They existed only as
-# one-off literals inside launcher.py's stylesheet methods, in a second
-# palette of their own; naming them here is what lets the launcher and the
-# editor agree without either hardcoding the other's hex.
-ACCENT_HOVER   = "#8f95ff"
-ACCENT_PRESSED = "#666dd4"
-DANGER_HOVER   = "#f25a73"
-DANGER_PRESSED = "#c9364e"
+_DARK = {
+    "ACCENT":         "#7c83fd",
+    # Deepens on hover rather than lightening, which is the less obvious
+    # direction on a dark UI and the one the contrast test forces: these
+    # buttons carry white labels, and the lighter #8f95ff measured 2.65:1
+    # against white - under the 3:1 floor. ACCENT -> HOVER -> PRESSED is
+    # therefore one consistent darkening ramp.
+    "ACCENT_HOVER":   "#6f77f2",
+    "ACCENT_PRESSED": "#666dd4",
+    "DANGER":         "#e94560",
+    "DANGER_HOVER":   "#f25a73",
+    "DANGER_PRESSED": "#c9364e",
+    "BG_900":         "#0d0d1a",
+    "BG_800":         "#13132a",
+    "BG_700":         "#1a1b35",
+    "LINE":           "#2a2a4e",
+    "LINE_STRONG":    "#3a3a5e",
+    "TEXT":           "#e0e6f0",
+    "MUTED":          "#8892a4",
+    "PANEL_BG":       (13, 13, 26, 242),
+    "PANEL_BORDER":   (124, 131, 253, 80),
+}
 
-# The launcher is a frameless always-on-top panel painted by hand, so it
-# needs its chrome as values rather than as stylesheet rules. Kept beside
-# the tokens they derive from, so a change to ACCENT reaches the launcher
-# too - which was the whole problem with the amber palette these replace.
-PANEL_BG = (13, 13, 26, 242)        # BG_900 at the panel's own opacity
-PANEL_BORDER = (124, 131, 253, 80)  # ACCENT, heavily muted
-BG_900      = "#0d0d1a"
-BG_800      = "#13132a"
-BG_700      = "#1a1b35"
-LINE        = "#2a2a4e"
-LINE_STRONG = "#3a3a5e"
-TEXT        = "#e0e6f0"
-MUTED       = "#8892a4"
+# Amber rather than a lightened indigo: the launcher was originally amber,
+# and it reads better against a light ground than the indigo does. Darker
+# than that original #c8763a on purpose - white label text on the lighter
+# shade falls below 4.5:1, which is fine on near-black and not on white.
+_LIGHT = {
+    "ACCENT":         "#b0591f",
+    "ACCENT_HOVER":   "#c76a2b",
+    "ACCENT_PRESSED": "#8f4718",
+    "DANGER":         "#c0392b",
+    "DANGER_HOVER":   "#d4503f",
+    "DANGER_PRESSED": "#9c2b1f",
+    "BG_900":         "#f7f7fa",
+    "BG_800":         "#eeeef4",
+    "BG_700":         "#e4e4ec",
+    "LINE":           "#d8d8e2",
+    "LINE_STRONG":    "#c2c2d0",
+    "TEXT":           "#1a1a24",
+    "MUTED":          "#5f6676",
+    "PANEL_BG":       (247, 247, 250, 242),
+    "PANEL_BORDER":   (176, 89, 31, 90),
+}
 
-# Applied to the editor QApplication so all Qt widgets inherit the dark look.
-EDITOR_STYLE = f"""
+# Dark is the default so that importing this module never depends on a live
+# QApplication - use_scheme() replaces these once one exists.
+ACCENT = ACCENT_HOVER = ACCENT_PRESSED = ""
+DANGER = DANGER_HOVER = DANGER_PRESSED = ""
+BG_900 = BG_800 = BG_700 = LINE = LINE_STRONG = TEXT = MUTED = ""
+PANEL_BG = PANEL_BORDER = ()
+is_light = False
+
+
+def use_scheme(light: bool) -> None:
+    """Swap the module's tokens to one palette or the other.
+
+    Must be called before any widget is constructed: consumers read these
+    through the module (`theme.ACCENT`) rather than binding them at import,
+    but a widget already built has its stylesheet string baked in. That is
+    also why there is no live switching when the OS theme changes mid-run -
+    restyling every existing widget is a different and much larger job than
+    picking a palette at startup, and the failure mode of getting it wrong
+    is a half-recoloured window.
+    """
+    global ACCENT, ACCENT_HOVER, ACCENT_PRESSED
+    global DANGER, DANGER_HOVER, DANGER_PRESSED
+    global BG_900, BG_800, BG_700, LINE, LINE_STRONG, TEXT, MUTED
+    global PANEL_BG, PANEL_BORDER, is_light
+
+    palette = _LIGHT if light else _DARK
+    globals().update(palette)
+    is_light = light
+
+
+use_scheme(light=False)
+
+
+def editor_style() -> str:
+    """The application stylesheet, built from whichever palette is active.
+
+    A function rather than a module constant because the palette is not
+    known until a QApplication exists to be asked what the OS is set to.
+    """
+    return f"""
 QMainWindow, QDialog {{
     background-color: {BG_900};
 }}
@@ -156,8 +231,8 @@ QPushButton#btn_primary:hover {{
     /* #9098fe (a bigger lighten) dropped white text to 2.59:1, below the
     3:1 floor - found by the contrast test added for item 3, not reported
     separately. This lighten is smaller specifically to stay above it. */
-    background-color: #7f86fd;
-    border-color: #7f86fd;
+    background-color: {ACCENT_HOVER};
+    border-color: {ACCENT_HOVER};
     color: #ffffff;
 }}
 QPushButton#btn_danger {{
@@ -166,12 +241,12 @@ QPushButton#btn_danger {{
     border-color: {DANGER};
 }}
 QPushButton#btn_danger:hover {{
-    background-color: #ef6070;
-    border-color: #ef6070;
+    background-color: {DANGER_HOVER};
+    border-color: {DANGER_HOVER};
     color: #ffffff;
 }}
 QPushButton#btn_help {{
-    background-color: #1a6fc4;
+    background-color: {ACCENT};
     color: #ffffff;
     border: none;
     border-radius: 14px;
@@ -190,7 +265,7 @@ QPushButton[smallIconButton="true"] {{
     font-size: 12px;
 }}
 QPushButton#btn_help:hover {{
-    background-color: #2585e0;
+    background-color: {ACCENT_HOVER};
     color: #ffffff;
     border: none;
 }}
