@@ -925,3 +925,98 @@ run immediately after inspecting the conflict markers; nothing was
 committed. The worktree (`artifacts/review/drop-test`) has been removed
 and `git worktree prune` run — `git worktree list` shows only the five
 per-PR review worktrees.
+
+## `ca71881` re-isolated — arithmetic correction, and a conflict-free revert would still crash — 2026-09-11
+
+Re-run of the two commands above, this time checking the one thing the
+prior entry did not: whether a *hand-resolved* revert produces a tree
+that actually runs, not just one that reverts without conflict markers.
+
+**`git show ca71881 --stat` (verbatim, unchanged from the prior run):**
+
+```
+commit ca718819e15fb29f5018976a486534445f867b94
+Author: Martin Hugo <m.hugo@guardian360.nl>
+Date:   Fri Sep 11 12:56:53 2026 +0200
+
+    feat(launcher): rebuild the floating panel and docked strip
+    [...]
+
+ python/launcher.py               | 801 +++++++++++++++++++--------------------
+ python/tests/test_regressions.py | 229 +++++++++--
+ python/theme.py                  |  12 +
+ 3 files changed, 596 insertions(+), 446 deletions(-)
+```
+
+**Correcting an arithmetic slip in the prior entry.** That entry called
+the "~150 lines" overstatement "roughly 30x" — that number is
+150 ÷ 5 (the whole-branch net, from §6's own table), not 150 ÷ 17 (this
+commit's own net, from `--numstat`: `392 409 python/launcher.py`, net
+−17). The correct factor for the claim as written — about *this commit*
+— is **~9x**, not 30x. The −5 whole-branch net and the −17 single-commit
+net are both real, measured numbers; they just answer different
+questions, and the prior entry compared the claim to the wrong one.
+
+**`git worktree add --detach artifacts/review/drop-test origin/ui-polish`
+then `git revert --no-commit ca71881`** reproduces exactly the prior
+result — same two files, same three hunks in `launcher.py` (lines
+194–210, 216–229, 265–340 in the marked-up file), same single hunk in
+`test_regressions.py` (2525–2734), `theme.py` auto-merging cleanly:
+
+```
+Auto-merging python/launcher.py
+CONFLICT (content): Merge conflict in python/launcher.py
+Auto-merging python/tests/test_regressions.py
+CONFLICT (content): Merge conflict in python/tests/test_regressions.py
+Auto-merging python/theme.py
+error: could not revert ca71881... feat(launcher): rebuild the floating panel and docked strip
+```
+
+**The more important question: does the tree left behind actually run?**
+`_apply_hotkey_labels()` — added by `5c5e0a1`, two commits after
+`ca71881`, and not touched by reverting `ca71881` alone — calls
+`self._btn_record.setToolTip("Start recording (Alt+V)")` at
+`launcher.py:479` in the mid-revert tree. That call site sits *outside*
+all three conflict hunks (479 falls between the 265–340 hunk and nothing
+else follows it), so it merges silently, unchanged, on both sides of the
+conflict — there is no marker to alert a reviewer to it.
+
+Checked directly, on the mid-revert file, before aborting:
+
+```
+$ grep -n "_btn_record" python/launcher.py
+479:            self._btn_record.setToolTip("Start recording (Alt+V)")
+
+$ grep -n "_btn_record\s*=" python/launcher.py
+(no output)
+```
+
+Every `self._btn_record = ...` creation line (`launcher.py:240–244` on
+clean `ui-polish` — the button's construction, its `clicked.connect`,
+and its later `setIcon`/`setToolTip` calls in `_set_recording_state`)
+was removed by the revert **without a conflict** — that part of
+`ca71881`'s patch applied cleanly, since nothing later touches those
+exact lines. The one survivor, `_apply_hotkey_labels()`'s reference, is
+untouched because it belongs to a different commit (`5c5e0a1`) that
+this revert does not target.
+
+**Conclusion: a fully hand-resolved revert of `ca71881` — with both
+conflicting hunks in `launcher.py` and the one in `test_regressions.py`
+resolved in the "drop the rebuild" direction — leaves `_btn_record`
+uncreated while `_apply_hotkey_labels()` still calls a method on it.**
+That path runs whenever `register_global_hotkeys=True`, which is the
+real application's startup path and the one the test suite structurally
+avoids (documented precedent: this is the same class of failure
+`5c5e0a1` itself was written to fix, and the same class `aca5463`
+patched again after the rebuild). A conflict-free, carefully
+hand-resolved revert is therefore a **worse** outcome than the conflict
+git already reports: the conflict at least stops a reviewer before a
+broken tree exists, where a quiet hand-resolution would not.
+
+`git revert --abort` was run immediately after this check; nothing was
+committed or left staged. The worktree
+(`artifacts/review/drop-test`) has been removed (`git worktree remove`
+hit the same Windows file-lock `Permission denied` as before —
+resolved with `rm -rf` once the shell's working directory had moved off
+it, followed by `git worktree prune`). `git worktree list` again shows
+only the five per-PR review worktrees.
