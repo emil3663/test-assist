@@ -84,6 +84,36 @@ For two pieces the seam is safe by construction (piece 2's `dest.x` equals piece
 
 **Ask before merging:** add `1.25, 1.5` to that loop and a three-piece layout, and report whether it still passes. This machine's own laptop runs at 125%.
 
+### The fix is incomplete — the full-screen path has the same defect and #8 does not touch it
+
+Found by building both branches and taking a real capture on the 125% laptop, not by reading.
+
+Two full-screen captures, one per build, measured: **a 1920×1080 file containing only 1536×864 of content in the top-left, black elsewhere.** Those are exactly the device and logical dimensions of a 1080p panel at 125%. The two builds' output differs by 49 pixels — the same capture path in both.
+
+Each link verified:
+
+1. `_grab_full_capture()` lives in **`launcher.py`**, not `capture.py`, and reads `pixmap = self._current_screen().grabWindow(0)` — byte-identical on `main` and `ui-polish`, with **no `setDevicePixelRatio` call anywhere in either file**.
+2. **PR #8's diff touches `capture.py`, `screen_geometry.py` and two test files — zero lines of `launcher.py`.**
+3. On a 1.25 screen, `grabWindow(0)` returns a 1920×1080 pixmap *tagged* DPR 1.25.
+4. The fix's own commit body names this hazard exactly: *"canvas.py measures annotation coordinates and its own widget size from `_pixmap.width()`, which is device pixels, so a tagged pixmap would render into a quarter of the widget and put every annotation at half its intended position."*
+5. That is precisely why it calls `setDevicePixelRatio(1.0)` on **both** results inside `capture.py`, the no-pieces fallback included.
+6. The full-screen path never enters `capture.py`. It hands a DPR-tagged pixmap straight into the code the fix's own author documented as unable to accept one.
+
+**Remedy — the same line, in the place the fix did not reach:**
+
+```python
+def _grab_full_capture(self) -> None:
+    pixmap = self._current_screen().grabWindow(0)
+    pixmap.setDevicePixelRatio(1.0)          # matches capture.py's normalisation
+    self._on_capture_ready(pixmap)
+```
+
+**This is not a regression from this contribution.** It is pre-existing on `main` and ships in v1.4.0-rc5 today: every user on a scaled display — 125% and 150% being the ordinary Windows laptop — gets full-screen captures that are black-padded and carry logical-resolution content inside a device-sized file. For a tool whose output is evidence, that is a correctness defect, and it is single-monitor reproducible.
+
+**It should fold into #8 rather than become a separate PR.** Same defect class, same one-line remedy; merging #8 without it would close the issue while leaving half the capture surface broken — worse than not closing it, because the ticket would then read as done.
+
+**Not yet done:** diagnosed from the artefact plus the code, not by running the patched line. Confirmation is that one line plus a re-capture — if the black padding goes and content fills 1920×1080, it is proven.
+
 **On TA-225 and TA-223.** The handover's reasoning that TA-225 (blank capture) is probably unrelated holds — this fix changes result *sizing*, and can make a capture softer or sharper but never blank. TA-223 (selection rectangle jumping at a mixed-DPI boundary) is untouched by this PR for a good reason: it lives in `mouseMoveEvent`'s `globalPosition()` tracking during the drag, not in the grab path. Neither should be closed on the back of this fix.
 
 ---
