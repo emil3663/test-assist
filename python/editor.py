@@ -315,16 +315,21 @@ class EditorWindow(QMainWindow):
             "pen":       "#ff3b30",
         }
 
+        # The second field is an icon name from theme.ICONS, not a glyph:
+        # these were emoji, which the colour-emoji font draws as bitmaps in
+        # its own colours - pixelated at any size it has no bitmap for, and
+        # unable to follow the palette, which is what made them illegible
+        # once there was a light one.
         _TOOLS = [
-            ("select",    "🖱",  "Select (S)",       False),
-            ("crop",      "✂",  "Crop (X)",          False),
-            ("blur",      "▒",  "Blur (B)",          False),
-            ("text",      "T",   "Text (T)",          True),
-            ("highlight", "🟡", "Highlight (H)",      True),
-            ("circle",    "⭕", "Circle (C)",         True),
-            ("arrow",     "→",  "Arrow (A)",          True),
-            ("rect",      "▭",  "Rectangle (R)",      True),
-            ("pen",       "✏", "Pen (P)",             True),
+            ("select",    "select",    "Select (S)",     False),
+            ("crop",      "crop",      "Crop (X)",       False),
+            ("blur",      "blur",      "Blur (B)",       False),
+            ("text",      "text",      "Text (T)",       True),
+            ("highlight", "highlight", "Highlight (H)",  True),
+            ("circle",    "circle",    "Circle (C)",     True),
+            ("arrow",     "arrow",     "Arrow (A)",      True),
+            ("rect",      "rect",      "Rectangle (R)",  True),
+            ("pen",       "pen",       "Pen (P)",        True),
         ]
 
         layout.addStretch()
@@ -345,7 +350,9 @@ class EditorWindow(QMainWindow):
 
             vl.addStretch(1)
 
-            btn = QPushButton(icon)
+            btn = QPushButton()
+            btn.setIcon(theme.icon_pixmap(icon, 18, theme.TEXT))
+            btn.setIconSize(QSize(18, 18))
             btn.setCheckable(True)
             btn.setFixedSize(44, 30)
             btn.setToolTip(tip)
@@ -376,7 +383,8 @@ class EditorWindow(QMainWindow):
         # History (past app-generated exports) and a fresh capture were
         # the only ways to bring an image in; there was no way to pull in
         # an external file (TA-214).
-        self._btn_open_image = QPushButton("📂")
+        self._btn_open_image = QPushButton()
+        self._btn_open_image.setIcon(theme.icon_pixmap("open", 16, theme.MUTED))
         self._btn_open_image.setObjectName("btn_open_image")
         self._btn_open_image.setProperty("smallIconButton", True)
         self._btn_open_image.setFixedSize(28, 28)
@@ -388,7 +396,8 @@ class EditorWindow(QMainWindow):
         # launcher, so a user working from the Editor had no path to it
         # without switching back (TA-218). No-op until
         # set_check_updates_callback() is wired, same as Show Launcher.
-        self._btn_check_updates = QPushButton("🔄")
+        self._btn_check_updates = QPushButton()
+        self._btn_check_updates.setIcon(theme.icon_pixmap("updates", 16, theme.MUTED))
         self._btn_check_updates.setObjectName("btn_check_updates")
         self._btn_check_updates.setProperty("smallIconButton", True)
         self._btn_check_updates.setFixedSize(28, 28)
@@ -400,7 +409,8 @@ class EditorWindow(QMainWindow):
         # Once the launcher is hidden (its own X, or the tray), this is the
         # only route back besides the tray icon, which Windows hides in the
         # overflow by default.
-        self._show_launcher_btn = QPushButton("🏠")
+        self._show_launcher_btn = QPushButton()
+        self._show_launcher_btn.setIcon(theme.icon_pixmap("home", 16, theme.MUTED))
         self._show_launcher_btn.setObjectName("btn_show_launcher")
         self._show_launcher_btn.setProperty("smallIconButton", True)
         self._show_launcher_btn.setFixedSize(28, 28)
@@ -409,7 +419,8 @@ class EditorWindow(QMainWindow):
         layout.addWidget(self._show_launcher_btn, 0, Qt.AlignmentFlag.AlignVCenter)
 
         # About button — beside Help, far right of toolbar
-        self._about_btn = QPushButton("ⓘ")
+        self._about_btn = QPushButton()
+        self._about_btn.setIcon(theme.icon_pixmap("about", 16, theme.MUTED))
         self._about_btn.setObjectName("btn_about")
         self._about_btn.setProperty("smallIconButton", True)
         self._about_btn.setFixedSize(28, 28)
@@ -418,7 +429,8 @@ class EditorWindow(QMainWindow):
         layout.addWidget(self._about_btn, 0, Qt.AlignmentFlag.AlignVCenter)
 
         # Help button — far right of toolbar
-        help_btn = QPushButton("?")
+        help_btn = QPushButton("" if theme.ICON_FONT_FAMILY else "?")
+        help_btn.setIcon(theme.icon_pixmap("help", 16, "#ffffff"))
         help_btn.setObjectName("btn_help")
         help_btn.setFixedSize(28, 28)
         help_btn.setToolTip("Open Help")
@@ -549,7 +561,8 @@ class EditorWindow(QMainWindow):
         # Kept visually primary via the accent-filled btn_primary style and
         # a taller, wider button than the strip around it - this is still
         # the main action of the screen, not just another button in a row.
-        self._btn_save_png = QPushButton("💾  Save PNG")
+        self._btn_save_png = QPushButton("Save PNG")
+        self._btn_save_png.setIcon(theme.icon_pixmap("save", 15, "#ffffff"))
         self._btn_save_png.setObjectName("btn_primary")
         self._btn_save_png.setFixedHeight(28)
         layout.addWidget(self._btn_save_png)
@@ -571,13 +584,20 @@ class EditorWindow(QMainWindow):
         # ── Edit controls stacked vertically ─────────────────────────────
         self._add_section(layout, "Edit")
 
-        self._btn_undo     = QPushButton("↩  Undo")
-        self._btn_redo     = QPushButton("↪  Redo")
-        self._btn_delete   = QPushButton("✂  Delete Selected")
-        self._btn_front    = QPushButton("⬆  Bring to Front")
-        self._btn_back     = QPushButton("⬇  Send Backward")
-        self._btn_backmost = QPushButton("⤓  Send to Back")
-        self._btn_clear    = QPushButton("🗑  Clear All")
+        self._btn_undo     = QPushButton("Undo")
+        self._btn_undo.setIcon(theme.icon_pixmap("undo", 15, theme.MUTED))
+        self._btn_redo     = QPushButton("Redo")
+        self._btn_redo.setIcon(theme.icon_pixmap("redo", 15, theme.MUTED))
+        self._btn_delete     = QPushButton("Delete Selected")
+        self._btn_delete.setIcon(theme.icon_pixmap("delete", 15, theme.MUTED))
+        self._btn_front     = QPushButton("Bring to Front")
+        self._btn_front.setIcon(theme.icon_pixmap("to_front", 15, theme.MUTED))
+        self._btn_back     = QPushButton("Send Backward")
+        self._btn_back.setIcon(theme.icon_pixmap("backward", 15, theme.MUTED))
+        self._btn_backmost     = QPushButton("Send to Back")
+        self._btn_backmost.setIcon(theme.icon_pixmap("to_back", 15, theme.MUTED))
+        self._btn_clear     = QPushButton("Clear All")
+        self._btn_clear.setIcon(theme.icon_pixmap("clear", 15, "#ffffff"))
         self._btn_clear.setObjectName("btn_danger")
 
         self._btn_undo.setToolTip("Undo (Ctrl+Z)")

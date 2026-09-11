@@ -225,6 +225,9 @@ def main() -> None:
     theme.use_scheme(
         light=app.styleHints().colorScheme() == Qt.ColorScheme.Light
     )
+    # After use_scheme, because the tint comes from the resolved palette;
+    # before any widget, because buttons ask for their icon on construction.
+    theme.load_icon_font(_asset_path("MaterialIcons-Regular.ttf"))
     app.setStyleSheet(theme.editor_style())
     app.setWindowIcon(_make_tray_icon())
 

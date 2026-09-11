@@ -25,6 +25,10 @@ a = Analysis(
     binaries=[],
     datas=[
         (str(REPO / 'assets' / 'icon.ico'), 'assets'),
+        # The UI's icons are glyphs from this font, so a build without it
+        # falls back to text labels on every icon button.
+        (str(REPO / 'assets' / 'MaterialIcons-Regular.ttf'), 'assets'),
+        (str(REPO / 'assets' / 'MaterialIcons-LICENSE.txt'), 'assets'),
         (str(HERE / 'help.html'), '.'),
         # Pulls in imageio_ffmpeg/binaries/ffmpeg-win-*.exe (~83 MB), the
         # actual encoder capture.py shells out to for MP4 assembly.
