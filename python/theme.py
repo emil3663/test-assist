@@ -70,6 +70,22 @@ def ui_font(point_size: int, weight: QFont.Weight = QFont.Weight.Normal) -> QFon
 # Colour tokens
 ACCENT      = "#7c83fd"
 DANGER      = "#e94560"
+
+# Interaction states for the two action colours. They existed only as
+# one-off literals inside launcher.py's stylesheet methods, in a second
+# palette of their own; naming them here is what lets the launcher and the
+# editor agree without either hardcoding the other's hex.
+ACCENT_HOVER   = "#8f95ff"
+ACCENT_PRESSED = "#666dd4"
+DANGER_HOVER   = "#f25a73"
+DANGER_PRESSED = "#c9364e"
+
+# The launcher is a frameless always-on-top panel painted by hand, so it
+# needs its chrome as values rather than as stylesheet rules. Kept beside
+# the tokens they derive from, so a change to ACCENT reaches the launcher
+# too - which was the whole problem with the amber palette these replace.
+PANEL_BG = (13, 13, 26, 242)        # BG_900 at the panel's own opacity
+PANEL_BORDER = (124, 131, 253, 80)  # ACCENT, heavily muted
 BG_900      = "#0d0d1a"
 BG_800      = "#13132a"
 BG_700      = "#1a1b35"
