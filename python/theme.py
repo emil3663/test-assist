@@ -432,6 +432,18 @@ ICONS = {
     "arrow":       "\ue5c8",  # arrow_forward
     "rect":        "\ue835",  # check_box_outline_blank
     "pen":         "\ue3c9",  # edit
+    # Launcher chrome
+    "close":       "\ue5cd",  # close
+    "minimise":    "\ue931",  # minimize
+    "fullscreen":  "\ue30c",  # desktop_windows
+    "expand":      "\ue5d0",  # fullscreen
+    "region":      "\ue3be",  # crop
+    "record":      "\ue061",  # fiber_manual_record
+    "camera":      "\ue412",  # photo_camera
+    "video":       "\ue04b",  # videocam
+    "history":     "\ue889",  # history
+    "dock":        "\uef6f",  # push_pin
+    "stop":        "\ue047",  # stop
 }
 
 
