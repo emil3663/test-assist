@@ -59,9 +59,13 @@ class _EditorStub:
         self.loaded = []
         self.recorded = []
         self.refresh_history_calls = 0
+        self.open_help_calls = 0
 
     def bring_forward(self) -> None:
         self.bring_forward_calls += 1
+
+    def open_help(self) -> None:
+        self.open_help_calls += 1
 
     def load_pixmap(self, pixmap, background: bool = True) -> None:
         self.loaded.append((pixmap, background))
@@ -1282,7 +1286,12 @@ def test_launcher_build_ui_header_controls_have_expected_tooltips(qapp) -> None:
     launcher.show()
     qapp.processEvents()
 
-    assert launcher._btn_open_editor.toolTip() == "Open Editor"
+    # The wordmark was removed from the header, so the TA badge is the only
+    # place the floating panel names the app - its tooltip carries the name
+    # as well as the action. accessibleName stays the bare action, since
+    # that is what TA-228's black-box lane finds the button by.
+    assert launcher._btn_open_editor.toolTip() == "Test Assist \u2014 Open Editor"
+    assert launcher._btn_open_editor.accessibleName() == "Open Editor"
     assert launcher._btn_check_updates.toolTip() == "Check for Updates"
     assert launcher._btn_dock_right.toolTip() == "Dock to right side"
     assert launcher._btn_close.toolTip() == "Hide to tray"
