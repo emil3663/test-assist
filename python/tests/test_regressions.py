@@ -513,14 +513,16 @@ def test_launcher_build_ui_buttons_include_shortcut_hints(qapp) -> None:
     launcher.show()
     qapp.processEvents()
 
-    # Action button shows "Quick Capture" in photo mode
-    assert launcher._btn_capture.text() == "Quick Capture"
+    # The capture button says what it captures. It used to read "Quick
+    # Capture", which depended on a Photo/Video toggle beside it to mean
+    # anything - each action is now its own button.
+    assert launcher._btn_capture.text().strip() == "Capture Region"
     # register_global_hotkeys defaults to False (see TA-211 tests below for
     # why - real, shared OS state that every other launcher-constructing
     # test in this suite would otherwise fight over) - so nothing is
     # actually bound here, and the tooltips must not claim otherwise.
-    assert "Alt+P" not in launcher._btn_photo.toolTip()
-    assert "Alt+V" not in launcher._btn_video.toolTip()
+    assert "Alt+P" not in launcher._btn_capture.toolTip()
+    assert "Alt+V" not in launcher._btn_record.toolTip()
     assert "Alt+Shift+P" not in launcher._btn_full_capture.toolTip()
     launcher.close()
 
@@ -857,7 +859,7 @@ def test_TA211_hotkeys_are_not_touched_without_opting_in(qapp) -> None:
     try:
         assert launcher._hotkeys is None
         assert not any(launcher._hotkey_registered.values())
-        assert "Alt+P" not in launcher._btn_photo.toolTip()
+        assert "Alt+P" not in launcher._btn_capture.toolTip()
         assert not launcher._hint_lbl.isVisible()
     finally:
         launcher.close()
@@ -1100,26 +1102,28 @@ def test_TA215_docked_capture_icon_shows_recording_state(qapp) -> None:
     launcher._dock_right()
     qapp.processEvents()
 
-    idle_tooltip = launcher._btn_dock_capture.toolTip()
+    idle_tooltip = launcher._btn_dock_record.toolTip()
     assert launcher._dock_rec_label.isHidden()
 
-    launcher._set_mode("video")
     launcher._toggle_recording()  # start
 
-    assert launcher._btn_dock_capture.toolTip() != idle_tooltip
+    assert launcher._btn_dock_record.toolTip() != idle_tooltip
     assert not launcher._dock_rec_label.isHidden()
     assert launcher._dock_rec_label.text() == "00:00"
+    # The stills would only compete for the click that stops the recording.
+    assert launcher._btn_dock_capture.isHidden()
+    assert launcher._btn_dock_full.isHidden()
 
     launcher._toggle_recording()  # stop
 
-    assert launcher._btn_dock_capture.toolTip() == idle_tooltip
+    assert launcher._btn_dock_record.toolTip() == idle_tooltip
     assert launcher._dock_rec_label.isHidden()
+    assert not launcher._btn_dock_capture.isHidden()
     launcher.close()
 
 
 def test_TA215_docked_recording_indicator_shows_elapsed_time(qapp) -> None:
     launcher = FloatingLauncher(_EditorStub())
-    launcher._set_mode("video")
     launcher._toggle_recording()
 
     launcher._tick()
@@ -1138,33 +1142,39 @@ def test_TA215_clicking_the_docked_capture_icon_again_stops_the_recording(qapp) 
     capture icon does nothing"."""
     launcher = FloatingLauncher(_EditorStub())
     launcher._dock_right()
-    launcher._set_mode("video")
 
-    launcher._btn_dock_capture.click()
+    launcher._btn_dock_record.click()
     assert launcher._rec_timer.isActive()
 
-    launcher._btn_dock_capture.click()
+    launcher._btn_dock_record.click()
     assert not launcher._rec_timer.isActive()
     launcher.close()
 
 
-def test_TA215_docked_capture_icon_shows_a_distinct_video_mode_appearance(qapp) -> None:
-    """Re-tested on rc4: the recording-in-progress feedback works, but
-    Photo vs Video mode was indistinguishable on the docked icon until a
-    recording was actually running - reuses _make_video_icon(), the same
-    glyph the undocked mode buttons already use for this distinction."""
+def test_TA215_the_docked_record_control_is_distinct_from_the_stills(qapp) -> None:
+    """Originally: Photo vs Video mode was indistinguishable on the docked
+    icon until a recording was running, because one control meant two
+    things depending on an invisible mode.
+
+    There is no mode now - record is its own always-present control, round
+    and red where the stills are square outlines - so the question "what
+    will this click do" is answered by looking, before anything starts.
+    That is the property worth pinning; the mode it replaced is gone.
+    """
     launcher = FloatingLauncher(_EditorStub())
     launcher._dock_right()
+    try:
+        still = launcher._btn_dock_capture.icon().pixmap(18, 18).toImage()
+        record = launcher._btn_dock_record.icon().pixmap(18, 18).toImage()
+        assert still != record, "record looks the same as a still capture"
 
-    launcher._set_mode("photo")
-    photo_icon = launcher._btn_dock_capture.icon().pixmap(20, 20).toImage()
-
-    launcher._set_mode("video")
-    video_icon = launcher._btn_dock_capture.icon().pixmap(20, 20).toImage()
-
-    assert photo_icon != video_icon, \
-        "selecting Video mode before recording must look different from Photo mode on the docked icon"
-    launcher.close()
+        # And it says which it is, rather than swapping meaning silently.
+        assert "record" in launcher._btn_dock_record.toolTip().lower()
+        launcher._toggle_recording()
+        assert "stop" in launcher._btn_dock_record.toolTip().lower()
+        launcher._toggle_recording()
+    finally:
+        launcher.close()
 
 
 def test_TA215_finished_recording_refreshes_history_without_reopening_the_editor(qapp) -> None:
@@ -1272,12 +1282,10 @@ def test_launcher_keyPressEvent_plain_letters_do_not_trigger_actions(qapp) -> No
     qapp.processEvents()
 
     launcher.keyPressEvent(_key_event(Qt.Key.Key_P))
-    assert launcher._mode == "photo"
     assert not launcher.isHidden()
 
     launcher.keyPressEvent(_key_event(Qt.Key.Key_V))
-    assert launcher._mode == "photo"
-    assert not launcher._rec_timer.isActive()
+    assert not launcher._rec_timer.isActive(), "a plain V started a recording"
     launcher.close()
 
 
@@ -1290,11 +1298,17 @@ def test_launcher_build_ui_header_controls_have_expected_tooltips(qapp) -> None:
     # place the floating panel names the app - its tooltip carries the name
     # as well as the action. accessibleName stays the bare action, since
     # that is what TA-228's black-box lane finds the button by.
-    assert launcher._btn_open_editor.toolTip() == "Test Assist \u2014 Open Editor"
+    assert launcher._btn_open_editor.toolTip() == "Open Editor"
     assert launcher._btn_open_editor.accessibleName() == "Open Editor"
     assert launcher._btn_check_updates.toolTip() == "Check for Updates"
-    assert launcher._btn_dock_right.toolTip() == "Dock to right side"
-    assert launcher._btn_close.toolTip() == "Hide to tray"
+    # One reduced form, not two: this shrinks to the docked strip, which is
+    # the compact mode.
+    assert launcher._btn_dock_right.toolTip() == "Shrink to the compact strip"
+    # The close button hides to the tray with nothing on screen saying so,
+    # which is how it read as "closed, with no way back" - the tooltip and
+    # the footer hint both now say where it went.
+    assert launcher._btn_close.toolTip().startswith("Hide to the tray")
+    assert "tray" in launcher._exit_hint.text().lower()
     launcher.close()
 
 
@@ -1470,9 +1484,15 @@ def test_TA218_update_icon_is_not_the_old_plain_arrow_shape(qapp) -> None:
     suite cannot make (see TA-206 for the same kind of limit)."""
     from launcher import FloatingLauncher
 
-    icon = FloatingLauncher._make_update_icon()
-    pixmap = icon.pixmap(14, 14)
-    image = pixmap.toImage()
+    # The icon the button actually carries, not a factory it no longer
+    # calls: these are glyphs from the icon font now, and a test aimed at
+    # the old drawing code would keep passing while the button showed
+    # anything at all.
+    launcher = FloatingLauncher(_EditorStub())
+    try:
+        image = launcher._btn_check_updates.icon().pixmap(14, 14).toImage()
+    finally:
+        launcher.close()
 
     old_shape_pixels = {(7, 2), (7, 9), (3, 12), (11, 12)}  # the old icon's line endpoints
     old_shape_survives = all(
@@ -2516,3 +2536,138 @@ def test_the_canvas_does_not_follow_the_os_theme() -> None:
         f"canvas.py imports palette tokens {imported - {'ui_font'}} - annotation "
         "rendering must not depend on the OS theme"
     )
+
+
+# ── Launcher redesign ────────────────────────────────────────────────────────
+
+
+def test_LAUNCH_01_every_capture_action_is_its_own_button(qapp) -> None:
+    """There was a Photo/Video toggle beside the capture button, so what
+    "Quick Capture" did depended on an unlabeled control next to it - mode
+    and action looked identical and neither said which it was."""
+    launcher = FloatingLauncher(_EditorStub())
+    try:
+        assert not hasattr(launcher, "_btn_photo"), "the mode toggle is back"
+        assert not hasattr(launcher, "_mode"), "the mode state is back"
+        assert launcher._btn_capture.text().strip() == "Capture Region"
+        assert launcher._btn_full_capture.text().strip() == "Full Screen"
+    finally:
+        launcher.close()
+
+
+def test_LAUNCH_02_recording_replaces_the_capture_actions_with_stop(qapp) -> None:
+    """The thing this redesign is for. Stopping used to be the same button
+    that started, relabelled; a tester two minutes into a recording should
+    not have to work out which control ends it - that is the specific thing
+    QuickTime gets wrong by hiding stop in the menu bar."""
+    launcher = FloatingLauncher(_EditorStub())
+    try:
+        assert launcher._btn_stop.isHidden()
+        assert launcher._rec_row.isHidden()
+
+        launcher._toggle_recording()
+        assert not launcher._btn_stop.isHidden(), "no stop control while recording"
+        assert not launcher._rec_row.isHidden(), "no recording indicator"
+        # Nothing else should compete for the click that stops it.
+        assert launcher._btn_capture.isHidden()
+        assert launcher._btn_full_capture.isHidden()
+        assert launcher._btn_record.isHidden()
+
+        launcher._toggle_recording()
+        assert launcher._btn_stop.isHidden()
+        assert not launcher._btn_capture.isHidden()
+    finally:
+        launcher.close()
+
+
+def test_LAUNCH_03_the_stop_button_actually_stops(qapp) -> None:
+    """Pinned through the real click rather than the method, since the
+    reported symptom for its predecessor was "clicking it does nothing"."""
+    launcher = FloatingLauncher(_EditorStub())
+    try:
+        launcher._btn_record.click()
+        assert launcher._rec_timer.isActive()
+        launcher._btn_stop.click()
+        assert not launcher._rec_timer.isActive()
+    finally:
+        launcher.close()
+
+
+def test_LAUNCH_04_the_elapsed_clock_runs_in_both_panels(qapp) -> None:
+    """The timer is also evidence: a tester reporting "it froze about forty
+    seconds in" can read the number off rather than estimate it."""
+    launcher = FloatingLauncher(_EditorStub())
+    try:
+        launcher._toggle_recording()
+        launcher._tick()
+        launcher._tick()
+        assert launcher._rec_label.text() == "00:02"
+        assert launcher._dock_rec_label.text() == "00:02"
+        launcher._toggle_recording()
+    finally:
+        launcher.close()
+
+
+def test_LAUNCH_05_recent_slots_come_from_history_not_the_editor(qapp, tmp_path) -> None:
+    """The panel should say whether a capture worked without the editor
+    having been opened, which is the confirmation it gave nowhere before.
+    Reading history directly is what makes that true even for a launcher
+    whose editor has never been shown."""
+    import paths
+    from PySide6.QtGui import QColor, QPixmap
+
+    shot = QPixmap(40, 30)
+    shot.fill(QColor("red"))
+    shot.save(str(paths.history_dir() / "capture_1.png"))
+
+    launcher = FloatingLauncher(_EditorStub())
+    try:
+        launcher.refresh_recent()
+        assert not launcher._recent_slots[0].pixmap().isNull(), "newest capture not shown"
+        assert launcher._recent_slots[0].toolTip() == "capture_1.png"
+        assert launcher._recent_slots[2].pixmap().isNull(), "empty slot should stay empty"
+    finally:
+        launcher.close()
+
+
+def test_LAUNCH_06_recent_survives_an_unreadable_history(qapp, monkeypatch) -> None:
+    """A launcher that will not build because a thumbnail would not load is
+    a worse failure than an empty slot."""
+    import paths
+
+    def _boom():
+        raise OSError("history is unreadable")
+
+    monkeypatch.setattr(paths, "history_dir", _boom)
+    launcher = FloatingLauncher(_EditorStub())
+    try:
+        launcher.refresh_recent()
+        assert all(slot.pixmap().isNull() for slot in launcher._recent_slots)
+    finally:
+        launcher.close()
+
+
+def test_LAUNCH_07_the_strip_is_wide_enough_to_centre_its_own_controls(qapp) -> None:
+    """The strip was 50px wide holding 40px controls inside 8px margins -
+    6px narrower than its own contents - so AlignHCenter had nothing to
+    centre within and every button sat off to one side.
+
+    Measured rather than asserted against a fixed width, so changing the
+    button size or the margins keeps the property rather than breaking it
+    silently: nothing here says "56", only that the gaps match.
+    """
+    launcher = FloatingLauncher(_EditorStub())
+    launcher.show()
+    launcher._dock_right()
+    qapp.processEvents()
+    try:
+        for name, button in [
+            ("region", launcher._btn_dock_capture),
+            ("full screen", launcher._btn_dock_full),
+            ("record", launcher._btn_dock_record),
+        ]:
+            left = button.x()
+            right = launcher.width() - (button.x() + button.width())
+            assert left == right, f"{name} is off-centre in the strip ({left} vs {right})"
+    finally:
+        launcher.close()
