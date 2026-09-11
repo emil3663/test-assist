@@ -2,7 +2,8 @@ __pycache__/
 *.py[cod]
 *.pyo
 .pytest_cache/
-.venv/.claude/
+.venv/
+.claude/
 .vscode/
 
 # Browser test suite
