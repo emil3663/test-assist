@@ -32,7 +32,19 @@ from capture import FrameRecorder, ScreenshotOverlay
 from global_hotkeys import MOD_ALT, MOD_SHIFT, GlobalHotkeyManager
 from screen_geometry import is_within_dock_band, screen_for_rect
 from update_check import UpdateChecker
-from theme import ui_font
+from theme import (
+    ACCENT,
+    ACCENT_HOVER,
+    ACCENT_PRESSED,
+    DANGER,
+    DANGER_HOVER,
+    DANGER_PRESSED,
+    MUTED,
+    PANEL_BG,
+    PANEL_BORDER,
+    TEXT,
+    ui_font,
+)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -129,7 +141,7 @@ class FloatingLauncher(QWidget):
         grip = QLabel()
         grip.setFixedHeight(4)
         grip.setStyleSheet(
-            "QLabel { background-color: rgba(200,120,60,0.25); border-radius: 2px;"
+            "QLabel { background-color: rgba(124,131,253,0.25); border-radius: 2px;"
             " margin: 0px 70px; }"
         )
         float_layout.addWidget(grip, alignment=Qt.AlignmentFlag.AlignHCenter)
@@ -139,12 +151,13 @@ class FloatingLauncher(QWidget):
         header_row.setContentsMargins(0, 0, 0, 0)
         header_row.setSpacing(6)
 
-        title = QLabel("Test Assist")
-        title.setStyleSheet(
-            "color:#f0d0a0; font-size:14px; font-weight:700;"
-            " background:transparent; letter-spacing:1px;"
-        )
-        header_row.addWidget(title, 1)
+        # No title label: at 280px the wordmark was the widest thing in a
+        # panel whose entire job is to stay out of the way of the app under
+        # test, and it said nothing the TA badge beside it does not. The
+        # name moves onto that badge's tooltip, which is where someone who
+        # needs it will look. The stretch stays, so the icons keep their
+        # right alignment and the empty left half remains the drag target.
+        header_row.addStretch(1)
 
         self._btn_dock_right = QPushButton()
         self._btn_dock_right.setFixedSize(26, 26)
@@ -157,7 +170,7 @@ class FloatingLauncher(QWidget):
         self._btn_open_editor.setFixedSize(26, 26)
         self._btn_open_editor.setIcon(self._make_ta_icon())
         self._btn_open_editor.setIconSize(QSize(14, 14))
-        self._btn_open_editor.setToolTip("Open Editor")
+        self._btn_open_editor.setToolTip("Test Assist \u2014 Open Editor")
         # setAccessibleName(), not just the tooltip (TA-228): this is an
         # icon-only button, indistinguishable from its unlabeled siblings
         # to UI Automation without one - the black-box e2e lane needs a
@@ -214,7 +227,7 @@ class FloatingLauncher(QWidget):
 
         self._btn_full_capture = QPushButton()
         self._btn_full_capture.setFixedSize(36, 36)
-        self._btn_full_capture.setIcon(self._make_screen_icon("#b88d6f"))
+        self._btn_full_capture.setIcon(self._make_screen_icon(MUTED))
         self._btn_full_capture.setIconSize(QSize(18, 18))
         self._btn_full_capture.setToolTip(
             "Capture full primary screen including taskbar/time"
@@ -234,7 +247,7 @@ class FloatingLauncher(QWidget):
         # starts empty and hidden rather than claiming anything upfront.
         self._hint_lbl = QLabel("")
         self._hint_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self._hint_lbl.setStyleSheet("color:#7a6050; font-size:10px; background:transparent;")
+        self._hint_lbl.setStyleSheet(f"color:{MUTED}; font-size:10px; background:transparent;")
         self._hint_lbl.hide()
         float_layout.addWidget(self._hint_lbl)
 
@@ -242,7 +255,7 @@ class FloatingLauncher(QWidget):
         self._rec_label = QLabel()
         self._rec_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._rec_label.setStyleSheet(
-            "color:#c04040; font-size:12px; font-weight:700; background:transparent;"
+            f"color:{DANGER}; font-size:12px; font-weight:700; background:transparent;"
         )
         self._rec_label.hide()
         float_layout.addWidget(self._rec_label)
@@ -292,7 +305,7 @@ class FloatingLauncher(QWidget):
 
         self._btn_dock_capture = QPushButton()
         self._btn_dock_capture.setFixedSize(36, 36)
-        self._btn_dock_capture.setIcon(self._make_camera_icon("#f0d0a0"))
+        self._btn_dock_capture.setIcon(self._make_camera_icon(TEXT))
         self._btn_dock_capture.setIconSize(QSize(20, 20))
         self._btn_dock_capture.setToolTip("Quick Capture")
         self._btn_dock_capture.setStyleSheet(self._style_icon_btn())
@@ -306,7 +319,7 @@ class FloatingLauncher(QWidget):
         self._dock_rec_label = QLabel()
         self._dock_rec_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._dock_rec_label.setStyleSheet(
-            "color:#c04040; font-size:9px; font-weight:700; background:transparent;"
+            f"color:{DANGER}; font-size:9px; font-weight:700; background:transparent;"
         )
         self._dock_rec_label.hide()
         dock_layout.addWidget(self._dock_rec_label)
@@ -574,10 +587,10 @@ class FloatingLauncher(QWidget):
             icon = self._make_stop_icon()
             icon_size = QSize(16, 16)
         elif self._mode == "video":
-            icon = self._make_video_icon("#f0d0a0")
+            icon = self._make_video_icon(TEXT)
             icon_size = QSize(20, 20)
         else:
-            icon = self._make_camera_icon("#f0d0a0")
+            icon = self._make_camera_icon(TEXT)
             icon_size = QSize(20, 20)
         self._btn_dock_capture.setIcon(icon)
         self._btn_dock_capture.setIconSize(icon_size)
@@ -662,8 +675,8 @@ class FloatingLauncher(QWidget):
 
     def _refresh_mode_icons(self) -> None:
         """Repaint camera/video glyphs with active vs inactive colors."""
-        active = "#f0d0a0"
-        inactive = "#9b7a64"
+        active = TEXT
+        inactive = MUTED
         self._btn_photo.setIcon(
             self._make_camera_icon(active if self._mode == "photo" else inactive)
         )
@@ -760,8 +773,8 @@ class FloatingLauncher(QWidget):
     def paintEvent(self, _event) -> None:
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
-        p.setPen(QPen(QColor(200, 120, 60, 80), 1))
-        p.setBrush(QBrush(QColor(18, 12, 8, 242)))
+        p.setPen(QPen(QColor(*PANEL_BORDER), 1))
+        p.setBrush(QBrush(QColor(*PANEL_BG)))
         p.drawRoundedRect(self.rect().adjusted(1, 1, -1, -1), 20, 20)
         p.end()
 
@@ -831,67 +844,67 @@ class FloatingLauncher(QWidget):
 
     @staticmethod
     def _style_primary() -> str:
-        return """
-            QPushButton {
-                background-color: #c8763a;
-                color: #fff8f0;
-                border: none;
-                border-radius: 10px;
-                font-weight: 700;
-                font-size: 13px;
-            }
-            QPushButton:hover   { background-color: #d88848; }
-            QPushButton:pressed { background-color: #a86030; }
-        """
-
-    @staticmethod
-    def _style_danger() -> str:
-        return """
-            QPushButton {
-                background-color: #c04040;
+        return f"""
+            QPushButton {{
+                background-color: {ACCENT};
                 color: #ffffff;
                 border: none;
                 border-radius: 10px;
                 font-weight: 700;
                 font-size: 13px;
-            }
-            QPushButton:hover   { background-color: #d05050; }
-            QPushButton:pressed { background-color: #a03030; }
+            }}
+            QPushButton:hover   {{ background-color: {ACCENT_HOVER}; }}
+            QPushButton:pressed {{ background-color: {ACCENT_PRESSED}; }}
+        """
+
+    @staticmethod
+    def _style_danger() -> str:
+        return f"""
+            QPushButton {{
+                background-color: {DANGER};
+                color: #ffffff;
+                border: none;
+                border-radius: 10px;
+                font-weight: 700;
+                font-size: 13px;
+            }}
+            QPushButton:hover   {{ background-color: {DANGER_HOVER}; }}
+            QPushButton:pressed {{ background-color: {DANGER_PRESSED}; }}
         """
 
     @staticmethod
     def _style_outline() -> str:
-        return """
-            QPushButton {
+        return f"""
+            QPushButton {{
                 background-color: transparent;
-                color: #b09070;
-                border: 1px solid rgba(200,120,60,0.3);
+                color: {MUTED};
+                border: 1px solid rgba(124,131,253,0.30);
                 border-radius: 10px;
                 font-weight: 600;
                 font-size: 13px;
-            }
-            QPushButton:hover    { border-color: #c8763a; color: #f0b880; }
-            QPushButton:disabled { color: #5a4030; border-color: rgba(200,120,60,0.1); }
+            }}
+            QPushButton:hover    {{ border-color: {ACCENT}; color: {ACCENT}; }}
+            QPushButton:disabled {{ color: #4a4f63; border-color: rgba(124,131,253,0.10); }}
         """
 
     @staticmethod
     def _style_icon_btn() -> str:
-        """Small icon button (dock / close) in muted orange."""
-        return """
-            QPushButton {
-                background-color: rgba(200,120,60,0.08);
-                color: #c8906a;
-                border: 1px solid rgba(200,120,60,0.25);
+        """Small icon button (dock / close), muted against the panel."""
+        return f"""
+            QPushButton {{
+                background-color: rgba(124,131,253,0.08);
+                color: {MUTED};
+                border: 1px solid rgba(124,131,253,0.25);
                 border-radius: 6px;
                 font-size: 11px;
                 font-weight: 600;
-            }
-            QPushButton:hover {
-                background-color: rgba(200,120,60,0.18);
-                color: #f0b880;
-                border-color: rgba(200,120,60,0.5);
-            }
-            QPushButton:pressed { background-color: rgba(200,120,60,0.30); }
+            }}
+            QPushButton:hover {{
+                background-color: rgba(124,131,253,0.18);
+                color: {ACCENT};
+                border-color: rgba(124,131,253,0.50);
+            }}
+            QPushButton:pressed {{ background-color: rgba(124,131,253,0.30); }}
         """
 
     @staticmethod
@@ -899,25 +912,25 @@ class FloatingLauncher(QWidget):
         if active:
             return """
                 QPushButton {
-                    background-color: rgba(200,120,60,0.22);
-                    border: 1px solid rgba(200,120,60,0.65);
+                    background-color: rgba(124,131,253,0.22);
+                    border: 1px solid rgba(124,131,253,0.65);
                     border-radius: 8px;
                 }
-                QPushButton:hover { background-color: rgba(200,120,60,0.32); }
+                QPushButton:hover { background-color: rgba(124,131,253,0.32); }
             """
         return """
             QPushButton {
                 background-color: transparent;
-                border: 1px solid rgba(200,120,60,0.18);
+                border: 1px solid rgba(124,131,253,0.18);
                 border-radius: 8px;
             }
             QPushButton:hover {
-                background-color: rgba(200,120,60,0.10);
+                background-color: rgba(124,131,253,0.10);
             }
         """
 
     @staticmethod
-    def _make_close_icon(color: str = "#f8d3ad") -> QIcon:
+    def _make_close_icon(color: str = TEXT) -> QIcon:
         pix = QPixmap(14, 14)
         pix.fill(Qt.GlobalColor.transparent)
         p = QPainter(pix)
@@ -930,7 +943,7 @@ class FloatingLauncher(QWidget):
         return QIcon(pix)
 
     @staticmethod
-    def _make_undock_icon(color: str = "#f8d3ad") -> QIcon:
+    def _make_undock_icon(color: str = TEXT) -> QIcon:
         pix = QPixmap(14, 14)
         pix.fill(Qt.GlobalColor.transparent)
         p = QPainter(pix)
@@ -947,7 +960,7 @@ class FloatingLauncher(QWidget):
         return QIcon(pix)
 
     @staticmethod
-    def _make_dock_icon(color: str = "#f8d3ad") -> QIcon:
+    def _make_dock_icon(color: str = TEXT) -> QIcon:
         pix = QPixmap(14, 14)
         pix.fill(Qt.GlobalColor.transparent)
         p = QPainter(pix)
@@ -962,7 +975,7 @@ class FloatingLauncher(QWidget):
         return QIcon(pix)
 
     @staticmethod
-    def _make_pencil_icon(color: str = "#f8d3ad") -> QIcon:
+    def _make_pencil_icon(color: str = TEXT) -> QIcon:
         pix = QPixmap(14, 14)
         pix.fill(Qt.GlobalColor.transparent)
         p = QPainter(pix)
@@ -982,17 +995,17 @@ class FloatingLauncher(QWidget):
         pix.fill(Qt.GlobalColor.transparent)
         p = QPainter(pix)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
-        p.setPen(QPen(QColor("#d7873d"), 1))
-        p.setBrush(QColor("#d7873d"))
+        p.setPen(QPen(QColor(ACCENT), 1))
+        p.setBrush(QColor(ACCENT))
         p.drawRoundedRect(1, 1, 12, 12, 3, 3)
-        p.setPen(QColor("#1f1208"))
+        p.setPen(QColor("#ffffff"))
         p.setFont(ui_font(6, QFont.Weight.Bold))
         p.drawText(pix.rect(), Qt.AlignmentFlag.AlignCenter, "TA")
         p.end()
         return QIcon(pix)
 
     @staticmethod
-    def _make_update_icon(color: str = "#f8d3ad") -> QIcon:
+    def _make_update_icon(color: str = TEXT) -> QIcon:
         """A circular refresh arrow - the standard visual convention for
         "check for updates". The previous icon (a plain arrow into a
         tray) was a generic download shape with no such convention behind
