@@ -19,6 +19,7 @@ from PySide6.QtGui import (
     QPixmap,
 )
 from PySide6.QtWidgets import QApplication, QInputDialog, QWidget
+from theme import ui_font
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -781,7 +782,7 @@ class AnnotationCanvas(QWidget):
 
         elif t == "text":
             font_size = max(14, a.get("size", 3) * 4)
-            f = QFont("Segoe UI", font_size, QFont.Weight.Bold)
+            f = ui_font(font_size, QFont.Weight.Bold)
             p.setFont(f)
             p.setPen(QPen(color))
             
@@ -808,7 +809,7 @@ class AnnotationCanvas(QWidget):
             # Superscript-like text id marker in the top-right corner.
             text_id = a.get("text_id")
             if text_id is not None:
-                badge_font = QFont("Segoe UI", max(9, int(font_size * 0.55)), QFont.Weight.DemiBold)
+                badge_font = ui_font(max(9, int(font_size * 0.55)), QFont.Weight.DemiBold)
                 p.setFont(badge_font)
                 p.setPen(QPen(QColor(215, 215, 215, 220)))
                 p.drawText(QPointF(x0 + w - 10, y0 - 6), str(text_id))
@@ -971,7 +972,7 @@ class AnnotationCanvas(QWidget):
     def _draw_inline_text(self, p: QPainter) -> None:
         """Render the text buffer on a resizable box while the user is typing."""
         font_size = max(14, self.stroke_size * 4)
-        f  = QFont("Segoe UI", font_size, QFont.Weight.Bold)
+        f  = ui_font(font_size, QFont.Weight.Bold)
         fm = QFontMetricsF(f)
         p.setFont(f)
 
@@ -1027,7 +1028,7 @@ class AnnotationCanvas(QWidget):
     def _start_text_edit(self, pos: QPointF) -> None:
         """Start inline text editing at the given position with initial width for ~10 chars."""
         font_size = max(14, self.stroke_size * 4)
-        f  = QFont("Segoe UI", font_size, QFont.Weight.Bold)
+        f  = ui_font(font_size, QFont.Weight.Bold)
         fm = QFontMetricsF(f)
         # Initial width for approximately 10 characters
         char_width = fm.horizontalAdvance("M")  # Average char width

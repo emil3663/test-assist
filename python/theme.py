@@ -1,4 +1,71 @@
-"""Colour tokens and Qt stylesheet for Test Assist (PySide6 edition)."""
+"""Colour tokens, fonts and Qt stylesheet for Test Assist (PySide6 edition)."""
+
+import sys
+
+from PySide6.QtGui import QFont
+
+# A fallback chain, not a change of font: whichever platform you are on,
+# its own UI face is asked for first and the rest follow as backstops.
+#
+# This exists because seven call sites constructed `QFont("Segoe UI", ...)`
+# with no alternative at all, and Qt answers an unknown family by
+# substituting a default whose metrics are its own business. Five of those
+# sites are in canvas.py, where QFontMetricsF drives annotation text
+# wrapping and badge sizing - so on any machine without Segoe UI installed
+# the *exported evidence* laid out differently, not merely the UI chrome.
+#
+# Ordering by platform rather than hardcoding Segoe UI first is not
+# cosmetic: naming a missing family first makes Qt populate its font-family
+# alias table to go looking for it, which measured at ~195 ms of startup
+# cost on macOS and emits a qt.qpa.fonts warning on every launch. Windows
+# still asks for Segoe UI first and so renders exactly as it always has.
+#
+# ".AppleSystemUIFont" is the always-present macOS system face (SF) and
+# is what a Mac actually resolves to. "SF Pro Text" is deliberately NOT
+# listed ahead of it: that name ships with Xcode rather than with macOS,
+# so on a stock Mac it is missing and naming it first reintroduces the
+# very alias-table cost this ordering exists to avoid. Helvetica Neue
+# sits behind as the documented public name, in case the dot-prefixed
+# private one ever stops resolving.
+_WINDOWS_UI = ["Segoe UI"]
+_MACOS_UI = [".AppleSystemUIFont", "Helvetica Neue"]
+_LINUX_UI = ["Cantarell", "Noto Sans", "DejaVu Sans"]
+_GENERIC_UI = ["Arial", "sans-serif"]
+
+if sys.platform == "win32":
+    UI_FONT_FAMILIES = _WINDOWS_UI + _MACOS_UI + _LINUX_UI + _GENERIC_UI
+elif sys.platform == "darwin":
+    UI_FONT_FAMILIES = _MACOS_UI + _WINDOWS_UI + _LINUX_UI + _GENERIC_UI
+else:
+    UI_FONT_FAMILIES = _LINUX_UI + _WINDOWS_UI + _MACOS_UI + _GENERIC_UI
+
+
+# The same chain as a CSS font-family value, so the stylesheet and the
+# QFont call sites can never name a different font from each other - and
+# so the stylesheet inherits the platform ordering rather than pinning a
+# missing family first and paying the alias-table cost anyway.
+UI_FONT_CSS = ", ".join(
+    family if family == "sans-serif" else f"'{family}'"
+    for family in UI_FONT_FAMILIES
+)
+
+MONO_FONT_FAMILIES = [
+    "Consolas", "Cascadia Code", "SF Mono", "Menlo", "DejaVu Sans Mono", "monospace",
+]
+
+
+def ui_font(point_size: int, weight: QFont.Weight = QFont.Weight.Normal) -> QFont:
+    """The UI face at a given size, with a real fallback chain.
+
+    `setFamilies` rather than the `QFont(family, ...)` constructor: the
+    constructor takes a single family and silently substitutes when it is
+    missing, which is the behaviour this exists to remove.
+    """
+    font = QFont()
+    font.setFamilies(UI_FONT_FAMILIES)
+    font.setPointSize(point_size)
+    font.setWeight(weight)
+    return font
 
 # Colour tokens
 ACCENT      = "#7c83fd"
@@ -19,7 +86,7 @@ QMainWindow, QDialog {{
 QWidget {{
     background-color: {BG_900};
     color: {TEXT};
-    font-family: 'Segoe UI', Arial, sans-serif;
+    font-family: {UI_FONT_CSS};
     font-size: 13px;
 }}
 QDockWidget::title {{
