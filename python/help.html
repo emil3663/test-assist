@@ -5,21 +5,51 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Test Assist — Help</title>
   <style>
+    /*
+      Follows the reader's own light/dark setting, the same binary the app
+      itself follows - and the same two palettes, so opening Help from Test
+      Assist does not land you somewhere that looks like a different
+      product. This is a plain HTML file opened in the user's browser, so
+      it cannot be told what the app resolved; prefers-color-scheme is how
+      it arrives at the same answer independently.
+
+      Dark is the default rather than the fallback-for-nothing: a browser
+      that reports no preference gets the palette this file has always had.
+    */
     :root {
-      --bg:      #0f0c09;
-      --bg2:     #1a1410;
-      --accent:  #c8763a;
-      --accent2: #f0d0a0;
-      --text:    #e8ddd0;
-      --muted:   #9b7a64;
-      --line:    rgba(200,120,60,0.18);
-      --radius:  12px;
+      color-scheme: light dark;
+
+      --bg:        #0d0d1a;
+      --bg2:       #13132a;
+      --accent:    #7c83fd;
+      --accent2:   #a8adff;
+      --on-accent: #ffffff;
+      --text:      #e0e6f0;
+      --muted:     #8892a4;
+      --line:      rgba(124,131,253,0.18);
+      --radius:    12px;
+    }
+
+    @media (prefers-color-scheme: light) {
+      :root {
+        --bg:        #f7f7fa;
+        --bg2:       #eeeef4;
+        /* Amber on light, indigo on dark - the app's own pairing. Darker
+           than the app's accent for headings, since text on a near-white
+           ground needs more contrast than a button fill does. */
+        --accent:    #b0591f;
+        --accent2:   #8f4718;
+        --on-accent: #ffffff;
+        --text:      #1a1a24;
+        --muted:     #5f6676;
+        --line:      rgba(176,89,31,0.22);
+      }
     }
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body {
       background: var(--bg);
       color: var(--text);
-      font-family: "Segoe UI", system-ui, sans-serif;
+      font-family: system-ui, "Segoe UI", "Helvetica Neue", Arial, sans-serif;
       font-size: 15px;
       line-height: 1.65;
       padding: 40px 0 80px;
@@ -42,7 +72,7 @@
       background: var(--accent);
       border-radius: 14px;
       display: flex; align-items: center; justify-content: center;
-      font-size: 22px; font-weight: 800; color: #1f1208;
+      font-size: 22px; font-weight: 800; color: var(--on-accent);
       flex-shrink: 0;
     }
     header h1 { font-size: 26px; color: var(--accent2); font-weight: 700; letter-spacing: 0.5px; }
