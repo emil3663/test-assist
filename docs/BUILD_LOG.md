@@ -830,3 +830,98 @@ immediately** after each edit (`45792b9` for TA-227, `3074602` for
 TA-228), rather than batched with the corresponding code/test commit —
 shrinking the window a loss could happen in, independent of whether the
 root cause above is the true one.
+
+## `ca71881` isolated — §6's two imprecisions confirmed, revert cost measured — 2026-09-11
+
+`docs/VERIFICATION_2026-09-11.md` §6 audited the launcher rebuild
+(`ca71881`) against branch-wide diffs and commit-body claims, but could
+not isolate the commit itself. Two commands settle what that comparison
+could only infer.
+
+**`git show ca71881 --stat`:**
+
+```
+commit ca718819e15fb29f5018976a486534445f867b94
+Author: Martin Hugo <m.hugo@guardian360.nl>
+Date:   Fri Sep 11 12:56:53 2026 +0200
+
+    feat(launcher): rebuild the floating panel and docked strip
+    [...]
+
+ python/launcher.py               | 801 +++++++++++++++++++--------------------
+ python/tests/test_regressions.py | 229 +++++++++--
+ python/theme.py                  |  12 +
+ 3 files changed, 596 insertions(+), 446 deletions(-)
+```
+
+`--numstat` for the per-file split:
+
+```
+392	409	python/launcher.py
+192	37	python/tests/test_regressions.py
+12	0	python/theme.py
+```
+
+**"launcher.py loses ~150 lines" is not true of this commit alone.**
+392 insertions, 409 deletions — net **−17** for `ca71881` by itself. The
+whole-branch net of −5 (already noted in §6) was the closer number; the
+commit's own body overstates its own contribution by roughly 30x.
+
+**"Eleven hand-drawn icon factories" — confirmed as ten, not eleven.**
+Functions matching `_make_*icon` present in `python/launcher.py` at
+`ca71881^` (i.e. immediately before the commit):
+
+```
+900:    def _style_mode_icon(active: bool) -> str:
+922:    def _make_close_icon(color: str = theme.TEXT) -> QIcon:
+935:    def _make_undock_icon(color: str = theme.TEXT) -> QIcon:
+952:    def _make_dock_icon(color: str = theme.TEXT) -> QIcon:
+967:    def _make_pencil_icon(color: str = theme.TEXT) -> QIcon:
+981:    def _make_ta_icon() -> QIcon:
+997:    def _make_update_icon(color: str = theme.TEXT) -> QIcon:
+1018:    def _make_camera_icon(color: str) -> QIcon:
+1035:    def _make_stop_icon(color: str = "#ff5050") -> QIcon:
+1050:    def _make_video_icon(color: str) -> QIcon:
+1065:    def _make_screen_icon(color: str) -> QIcon:
+```
+
+Ten `_make_*icon` functions, plus `_style_mode_icon` (a helper, not a
+factory) — eleven functions total removed, zero remaining in
+`ca71881`'s own tree. The commit body's "eleven hand-drawn icon
+factories and `_style_mode_icon`" reads as eleven factories *plus* the
+helper; it is ten factories plus the helper.
+
+**The revert experiment.** `git worktree add --detach
+artifacts/review/drop-test origin/ui-polish` followed by `git revert
+--no-commit ca71881`:
+
+```
+Auto-merging python/launcher.py
+CONFLICT (content): Merge conflict in python/launcher.py
+Auto-merging python/tests/test_regressions.py
+CONFLICT (content): Merge conflict in python/tests/test_regressions.py
+error: could not revert ca71881... feat(launcher): rebuild the floating panel and docked strip
+```
+
+`python/theme.py` auto-merged cleanly (the 12 added theme tokens have
+no later edits to conflict with). Two files do not:
+
+- **`python/launcher.py`** — three separate conflicting hunks: lines
+  194–210 (the old single "Capture Region" button vs. the new
+  three-action row), 216–229 (the old "Quick Capture" button vs. the
+  rebuilt full-screen button), and 265–340 (the entire recording-status
+  row, Stop button, and Recent-captures block the rebuild added, colliding
+  with the old mode-icon buttons and hint-line comment it replaced).
+- **`python/tests/test_regressions.py`** — one conflicting hunk, lines
+  2525–2734: the whole "Launcher redesign" test section added by
+  `ca71881` and extended by later commits (`5c5e0a1`, `aca5463`) fails to
+  reverse-apply as a block, since the file has moved on from what
+  `ca71881` originally touched.
+
+This is the concrete unpick cost §6 described from dependency analysis:
+not a clean one-commit revert, but conflicts in the two files every
+later launcher commit continued to build on. `git revert --abort` was
+run immediately after inspecting the conflict markers; nothing was
+committed. The worktree (`artifacts/review/drop-test`) has been removed
+and `git worktree prune` run — `git worktree list` shows only the five
+per-PR review worktrees.
