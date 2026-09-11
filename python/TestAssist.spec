@@ -9,15 +9,32 @@ from the taskbar. The folder starts effectively instantly and zips just as
 well for distribution.
 
 Build:  pyinstaller --noconfirm TestAssist.spec
-Output: dist/TestAssist/TestAssist.exe
+Output: Windows  dist/TestAssist/TestAssist.exe
+        macOS    dist/Test Assist.app
+
+One spec for both platforms rather than two, so the datas, excludes and
+hiddenimports cannot drift apart - they are the parts that actually decide
+whether a build works, and they are identical either way. Only the icon
+format, the Windows version resource and the macOS bundle differ, and each
+is guarded below.
 """
 
+import sys
 from pathlib import Path
 
 from PyInstaller.utils.hooks import collect_data_files
 
 HERE = Path(SPECPATH)
 REPO = HERE.parent
+MACOS = sys.platform == 'darwin'
+
+# __version__ without importing main.py, which would need PySide6 present in
+# the environment running PyInstaller rather than the one being packaged.
+VERSION = next(
+    line.split('=')[1].strip().strip('"\'')
+    for line in (HERE / 'main.py').read_text().splitlines()
+    if line.startswith('__version__')
+)
 
 a = Analysis(
     [str(HERE / 'main.py')],
@@ -25,6 +42,7 @@ a = Analysis(
     binaries=[],
     datas=[
         (str(REPO / 'assets' / 'icon.ico'), 'assets'),
+        *([(str(REPO / 'assets' / 'icon.icns'), 'assets')] if MACOS else []),
         # The UI's icons are glyphs from this font, so a build without it
         # falls back to text labels on every icon button.
         (str(REPO / 'assets' / 'MaterialIcons-Regular.ttf'), 'assets'),
@@ -69,8 +87,10 @@ exe = EXE(
     upx=False,
     console=False,                      # no console window behind the app
     disable_windowed_traceback=False,
-    icon=str(REPO / 'assets' / 'icon.ico'),
-    version=str(HERE / 'version_info.txt'),
+    icon=str(REPO / 'assets' / ('icon.icns' if MACOS else 'icon.ico')),
+    # A Windows PE version resource; meaningless in a Mach-O binary, and
+    # PyInstaller rejects the argument outright when it is not building one.
+    version=None if MACOS else str(HERE / 'version_info.txt'),
 )
 
 coll = COLLECT(
@@ -81,3 +101,33 @@ coll = COLLECT(
     upx=False,
     name='TestAssist',
 )
+
+# The .app wrapper. Everything a macOS user notices about "is this a real
+# application" comes from here rather than from the executable inside it.
+if MACOS:
+    app = BUNDLE(
+        coll,
+        name='Test Assist.app',
+        icon=str(REPO / 'assets' / 'icon.icns'),
+        bundle_identifier='com.emil3663.testassist',
+        version=VERSION,
+        info_plist={
+            # CFBundleName is what the macOS menu bar titles the application
+            # menu, and what it interpolates into "About X", "Hide X" and
+            # "Quit X". Running from source those read "Python", because the
+            # running bundle is the interpreter - this is the only thing that
+            # fixes it, and it fixes all four at once.
+            'CFBundleName': 'Test Assist',
+            'CFBundleDisplayName': 'Test Assist',
+            'CFBundleShortVersionString': VERSION,
+            'CFBundleVersion': VERSION,
+            # Without this the app renders through the 1x compatibility path
+            # and every screenshot it takes comes back at half resolution -
+            # which would undo the HiDPI capture fix at the packaging step.
+            'NSHighResolutionCapable': True,
+            # Not an agent: Test Assist has a Dock icon and a menu bar.
+            'LSUIElement': False,
+            'LSMinimumSystemVersion': '11.0',
+            'NSHumanReadableCopyright': 'MIT licensed. See LICENSE.',
+        },
+    )
