@@ -32,6 +32,7 @@ from capture import FrameRecorder, ScreenshotOverlay
 from global_hotkeys import MOD_ALT, MOD_SHIFT, GlobalHotkeyManager
 from screen_geometry import is_within_dock_band, screen_for_rect
 from update_check import UpdateChecker
+from theme import ui_font
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -985,7 +986,7 @@ class FloatingLauncher(QWidget):
         p.setBrush(QColor("#d7873d"))
         p.drawRoundedRect(1, 1, 12, 12, 3, 3)
         p.setPen(QColor("#1f1208"))
-        p.setFont(QFont("Segoe UI", 6, QFont.Weight.Bold))
+        p.setFont(ui_font(6, QFont.Weight.Bold))
         p.drawText(pix.rect(), Qt.AlignmentFlag.AlignCenter, "TA")
         p.end()
         return QIcon(pix)
