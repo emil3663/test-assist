@@ -2671,3 +2671,37 @@ def test_LAUNCH_07_the_strip_is_wide_enough_to_centre_its_own_controls(qapp) -> 
             assert left == right, f"{name} is off-centre in the strip ({left} vs {right})"
     finally:
         launcher.close()
+
+
+def test_LAUNCH_08_hotkey_labels_reach_buttons_that_still_exist(qapp) -> None:
+    """_apply_hotkey_labels() runs only when register_global_hotkeys=True,
+    which every test here avoids because it claims real, process-wide OS
+    hotkey state. So the launcher rebuild removed _btn_photo and _btn_video
+    while 349 tests stayed green and the actual app died on startup with an
+    AttributeError.
+
+    The registration outcomes are set directly rather than registered for
+    real: what needs covering is that this method addresses buttons that
+    exist, which is exactly the part no OS call is involved in.
+    """
+    launcher = FloatingLauncher(_EditorStub())
+    try:
+        launcher._hotkey_registered = {
+            "photo": True, "full_capture": True, "video": True,
+        }
+        launcher._apply_hotkey_labels()
+
+        assert "Alt+P" in launcher._btn_capture.toolTip()
+        assert "Alt+Shift+P" in launcher._btn_full_capture.toolTip()
+        assert "Alt+V" in launcher._btn_record.toolTip()
+        assert launcher._hint_lbl.text()
+
+        # And the other way: nothing registered, nothing advertised - the
+        # TA-211 bug was tooltips claiming shortcuts bound to nothing.
+        launcher._hotkey_registered = {
+            "photo": False, "full_capture": False, "video": False,
+        }
+        launcher._apply_hotkey_labels()
+        assert launcher._hint_lbl.text() == ""
+    finally:
+        launcher.close()

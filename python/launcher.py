@@ -484,11 +484,13 @@ class FloatingLauncher(QWidget):
         test-constructed launchers skip it entirely; see
         register_global_hotkeys)."""
         if self._hotkey_registered["photo"]:
-            self._btn_photo.setToolTip(self._btn_photo.toolTip() + " (Alt+P)")
+            self._btn_capture.setToolTip("Capture a region (Alt+P)")
         if self._hotkey_registered["full_capture"]:
-            self._btn_full_capture.setToolTip(self._btn_full_capture.toolTip() + " (Alt+Shift+P)")
+            self._btn_full_capture.setToolTip(
+                self._btn_full_capture.toolTip() + " (Alt+Shift+P)"
+            )
         if self._hotkey_registered["video"]:
-            self._btn_video.setToolTip(self._btn_video.toolTip() + " (Alt+V)")
+            self._btn_record.setToolTip("Start recording (Alt+V)")
 
         hints = []
         if self._hotkey_registered["photo"]:
