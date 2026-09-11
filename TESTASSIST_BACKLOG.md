@@ -1416,6 +1416,91 @@ that will actually ship.
   three screens at fractional scaling, which is not available; not
   blocking this release, which does not claim three-screen spans.
 
+### TA-230 — The `register_global_hotkeys` path is structurally untested, and has cost time three times in two days
+
+- **Phase:** 3
+- **Priority:** P2
+- **Suggested labels:** `testing`, `quality`, `technical-debt`
+- **Problem it solves:** `FloatingLauncher`'s `register_global_hotkeys`
+  parameter defaults to `False`, because the `True` path claims real,
+  process-wide OS state via `RegisterHotKey` that concurrent tests would
+  fight over. That is a sound precaution, and it leaves an entire code path
+  exercised only by five Windows-only `skipif` tests. The cost is no longer
+  hypothetical — it has surfaced three times in two days, each time in a
+  different way:
+
+  1. **2026-09-11, fixed in `5c5e0a1`.** `_apply_hotkey_labels()` still
+     addressed `_btn_photo` and `_btn_video` after the launcher rebuild
+     removed them. **The app died on startup with an `AttributeError` while
+     350 tests stayed green**, because that method runs only when
+     `register_global_hotkeys=True` and every test avoids it.
+  2. **2026-09-11, fixed in `aca5463`.** Three TA-211 tests referenced the
+     same removed attributes. They are `skipif`-guarded to Windows, so every
+     run on a Mac reported green **by construction** — the only tests that
+     would have failed were the ones that never ran. It surfaced on someone
+     else's Windows machine, which is the worst place to find it.
+  3. **2026-09-12, during PR #8's release gate.** A `TestAssist.exe` left
+     running from the manual capture check still held the real Win32
+     hotkeys, so the TA-211 tests' own `RegisterHotKey` calls failed. Three
+     phantom failures that read as a code regression *during a release*.
+     Correctly diagnosed as leftover process state rather than written off
+     as flaky — but only after investigation, mid-release.
+
+  The shape was already named in `docs/SESSION_HANDOVER_2026-09-11.md` §7.2
+  ("paths the suite deliberately avoids"). This ticket is the evidence that
+  the shape costs real time, and the record that stops a fourth occurrence
+  being re-derived from scratch.
+
+  **Three distinct sub-problems wear this one label**, and they have
+  different remedies:
+
+  - **(A) Coverage.** The parts of the `True` path that need no OS call —
+    principally that `_apply_hotkey_labels()` addresses widgets that exist —
+    can be tested without one. Partly addressed already: `5c5e0a1`'s test
+    sets `_hotkey_registered` directly rather than registering for real.
+  - **(B) Cross-platform blindness.** A `skipif`-guarded test rots silently
+    between the runs that actually execute it. Partly addressed already:
+    `test_LAUNCH_09_every_launcher_attribute_this_suite_names_exists` scans
+    the suite for `launcher.<attr>` references and asserts a real launcher
+    has each one — and it runs everywhere, including where the guarded tests
+    are skipped.
+  - **(C) A foreign hotkey holder.** A genuinely running instance makes the
+    suite fail opaquely. Not a code defect — `RegisterHotKey` is behaving
+    correctly and the test is asserting the right thing — but the diagnosis
+    is invisible from the failure message.
+
+  **Both (A) and (B)'s mitigations currently exist only on `ui-polish`
+  (PR #19)**, deferred to 1.5.0. Their real-world instances were caused by
+  the launcher rebuild on that same branch, so 1.4.0 is not exposed to
+  those two — but the mechanism they guard is general, not rebuild-specific.
+
+- **Scope:**
+  - **(C), the concrete fix:** a precondition in the TA-211 tests that
+    detects a foreign `RegisterHotKey` holder and reports it as a named skip
+    or an explicit failure — "Alt+P is held by another process; close any
+    running Test Assist (check the tray)" — rather than a bare assertion
+    failure that reads as a code regression.
+  - **(A) and (B), the decision:** state explicitly whether those two
+    mitigations should be cherry-picked to `main` independently of the
+    launcher rebuild, or wait and arrive with PR #19 in 1.5.0. Decide it;
+    do not let it default by inaction.
+  - A note in whichever document carries this project's testing conventions:
+    a default-off flag guarding real OS state is a recognised coverage
+    hazard, with this ticket as the worked example.
+- **Deliverables:**
+  - (C)'s precondition check, with a test proving it reports the right thing
+    when a hotkey is deliberately held.
+  - The (A)/(B) decision, written down whichever way it goes.
+  - The convention note.
+- **Acceptance criteria:**
+  - Running the suite with a Test Assist instance deliberately left running
+    produces a message naming the cause, not three unexplained assertion
+    failures.
+  - The (A)/(B) decision is recorded, with its reasoning.
+- **Dependencies:** None, and **not release-blocking for 1.4.0** — no
+  user-facing behaviour is involved. (C) is developer experience; (A) and
+  (B)'s instances were both caused by PR #19's rebuild, which is deferred.
+
 ### Gate A — Code complete
 - TA-201, TA-202, TA-203 merged
 - Suite green, no skips, no test opens a socket
