@@ -1838,20 +1838,34 @@ def test_CAP_04_a_new_capture_replaces_the_previous_image(editor):
 
 class _StubScreen:
     """A minimal QScreen substitute for exercising ScreenshotOverlay._grab()
-    against synthetic multi-monitor layouts without a second real monitor."""
+    against synthetic multi-monitor layouts without a second real monitor.
 
-    def __init__(self, geometry: QRect, color: str) -> None:
+    `device_pixel_ratio` defaults to 1.0, which is what every existing test
+    here assumes and what CI hardware actually is. Passing a higher one
+    models a HiDPI screen properly rather than merely reporting a number:
+    `grabWindow()` then returns a pixmap holding that many more real
+    pixels and tagged with the ratio, exactly as a real QScreen does. That
+    is the only way a 1.0 machine can exercise the path where those extra
+    pixels are kept or thrown away."""
+
+    def __init__(self, geometry: QRect, color: str, device_pixel_ratio: float = 1.0) -> None:
         self._geometry = geometry
         self._color = color
+        self._device_pixel_ratio = device_pixel_ratio
         self.grab_calls: list[tuple[int, int, int, int]] = []
 
     def geometry(self) -> QRect:
         return self._geometry
 
+    def devicePixelRatio(self) -> float:
+        return self._device_pixel_ratio
+
     def grabWindow(self, _wid, x=0, y=0, w=-1, h=-1) -> QPixmap:
         self.grab_calls.append((x, y, w, h))
-        pixmap = QPixmap(w, h)
+        ratio = self._device_pixel_ratio
+        pixmap = QPixmap(round(w * ratio), round(h * ratio))
         pixmap.fill(QColor(self._color))
+        pixmap.setDevicePixelRatio(ratio)
         return pixmap
 
 
@@ -2087,3 +2101,86 @@ def test_KEY_05_tool_shortcuts_are_suppressed_while_typing(editor):
 
     assert all(s.isEnabled() for s in editor._tool_shortcuts), \
         "tool shortcuts were not restored after the text was committed"
+
+
+def test_HIDPI_01_a_capture_on_a_hidpi_screen_keeps_every_pixel_it_grabbed(qapp, monkeypatch):
+    """A 400x300 selection on a 2.0-ratio screen grabs 800x600 real pixels.
+    Compositing into a logically-sized pixmap resampled those down to
+    400x300 and discarded 3/4 of the capture - on a tool whose output is
+    meant to be evidence, and where fine detail is the whole point.
+
+    The grab call itself still asks for the logical region: grabWindow()
+    takes logical coordinates and returns device pixels, so a HiDPI screen
+    must not be asked for doubled coordinates."""
+    from capture import ScreenshotOverlay
+
+    overlay = ScreenshotOverlay()
+    retina = _StubScreen(QRect(0, 0, 1512, 982), "red", device_pixel_ratio=2.0)
+    monkeypatch.setattr(QApplication, "screens", staticmethod(lambda: [retina]))
+    monkeypatch.setattr(QApplication, "primaryScreen", staticmethod(lambda: retina))
+
+    captured: list[QPixmap] = []
+    overlay.capture_ready.connect(captured.append)
+    overlay._grab(QRect(200, 200, 400, 300))
+
+    assert len(captured) == 1
+    result = captured[0]
+    assert (result.width(), result.height()) == (800, 600), "the extra pixels were discarded"
+    assert retina.grab_calls == [(200, 200, 400, 300)], "grabWindow takes logical coordinates"
+    # Untagged on purpose: canvas.py measures annotation coordinates and its
+    # own widget size from _pixmap.width(), so a ratio-tagged result would
+    # render into a quarter of the widget and halve every annotation's
+    # position.
+    assert result.devicePixelRatio() == 1.0
+    overlay.close()
+
+
+def test_HIDPI_02_an_ordinary_screen_is_completely_unaffected(qapp, monkeypatch):
+    """The regression guard for the fix itself: on 1.0 hardware - which is
+    every Windows machine at 100% scaling, and all of CI - the result must
+    be exactly what it was before any of this."""
+    from capture import ScreenshotOverlay
+
+    overlay = ScreenshotOverlay()
+    plain = _StubScreen(QRect(0, 0, 1920, 1080), "red")
+    monkeypatch.setattr(QApplication, "screens", staticmethod(lambda: [plain]))
+    monkeypatch.setattr(QApplication, "primaryScreen", staticmethod(lambda: plain))
+
+    captured: list[QPixmap] = []
+    overlay.capture_ready.connect(captured.append)
+    overlay._grab(QRect(100, 100, 400, 300))
+
+    assert (captured[0].width(), captured[0].height()) == (400, 300)
+    assert plain.grab_calls == [(100, 100, 400, 300)]
+    overlay.close()
+
+
+def test_HIDPI_03_a_mixed_dpi_span_composites_on_one_grid(qapp, monkeypatch):
+    """A selection spanning a 2.0 laptop panel and a 1.0 external is the
+    layout most testers actually have. Both pieces must land on the same
+    device-pixel grid - the sharper one at full detail - rather than the
+    result being flattened to the coarser of the two."""
+    from capture import ScreenshotOverlay
+
+    overlay = ScreenshotOverlay()
+    laptop = _StubScreen(QRect(0, 0, 1000, 800), "red", device_pixel_ratio=2.0)
+    external = _StubScreen(QRect(1000, 0, 1000, 800), "blue")
+    monkeypatch.setattr(QApplication, "screens", staticmethod(lambda: [laptop, external]))
+    monkeypatch.setattr(QApplication, "primaryScreen", staticmethod(lambda: laptop))
+
+    captured: list[QPixmap] = []
+    overlay.capture_ready.connect(captured.append)
+    overlay._grab(QRect(800, 100, 400, 200))      # spans the boundary at x=1000
+
+    result = captured[0]
+    assert (result.width(), result.height()) == (800, 400), "should be 400x200 logical at ratio 2.0"
+    # Each screen is still asked for its own logical region, unscaled.
+    assert laptop.grab_calls == [(800, 100, 200, 200)]
+    assert external.grab_calls == [(0, 100, 200, 200)]
+
+    # Both halves painted - a seam or a mis-scaled piece shows up as the
+    # transparent fill surviving somewhere in the middle.
+    image = result.toImage()
+    assert image.pixelColor(200, 200).alpha() > 0, "left half unpainted"
+    assert image.pixelColor(600, 200).alpha() > 0, "right half unpainted"
+    overlay.close()

@@ -13,7 +13,12 @@ from PySide6.QtWidgets import QApplication, QRubberBand, QWidget
 
 import debug_log
 import paths
-from screen_geometry import plan_capture
+from screen_geometry import (
+    composite_ratio,
+    device_result_size,
+    plan_capture,
+    to_device_rect,
+)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -318,6 +323,10 @@ class ScreenshotOverlay(QWidget):
             pixmap = QApplication.primaryScreen().grabWindow(
                 0, global_rect.x(), global_rect.y(), global_rect.width(), global_rect.height()
             )
+            # Same normalisation as the composited path below: hand the
+            # canvas plain device pixels, not a ratio-tagged pixmap it
+            # would then draw at a quarter size.
+            pixmap.setDevicePixelRatio(1.0)
             self.capture_ready.emit(pixmap)
             return
 
@@ -328,21 +337,57 @@ class ScreenshotOverlay(QWidget):
         # here as unpainted (black) space. max(dest + size) per axis - not
         # e.g. summing widths - is what stays correct regardless of which
         # axis plan_capture chose to close.
-        result_width = max(piece.dest.x() + piece.screen_local_rect.width() for piece in pieces)
-        result_height = max(piece.dest.y() + piece.screen_local_rect.height() for piece in pieces)
-        result = QPixmap(result_width, result_height)
+        # plan_capture() works in logical (device-independent) pixels,
+        # because that is the space a selection is dragged in. A screen
+        # with a devicePixelRatio above 1 - every Retina Mac, and every
+        # Windows machine at 125% or 150% scaling - holds more real pixels
+        # than that, and grabWindow() returns all of them.
+        #
+        # Compositing into a logical-sized pixmap threw those away: a
+        # 400x300 selection on a 2.0-ratio screen grabbed 800x600 real
+        # pixels and resampled them down to 400x300, discarding 3/4 of the
+        # captured data. For a tool whose output is meant to be evidence
+        # that is a correctness problem, not a cosmetic one - 1px borders
+        # and antialiased small text are exactly what a tester circles, and
+        # exactly what does not survive the downsample.
+        #
+        # So the result is sized in *device* pixels and left untagged at
+        # ratio 1.0, which is what a screenshot has always been elsewhere:
+        # macOS `screencapture` writes a 2x file on a Retina display too.
+        # Deliberately NOT setDevicePixelRatio() on the result - canvas.py
+        # measures annotation coordinates and its own widget size from
+        # `_pixmap.width()`, which is device pixels, so a tagged pixmap
+        # would render into a quarter of the widget and put every
+        # annotation at half its intended position.
+        #
+        # The highest ratio among the contributing screens wins, so a
+        # selection spanning a 2.0 screen and a 1.0 one keeps the sharp
+        # half at full detail and scales the other up to meet it, rather
+        # than flattening both to the coarser grid.
+        # The scaling decision itself lives in screen_geometry, on plain
+        # values rather than QScreen objects, so it can be exercised
+        # against a mixed-DPI layout with literal ratios - CI has no
+        # HiDPI screen, and this is precisely the bug that a 1.0-ratio
+        # machine cannot see.
+        ratio = composite_ratio(pieces, [screen.devicePixelRatio() for screen in screens])
+        size = device_result_size(pieces, ratio)
+
+        result = QPixmap(size)
         result.fill(Qt.GlobalColor.transparent)
         painter = QPainter(result)
         for piece in pieces:
             screen = screens[piece.screen_index]
             local = piece.screen_local_rect
             grabbed = screen.grabWindow(0, local.x(), local.y(), local.width(), local.height())
-            # Drawing into a fixed logical-pixel destination rect - rather
-            # than at the grabbed pixmap's own size - is what accounts for
-            # that screen's devicePixelRatio: grabWindow() already tags the
-            # returned pixmap with it, and QPainter scales accordingly.
-            painter.drawPixmap(QRect(piece.dest, local.size()), grabbed, grabbed.rect())
+            # Source rect is the grabbed pixmap's own device pixels and the
+            # destination is the same region scaled by `ratio`, so a piece
+            # from a screen already at `ratio` is a 1:1 blit with no
+            # resampling at all.
+            painter.drawPixmap(
+                to_device_rect(piece.dest, local.size(), ratio), grabbed, grabbed.rect()
+            )
         painter.end()
+        result.setDevicePixelRatio(1.0)
 
         self.capture_ready.emit(result)
 
