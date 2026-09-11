@@ -74,6 +74,11 @@ is enough for most front-end tickets.
 `TEST_PLAN.md` also carries the suggested GitHub label set and board columns
 (`§6`) if you're filing or triaging issues.
 
+`docs/WORKING_AGREEMENTS.md` covers the other half of that — the shape a
+written brief takes, how issues and the desktop build's `TA-NNN` tickets
+relate, and the `Closes #N` trailer that lets a merge close its issue.
+Commit subjects follow `docs/CONVENTIONAL_COMMITS.md`.
+
 ## Deploying
 
 There is no separate "build" artifact for this app — what's on `main` **is**
