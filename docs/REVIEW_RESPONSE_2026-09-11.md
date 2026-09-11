@@ -133,6 +133,49 @@ that breaks the property.
 **Ask:** add `1.25, 1.5` to that loop and a three-piece layout, and report
 whether it still passes. This is cheap and it is the case the fix is for.
 
+### 2b. #8 is incomplete — the full-screen path has the same defect, and the fix does not reach it
+
+This one came out of building both branches and taking a real capture on the
+125% laptop, which is the step none of the analysis substituted for.
+
+**Failure scenario, observed not predicted:** a full-screen capture produces a
+**1920×1080 file containing only 1536×864 of content in the top-left, black
+elsewhere** — exactly the device and logical dimensions of a 1080p panel at
+125%. Reproduced on both builds; their output differs by 49 pixels.
+
+The chain:
+
+- `_grab_full_capture()` is in **`launcher.py`**, not `capture.py`:
+  `pixmap = self._current_screen().grabWindow(0)`, with no
+  `setDevicePixelRatio` call anywhere in that file.
+- **#8's diff touches `capture.py`, `screen_geometry.py` and two test files —
+  zero lines of `launcher.py`.**
+- `grabWindow(0)` on a 1.25 screen returns 1920×1080 *tagged* DPR 1.25.
+- Your own commit body names this hazard precisely — *"a tagged pixmap would
+  render into a quarter of the widget and put every annotation at half its
+  intended position"* — which is why you call `setDevicePixelRatio(1.0)` on
+  both results in `capture.py`, fallback included.
+- The full-screen path never enters `capture.py`, so it hands a tagged pixmap
+  straight into the code you documented as unable to accept one.
+
+Remedy is the line you already wrote twice:
+
+```python
+def _grab_full_capture(self) -> None:
+    pixmap = self._current_screen().grabWindow(0)
+    pixmap.setDevicePixelRatio(1.0)          # matches capture.py
+    self._on_capture_ready(pixmap)
+```
+
+To be clear about ownership: **this is not yours.** It is pre-existing on
+`main` and ships in rc5 today, on every scaled display, single monitor
+included. But it belongs in #8 rather than a separate PR — same defect class,
+same remedy, and merging #8 without it closes #2 while leaving half the capture
+surface broken, which reads as done when it is not.
+
+Not yet done: this was diagnosed from the artefact plus the code, not by
+running the patched line. One line and a re-capture proves it.
+
 ### 3. §7's numbers are exact, but never say which tree they describe
 
 All three check out perfectly against `ui-polish`, and all three are wrong
@@ -226,7 +269,11 @@ No test suite was run, on any branch — "351 tests, ~12s" and "315 of 320 on a
 Mac" are unverified, though nothing measured contradicts either. The HiDPI fix
 was verified by reading and by its own tests, not by a measured before/after on
 a HiDPI display; that measurement is still owed and can only be done on
-hardware. Issue creation
+hardware. The dangling-reference finding above was observed on a mid-revert tree
+and corroborated against `ui-polish`'s line positions, but which commit
+introduced each of `_btn_record`'s other four reference sites was not established
+by `git blame` — the account given is the one consistent with the commit bodies.
+Issue creation
 timestamps weren't captured, so the 13 → 15 explanation is inference. And nobody
 has *looked* at the rebuilt launcher on Windows — "roughly three times the
 height" is a claim about a screen, and no screen has seen it yet.
