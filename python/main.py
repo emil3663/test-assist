@@ -240,6 +240,13 @@ def main() -> None:
     tray = _setup_tray(app, launcher, editor)
     app.setProperty("trayIcon", tray)
 
+    # Parentless, so it is the application-wide menu bar rather than one
+    # belonging to a window that normally is not shown - see
+    # EditorWindow.build_menu_bar(). Held on the QApplication for the same
+    # reason as the tray icon: nothing else owns it, and letting it go out
+    # of scope takes the menu with it.
+    app.setProperty("menuBar", editor.build_menu_bar())
+
     # A second launch's handoff lands here too, once this instance is the
     # one running - same destinations either way.
     single.show_requested.connect(launcher.restore)
