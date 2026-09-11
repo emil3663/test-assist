@@ -2256,3 +2256,90 @@ def test_TEXT_BG_03_the_plate_is_stored_on_the_annotation(qapp) -> None:
     assert anno["bgOpacity"] == 0.8
     assert anno["bgColor"] == "#000000"
     assert "bgOpacity" in canvas.serialisable_annotations()[-1], "must survive JSON export"
+
+
+# ── Per-tool settings controls ───────────────────────────────────────────────
+
+
+def _select_tool(editor, tool_id):
+    for btn in editor._tool_group.buttons():
+        if btn.property("tool_id") == tool_id:
+            btn.click()
+            return btn
+    raise AssertionError(f"no {tool_id} tool button")
+
+
+def test_TOOLSET_01_the_size_slider_says_what_it_sets(qapp) -> None:
+    """canvas.py computes a text annotation's font size as
+    max(14, stroke_size * 4), so this slider has always been the text size
+    control - while reading "3 px" with a "Stroke size" tooltip. The only
+    control over how big annotation text came out was undiscoverable."""
+    editor = EditorWindow()
+    try:
+        _select_tool(editor, "rect")
+        assert editor._size_lbl.text() == "3 px"
+        assert editor._size_slider.toolTip() == "Stroke size"
+
+        _select_tool(editor, "text")
+        assert editor._size_lbl.text() == "14 pt", "text size not shown in its own unit"
+        assert editor._size_slider.toolTip() == "Text size"
+    finally:
+        editor.close()
+
+
+def test_TOOLSET_02_the_background_swatch_belongs_to_the_text_tool(qapp) -> None:
+    """Text is the only annotation with a plate behind it. A swatch sitting
+    there disabled for every other tool would be the settings bar's widest
+    piece of dead space."""
+    editor = EditorWindow()
+    try:
+        # isHidden() rather than isVisible(): the latter reports *effective*
+        # visibility, which is False for every child of a window that has not
+        # been shown, so it would pass this test for the wrong reason.
+        _select_tool(editor, "highlight")
+        assert editor._text_bg_color_btn.isHidden()
+
+        _select_tool(editor, "text")
+        assert not editor._text_bg_color_btn.isHidden()
+    finally:
+        editor.close()
+
+
+def test_TOOLSET_03_the_opacity_slider_follows_the_active_tool(qapp) -> None:
+    """One slider serves both fills. Switching tools must restore that
+    tool's own value rather than carrying the other's across."""
+    editor = EditorWindow()
+    try:
+        _select_tool(editor, "highlight")
+        editor._opacity_slider.setValue(20)
+        assert editor._canvas.fill_opacity == pytest.approx(0.20)
+
+        _select_tool(editor, "text")
+        assert editor._opacity_slider.value() == round(editor._canvas.text_bg_opacity * 100)
+        editor._opacity_slider.setValue(80)
+        assert editor._canvas.text_bg_opacity == pytest.approx(0.80)
+        assert editor._canvas.fill_opacity == pytest.approx(0.20), "highlight's fill was overwritten"
+
+        _select_tool(editor, "highlight")
+        assert editor._opacity_slider.value() == 20, "highlight's own value was not restored"
+    finally:
+        editor.close()
+
+
+def test_TOOLSET_04_restoring_a_value_does_not_read_as_a_drag(qapp) -> None:
+    """The slider is set programmatically on every tool change. If that
+    emitted valueChanged the restore would immediately write itself back as
+    if the user had moved it - harmless while the values agree, and a silent
+    corruption the moment they do not."""
+    editor = EditorWindow()
+    try:
+        _select_tool(editor, "text")
+        editor._canvas.text_bg_opacity = 0.55
+        editor._canvas.fill_opacity = 0.30
+
+        _select_tool(editor, "highlight")
+        assert editor._canvas.text_bg_opacity == pytest.approx(0.55), "text opacity clobbered"
+        _select_tool(editor, "text")
+        assert editor._canvas.fill_opacity == pytest.approx(0.30), "highlight opacity clobbered"
+    finally:
+        editor.close()

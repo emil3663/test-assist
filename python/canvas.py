@@ -334,6 +334,7 @@ class AnnotationCanvas(QWidget):
         opacity: float | None = None,
         arrow_style: str | None = None,
         bgOpacity: float | None = None,
+        bgColor: str | None = None,
     ) -> None:
         """Apply style updates to the currently selected annotation, if any."""
         if self._selected is None or self._selected not in self._annotations:
@@ -368,6 +369,10 @@ class AnnotationCanvas(QWidget):
         # mean a different thing depending on the annotation type.
         if bgOpacity is not None and anno.get("type") == "text":
             anno["bgOpacity"] = max(0.0, min(1.0, float(bgOpacity)))
+            changed = True
+
+        if bgColor is not None and anno.get("type") == "text":
+            anno["bgColor"] = bgColor
             changed = True
 
         if changed:

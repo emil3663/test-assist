@@ -541,6 +541,16 @@ class EditorWindow(QMainWindow):
         layout.addWidget(self._opacity_slider)
         layout.addWidget(self._opacity_lbl)
 
+        # Text background colour. Shown only while the Text tool is active,
+        # because it is the only annotation with a plate behind it - a
+        # swatch permanently sitting there disabled would be the settings
+        # bar's widest piece of dead space.
+        self._text_bg_color_btn = _ColorButton(self._canvas.text_bg_color, size=(24, 24))
+        self._text_bg_color_btn.setToolTip("Text background colour")
+        self._text_bg_color_btn.color_changed.connect(self._on_text_bg_color_changed)
+        self._text_bg_color_btn.hide()
+        layout.addWidget(self._text_bg_color_btn)
+
         layout.addStretch(1)
 
         # ── Export ────────────────────────────────────────────────────────
@@ -710,28 +720,35 @@ class EditorWindow(QMainWindow):
         # Apply this tool's colour to the canvas
         if tool_id in self._tool_colors:
             self._canvas.color = self._tool_colors[tool_id]
-        self._sync_opacity_slider(tool_id)
+        self._sync_tool_settings(tool_id)
 
-    def _sync_opacity_slider(self, tool_id: str) -> None:
-        """Point the one opacity slider at whichever fill the current tool
-        actually has.
+    def _sync_tool_settings(self, tool_id: str) -> None:
+        """Put the shared settings controls into the active tool's state.
 
-        Highlight and Text are the only two tools with a fill, and they are
-        never both active, so a second slider would sit disabled for every
-        tool but one. This follows the same per-tool pattern the colour
-        swatches already use. Signals are blocked while the value is set,
-        or restoring the stored value would immediately write it back as if
-        the user had dragged the slider.
+        The settings bar has one size slider and one opacity slider serving
+        every tool, which is why both were labelled for whichever tool the
+        author had in mind rather than the one in use. Highlight and Text
+        are the only tools with a fill and are never both active, so a
+        second set of controls would sit disabled for every tool but one.
+
+        Signals are blocked while values are restored, or writing a stored
+        value back into the slider would read as the user having dragged it.
         """
         is_text = tool_id == "text"
-        value = self._canvas.text_bg_opacity if is_text else self._canvas.fill_opacity
+
+        self._size_slider.setToolTip("Text size" if is_text else "Stroke size")
+        self._size_lbl.setText(self._size_label_for(tool_id, self._canvas.stroke_size))
+
+        opacity = self._canvas.text_bg_opacity if is_text else self._canvas.fill_opacity
         self._opacity_slider.setToolTip(
             "Text background opacity" if is_text else "Highlight fill opacity"
         )
         self._opacity_slider.blockSignals(True)
-        self._opacity_slider.setValue(round(value * 100))
+        self._opacity_slider.setValue(round(opacity * 100))
         self._opacity_slider.blockSignals(False)
-        self._opacity_lbl.setText(f"{round(value * 100)} %")
+        self._opacity_lbl.setText(f"{round(opacity * 100)} %")
+
+        self._text_bg_color_btn.setVisible(is_text)
 
     def _on_tool_color_changed(self, tool_id: str, color: str) -> None:
         self._tool_colors[tool_id] = color
@@ -763,8 +780,26 @@ class EditorWindow(QMainWindow):
 
     def _on_size_changed(self, value: int) -> None:
         self._canvas.stroke_size = value
-        self._size_lbl.setText(f"{value} px")
+        self._size_lbl.setText(self._size_label_for(self._canvas.tool, value))
         self._canvas.update_selected_style(size=value)
+
+    @staticmethod
+    def _size_label_for(tool_id: str, value: int) -> str:
+        """What the size slider is actually setting, for the active tool.
+
+        For text this slider has always been the font size - canvas.py
+        computes it as max(14, stroke_size * 4) - but it read "3 px" with a
+        "Stroke size" tooltip, so the only control over how big an
+        annotation's text came out was undiscoverable. Showing the value it
+        produces, in the unit it produces it in, is the whole fix.
+        """
+        if tool_id == "text":
+            return f"{max(14, value * 4)} pt"
+        return f"{value} px"
+
+    def _on_text_bg_color_changed(self, color: str) -> None:
+        self._canvas.text_bg_color = color
+        self._canvas.update_selected_style(bgColor=color)
 
     def _on_zoom_slider_changed(self, value: int) -> None:
         self._fit_mode = False
