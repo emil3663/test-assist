@@ -573,6 +573,7 @@ class EditorWindow(QMainWindow):
         # the main action of the screen, not just another button in a row.
         self._btn_save_png = QPushButton("Save PNG")
         self._btn_save_png.setIcon(theme.icon_pixmap("save", 15, "#ffffff"))
+        self._btn_save_png.setProperty("iconLabel", True)
         self._btn_save_png.setObjectName("btn_primary")
         self._btn_save_png.setFixedHeight(28)
         layout.addWidget(self._btn_save_png)
@@ -623,6 +624,9 @@ class EditorWindow(QMainWindow):
             self._btn_front, self._btn_back, self._btn_backmost, self._btn_clear,
         ):
             btn.setFixedHeight(30)
+            # These sit in a column with labels of very different lengths, so
+            # a centred icon+text pair puts every icon at a different x.
+            btn.setProperty("iconLabel", True)
             layout.addWidget(btn)
 
         layout.addWidget(self._separator())
@@ -1477,14 +1481,33 @@ class _RecordingThumb(QFrame):
             self._load_thumbnail()
 
     def _show_fallback_icon(self) -> None:
-        self._preview.setPixmap(QPixmap())
-        self._preview.setText("🎞" if self._is_kept_frames else "🎥")
-        self._preview.setStyleSheet("font-size: 28px; background: transparent;")
+        """Shown when a recording has no poster frame to display.
+
+        A glyph rather than an emoji for the same reason as everywhere else:
+        emoji are bitmaps in their own colours, so they pixelate and ignore
+        the palette - here against a thumbnail tile that does follow it.
+        """
+        # Recorded as a name as well as drawn: the fallback used to be an
+        # emoji, so a test could assert on the character. A pixmap has no
+        # such handle, and "some pixmap is set" would not distinguish a
+        # frame sequence from an mp4 - which is the distinction the tests
+        # are actually about.
+        self._fallback_icon = "video" if self._is_kept_frames else "record"
+        self._preview.setText("")
+        self._preview.setStyleSheet("background: transparent;")
+        self._preview.setPixmap(
+            theme.icon_pixmap(self._fallback_icon, 28, theme.MUTED).pixmap(28, 28)
+        )
 
     def _show_thumbnail(self, thumbnail_path: Path) -> None:
         pixmap = QPixmap(str(thumbnail_path))
         if pixmap.isNull():
             return
+        # Cleared here rather than only set in _show_fallback_icon, so the
+        # attribute answers "which image is showing" rather than "which one
+        # was shown first" - a real poster frame arriving late must not
+        # leave the tile still claiming to be a fallback.
+        self._fallback_icon = None
         self._preview.setStyleSheet("background: transparent;")
         self._preview.setText("")
         self._preview.setPixmap(

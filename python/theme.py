@@ -2,6 +2,7 @@
 
 import sys
 
+from PySide6.QtCore import QRectF
 from PySide6.QtGui import QColor, QFont, QIcon
 
 # A fallback chain, not a change of font: whichever platform you are on,
@@ -200,6 +201,20 @@ QPushButton {{
     padding: 7px 14px;
     font-weight: 600;
     font-size: 12px;
+}}
+/* A button carrying both an icon and a label. Qt centres the icon+text
+   pair as one group, so in a column of buttons whose labels differ in
+   length - Undo, Delete Selected, Bring to Front - every icon lands at a
+   different x and the column reads as ragged. Left-aligning pins the
+   icons to one edge, and since they are all the same size the labels line
+   up behind them too.
+
+   Qt has no selector for "has an icon", so this is opted into with a
+   dynamic property rather than applied to every QPushButton: a short
+   text-only button like Copy or Fit still looks right centred. */
+QPushButton[iconLabel="true"] {{
+    text-align: left;
+    padding-left: 12px;
 }}
 QPushButton:hover {{
     border-color: {ACCENT};
@@ -489,32 +504,45 @@ def icon_pixmap(name: str, pixel_size: int = 18, colour: str | None = None) -> Q
     following light and dark, which is the whole reason for moving off
     emoji.
 
+    Rendered at exactly the device resolution and tagged with the ratio, so
+    Qt blits it 1:1. Both halves of that matter and a previous version got
+    both wrong: it drew the glyph at 3x and then scaled the pixmap down,
+    which is a resample - the softness everyone could see - and it produced
+    an untagged pixmap sized in logical pixels, which a HiDPI screen then
+    had to scale *up* again to fill the same button. Two resamples for a
+    glyph that is an outline and could simply have been drawn at the size
+    actually needed.
+
     Returns an empty QIcon when the font is unavailable, which QPushButton
     draws as no icon at all - so a button falls back to its text label
     rather than to tofu.
     """
     from PySide6.QtCore import Qt
-    from PySide6.QtGui import QPainter, QPixmap
+    from PySide6.QtGui import QGuiApplication, QPainter, QPixmap
 
     glyph = icon(name)
     if not glyph:
         return QIcon()
 
-    # Rendered at 3x and scaled down: a glyph drawn straight into a small
-    # pixmap picks up the hinting of that exact size, and these are also
-    # used on HiDPI screens where the same QIcon is asked for more pixels.
-    scale = 3
-    pixmap = QPixmap(pixel_size * scale, pixel_size * scale)
+    screen = QGuiApplication.primaryScreen()
+    ratio = screen.devicePixelRatio() if screen is not None else 1.0
+
+    pixmap = QPixmap(round(pixel_size * ratio), round(pixel_size * ratio))
     pixmap.fill(Qt.GlobalColor.transparent)
+    pixmap.setDevicePixelRatio(ratio)
+
     painter = QPainter(pixmap)
     painter.setRenderHint(QPainter.RenderHint.Antialiasing)
     painter.setRenderHint(QPainter.RenderHint.TextAntialiasing)
-    painter.setFont(icon_font(pixel_size * scale))
+    # Font size in logical pixels: the painter is already scaled by the
+    # pixmap's ratio, so asking for the device size here would draw the
+    # glyph at ratio-squared.
+    painter.setFont(icon_font(pixel_size))
     painter.setPen(QColor(colour or TEXT))
-    painter.drawText(pixmap.rect(), Qt.AlignmentFlag.AlignCenter, glyph)
+    painter.drawText(
+        QRectF(0, 0, pixel_size, pixel_size),
+        Qt.AlignmentFlag.AlignCenter,
+        glyph,
+    )
     painter.end()
-    return QIcon(pixmap.scaled(
-        pixel_size, pixel_size,
-        Qt.AspectRatioMode.KeepAspectRatio,
-        Qt.TransformationMode.SmoothTransformation,
-    ))
+    return QIcon(pixmap)
