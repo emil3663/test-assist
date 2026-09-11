@@ -108,6 +108,24 @@ below.
 
 ---
 
+## How test counts are measured
+
+Test counts are measured with the runner, never by grepping for `test(` or
+`def test_`. Parametrised and loop-generated tests are invisible to a source
+count — `pytest --collect-only -q` and `playwright test --list` report what
+actually exists. A claim audit that counts the source can produce a
+confident, wrong "this documentation is false."
+
+Concrete instance: `docs/VERIFICATION_2026-09-09.md` §4 counted `test(` calls
+in `tests/regression.spec.ts` and got 41, reporting README's "47 regression
+tests" as false. `regression.spec.ts:487:9` is a single `test()` inside a
+loop over the shortcut table, which Playwright collects as seven tests
+(KS-01–KS-07) — `playwright test --config playwright.regression.config.ts
+--list` reports 47, exactly as the README says. Retracted in place in that
+document rather than corrected silently.
+
+---
+
 ## What the tests run against
 
 `QT_QPA_PLATFORM=offscreen`, so real widgets are constructed and real event
