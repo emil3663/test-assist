@@ -222,6 +222,13 @@ cd python
 ./build.sh --zip                 # macOS
 ```
 
+The macOS artefact is `python/dist/Test Assist.app`. Ignore `python/build/` —
+that is PyInstaller's scratch directory, and the `TestAssist.pkg` inside it is
+PyInstaller's own compressed archive rather than a macOS installer package.
+Double-clicking it produces `com.apple.installer.pagecontroller error -1`,
+which is Installer.app declining to open something that was never meant for
+it.
+
 That produces `dist/TestAssist/TestAssist.exe`, verifies it actually runs, zips
 it, and drops a Desktop shortcut you can pin. The tagged-release workflow runs
 the same spec on a clean Windows runner, so a local build and a released build

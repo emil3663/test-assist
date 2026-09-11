@@ -108,6 +108,29 @@ _DARK = {
     "MUTED":          "#8892a4",
     "PANEL_BG":       (13, 13, 26, 242),
     "PANEL_BORDER":   (124, 131, 253, 80),
+
+    # Depth layer. Additive by construction: these are background-image
+    # gradients with alpha stops, so every fill still comes from the
+    # background-color the tokens above set. Nothing here changes a
+    # colour, a size or a contrast ratio - which is what makes it safe to
+    # apply broadly and easy to take back off.
+    #
+    # Qt has no box-shadow, so the edge-lighting half of this idea does not
+    # survive the port; the sheens do, and they are the half that carries
+    # the effect.
+    "LIFT_PAGE": (
+        "qlineargradient(x1:0, y1:0, x2:0.75, y2:1,"
+        " stop:0 rgba(124,131,253,40), stop:0.35 rgba(110,118,240,22),"
+        " stop:0.7 rgba(86,96,205,16), stop:1 rgba(64,74,175,26))"
+    ),
+    "LIFT_SURFACE": (
+        "qlineargradient(x1:0, y1:0, x2:0, y2:1,"
+        " stop:0 rgba(255,255,255,18), stop:0.42 rgba(255,255,255,0))"
+    ),
+    "LIFT_BUTTON": (
+        "qlineargradient(x1:0, y1:0, x2:0, y2:1,"
+        " stop:0 rgba(255,255,255,30), stop:0.55 rgba(255,255,255,0))"
+    ),
 }
 
 # Amber rather than a lightened indigo: the launcher was originally amber,
@@ -130,10 +153,28 @@ _LIGHT = {
     "MUTED":          "#5f6676",
     "PANEL_BG":       (247, 247, 250, 242),
     "PANEL_BORDER":   (176, 89, 31, 90),
+
+    # Same shapes, quieter: on a near-white ground a white sheen does
+    # almost nothing, so the page glow carries the accent instead and the
+    # surface light is a touch of white over an already-light fill.
+    "LIFT_PAGE": (
+        "qlineargradient(x1:0, y1:0, x2:0.75, y2:1,"
+        " stop:0 rgba(176,89,31,26), stop:0.35 rgba(176,89,31,14),"
+        " stop:0.7 rgba(140,110,90,12), stop:1 rgba(120,100,140,18))"
+    ),
+    "LIFT_SURFACE": (
+        "qlineargradient(x1:0, y1:0, x2:0, y2:1,"
+        " stop:0 rgba(255,255,255,150), stop:0.42 rgba(255,255,255,0))"
+    ),
+    "LIFT_BUTTON": (
+        "qlineargradient(x1:0, y1:0, x2:0, y2:1,"
+        " stop:0 rgba(255,255,255,45), stop:0.55 rgba(255,255,255,0))"
+    ),
 }
 
 # Dark is the default so that importing this module never depends on a live
 # QApplication - use_scheme() replaces these once one exists.
+LIFT_PAGE = LIFT_SURFACE = LIFT_BUTTON = ""
 ACCENT = ACCENT_HOVER = ACCENT_PRESSED = ""
 DANGER = DANGER_HOVER = DANGER_PRESSED = ""
 BG_900 = BG_800 = BG_700 = LINE = LINE_STRONG = TEXT = MUTED = ""
@@ -156,6 +197,7 @@ def use_scheme(light: bool) -> None:
     global DANGER, DANGER_HOVER, DANGER_PRESSED
     global BG_900, BG_800, BG_700, LINE, LINE_STRONG, TEXT, MUTED
     global PANEL_BG, PANEL_BORDER, is_light
+    global LIFT_PAGE, LIFT_SURFACE, LIFT_BUTTON
 
     palette = _LIGHT if light else _DARK
     globals().update(palette)
@@ -301,6 +343,22 @@ QSlider::sub-page:horizontal {{
     background: {ACCENT};
     border-radius: 2px;
 }}
+/* ── Depth layer ──────────────────────────────────────────────────────
+   Additive only: background-image, never background-color, so every fill
+   still comes from the tokens and no contrast ratio moves. Targeted by
+   objectName rather than applied to QWidget, because a gradient on
+   QWidget would also land on the canvas - which paints the user's
+   screenshot and must stay exactly what was captured. */
+QMainWindow {{
+    background-image: {LIFT_PAGE};
+}}
+QWidget#tools_bar, QWidget#settings_bar, QWidget#right_panel {{
+    background-image: {LIFT_SURFACE};
+}}
+QPushButton#btn_primary, QPushButton#btn_danger, QPushButton#btn_help {{
+    background-image: {LIFT_BUTTON};
+}}
+
 QLabel {{
     color: {MUTED};
     font-size: 11px;
@@ -341,6 +399,15 @@ QScrollBar::add-line, QScrollBar::sub-line {{
 }}
 QScrollArea {{
     border: none;
+    background: transparent;
+}}
+/* The viewport is a plain child QWidget, so it picks up the flat QWidget
+   fill above and paints it over the window's gradient - which is why the
+   depth was invisible on the largest surface in the app. Transparent here
+   lets QMainWindow show through around the canvas; the canvas itself is
+   sized to the image and paints its own pixels, so nothing of the capture
+   is affected. */
+QScrollArea > QWidget#qt_scrollarea_viewport {{
     background: transparent;
 }}
 QSplitter::handle {{

@@ -77,4 +77,10 @@ if [ "$ZIP" = "1" ]; then
     echo "==> $zip_path ($(du -h "$zip_path" | cut -f1))"
 fi
 
+echo
 echo "==> done: $app"
+echo "    Run that. Ignore python/build/ - it is PyInstaller's scratch"
+echo "    directory, and the TestAssist.pkg inside it is PyInstaller's own"
+echo "    compressed archive, not a macOS installer package. Double-clicking"
+echo "    it gives 'com.apple.installer.pagecontroller error -1', because"
+echo "    Installer.app is being handed something that is not an installer."
