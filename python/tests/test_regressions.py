@@ -2227,9 +2227,9 @@ def test_no_stylesheet_rule_sets_text_below_minimum_contrast() -> None:
     background, well under WCAG's 3:1 floor for large text/icons. A contrast
     function catches the whole class of this mistake, not just the one rule
     that happened to be reported."""
-    from theme import EDITOR_STYLE
+    import theme
 
-    pairs = _color_background_pairs(EDITOR_STYLE)
+    pairs = _color_background_pairs(theme.editor_style())
     assert pairs, "test setup: expected at least one rule with both color and background-color"
 
     failures = [
@@ -2243,9 +2243,9 @@ def test_no_stylesheet_rule_sets_text_below_minimum_contrast() -> None:
 def test_theme_has_exactly_one_shared_rule_for_small_icon_buttons() -> None:
     import re
 
-    from theme import EDITOR_STYLE
+    import theme
 
-    matches = re.findall(r'QPushButton\[smallIconButton="true"\]\s*\{([^}]*)\}', EDITOR_STYLE)
+    matches = re.findall(r'QPushButton\[smallIconButton="true"\]\s*\{([^}]*)\}', theme.editor_style())
     assert len(matches) == 1, "expected one shared rule, not one per button"
     assert "padding: 0" in matches[0]
 
@@ -2432,3 +2432,87 @@ def test_recorder_with_nothing_captured_emits_empty(qapp, monkeypatch, tmp_path)
     rec.stop()
 
     assert emitted == [""]
+
+
+# ── Light / dark palettes ────────────────────────────────────────────────────
+
+
+@pytest.mark.parametrize("light", [False, True], ids=["dark", "light"])
+def test_both_palettes_clear_the_contrast_floor(light: bool) -> None:
+    """The contrast guard above measures whichever palette happens to be
+    active, which before there were two was every palette there was.
+
+    A second palette that nothing checks is how light mode becomes a source
+    of bugs: the failure is invisible to anyone whose OS is set the other
+    way, which includes CI. Restores the previous scheme afterwards so test
+    order cannot matter.
+    """
+    import theme
+
+    was_light = theme.is_light
+    try:
+        theme.use_scheme(light=light)
+        pairs = _color_background_pairs(theme.editor_style())
+        assert pairs, "test setup: expected rules with both color and background-color"
+        failures = [
+            f"{selector}: {color} on {background} = {_contrast_ratio(color, background):.2f}:1"
+            for selector, color, background in pairs
+            if _contrast_ratio(color, background) < 3.0
+        ]
+        scheme = "light" if light else "dark"
+        assert not failures, f"{scheme} palette below the 3:1 minimum:\n" + "\n".join(failures)
+    finally:
+        theme.use_scheme(light=was_light)
+
+
+@pytest.mark.parametrize("light", [False, True], ids=["dark", "light"])
+def test_both_palettes_define_every_token(light: bool) -> None:
+    """A token missing from one palette resolves to the other's value only
+    because use_scheme() updates rather than replaces - so the gap shows up
+    as one wrong-coloured widget, not an error."""
+    import theme
+
+    was_light = theme.is_light
+    try:
+        assert set(theme._DARK) == set(theme._LIGHT), "palettes define different tokens"
+        theme.use_scheme(light=light)
+        for name in theme._DARK:
+            value = getattr(theme, name)
+            assert value, f"{name} is empty after use_scheme"
+    finally:
+        theme.use_scheme(light=was_light)
+
+
+def test_body_text_is_readable_on_the_light_background() -> None:
+    """The pairs test above only sees rules that set colour and background
+    together. Body text inherits its background, so the two combinations a
+    light palette most obviously has to get right are checked directly."""
+    import theme
+
+    was_light = theme.is_light
+    try:
+        theme.use_scheme(light=True)
+        assert _contrast_ratio(theme.TEXT, theme.BG_900) >= 4.5, "body text"
+        assert _contrast_ratio(theme.MUTED, theme.BG_900) >= 4.5, "secondary text"
+        assert _contrast_ratio(theme.MUTED, theme.BG_800) >= 4.5, "secondary text on panels"
+    finally:
+        theme.use_scheme(light=was_light)
+
+
+def test_the_canvas_does_not_follow_the_os_theme() -> None:
+    """The line that keeps light mode small: annotations are painted on top
+    of the user's screenshot, not on app chrome, so the same defect marked
+    up on a light machine and a dark one must export identical evidence.
+
+    canvas.py importing a colour token would be the first step toward that
+    not being true."""
+    import re
+    from pathlib import Path
+
+    source = Path(__file__).resolve().parent.parent / "canvas.py"
+    imports = re.findall(r"^from theme import (.+)$", source.read_text(), re.M)
+    imported = {name.strip() for line in imports for name in line.split(",")}
+    assert imported <= {"ui_font"}, (
+        f"canvas.py imports palette tokens {imported - {'ui_font'}} - annotation "
+        "rendering must not depend on the OS theme"
+    )

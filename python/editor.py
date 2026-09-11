@@ -38,7 +38,7 @@ from PySide6.QtWidgets import (
 import debug_log
 import paths
 from canvas import AnnotationCanvas
-from theme import ACCENT, BG_800, LINE, MUTED, TEXT
+import theme
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -294,8 +294,8 @@ class EditorWindow(QMainWindow):
         bar = QFrame()
         bar.setObjectName("tools_bar")
         bar.setStyleSheet(
-            f"QFrame#tools_bar {{ background-color: {BG_800};"
-            f" border-bottom: 1px solid {LINE}; }}"
+            f"QFrame#tools_bar {{ background-color: {theme.BG_800};"
+            f" border-bottom: 1px solid {theme.LINE}; }}"
         )
         bar.setFixedHeight(92)
 
@@ -340,7 +340,7 @@ class EditorWindow(QMainWindow):
             name_lbl = QLabel(short_name)
             name_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
             name_lbl.setFixedHeight(14)
-            name_lbl.setStyleSheet("font-size: 9px; color: #b0b0c8; background: transparent;")
+            name_lbl.setStyleSheet(f"font-size: 9px; color: {theme.MUTED}; background: transparent;")
             vl.addWidget(name_lbl, 0, Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignHCenter)
 
             vl.addStretch(1)
@@ -443,8 +443,8 @@ class EditorWindow(QMainWindow):
         bar = QFrame()
         bar.setObjectName("settings_bar")
         bar.setStyleSheet(
-            f"QFrame#settings_bar {{ background-color: {BG_800};"
-            f" border-bottom: 1px solid {LINE}; }}"
+            f"QFrame#settings_bar {{ background-color: {theme.BG_800};"
+            f" border-bottom: 1px solid {theme.LINE}; }}"
         )
         bar.setFixedHeight(40)
 
@@ -562,7 +562,7 @@ class EditorWindow(QMainWindow):
         panel = QWidget()
         panel.setObjectName("right_panel")
         panel.setFixedWidth(185)
-        panel.setStyleSheet(f"QWidget#right_panel {{ border-left: 1px solid {LINE}; }}")
+        panel.setStyleSheet(f"QWidget#right_panel {{ border-left: 1px solid {theme.LINE}; }}")
 
         layout = QVBoxLayout(panel)
         layout.setSpacing(5)
@@ -945,17 +945,17 @@ class EditorWindow(QMainWindow):
         layout.setSpacing(10)
 
         title = QLabel(f"Test Assist {self._version}")
-        title.setStyleSheet(f"font-size: 16px; font-weight: 700; color: {TEXT};")
+        title.setStyleSheet(f"font-size: 16px; font-weight: 700; color: {theme.TEXT};")
         layout.addWidget(title)
 
         os_line = QLabel(QSysInfo.prettyProductName())
-        os_line.setStyleSheet(f"color: {MUTED};")
+        os_line.setStyleSheet(f"color: {theme.MUTED};")
         layout.addWidget(os_line)
 
         screens_label = QLabel(_format_screen_summary(_collect_screen_info()))
         screens_label.setWordWrap(True)
         screens_label.setStyleSheet(
-            f"color: {MUTED}; font-family: Consolas, 'Cascadia Code', monospace; font-size: 12px;"
+            f"color: {theme.MUTED}; font-family: Consolas, 'Cascadia Code', monospace; font-size: 12px;"
         )
         layout.addWidget(screens_label)
 
@@ -1056,7 +1056,7 @@ class EditorWindow(QMainWindow):
         if not files:
             empty = QLabel("No snapshots in this range")
             empty.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            empty.setStyleSheet(f"color: {MUTED}; padding: 8px;")
+            empty.setStyleSheet(f"color: {theme.MUTED}; padding: 8px;")
             self._snap_layout.insertWidget(0, empty)
             return
 
@@ -1119,7 +1119,7 @@ class EditorWindow(QMainWindow):
         root.setSpacing(8)
 
         subtitle = QLabel("Browse snapshots by category and click a thumbnail to load it in the editor.")
-        subtitle.setStyleSheet(f"color: {MUTED};")
+        subtitle.setStyleSheet(f"color: {theme.MUTED};")
         root.addWidget(subtitle)
 
         tabs = QTabWidget()
@@ -1148,7 +1148,7 @@ class EditorWindow(QMainWindow):
             if not files:
                 empty = QLabel("No snapshots in this category")
                 empty.setAlignment(Qt.AlignmentFlag.AlignCenter)
-                empty.setStyleSheet(f"color: {MUTED}; padding: 20px;")
+                empty.setStyleSheet(f"color: {theme.MUTED}; padding: 20px;")
                 grid.addWidget(empty, 0, 0)
             else:
                 for idx, path in enumerate(files, start=1):
@@ -1196,14 +1196,14 @@ class EditorWindow(QMainWindow):
     def _separator() -> QFrame:
         line = QFrame()
         line.setFrameShape(QFrame.Shape.HLine)
-        line.setStyleSheet(f"background-color: {LINE}; border: none; max-height: 1px;")
+        line.setStyleSheet(f"background-color: {theme.LINE}; border: none; max-height: 1px;")
         return line
 
     @staticmethod
     def _vseparator() -> QFrame:
         line = QFrame()
         line.setFrameShape(QFrame.Shape.VLine)
-        line.setStyleSheet(f"background-color: {LINE}; border: none; max-width: 1px;")
+        line.setStyleSheet(f"background-color: {theme.LINE}; border: none; max-width: 1px;")
         line.setFixedWidth(1)
         return line
 
@@ -1214,7 +1214,7 @@ class EditorWindow(QMainWindow):
             btn.setObjectName("section_title")
             btn.setFlat(True)
             btn.setCursor(Qt.CursorShape.PointingHandCursor)
-            btn.setStyleSheet(f"text-align: left; color: {TEXT};")
+            btn.setStyleSheet(f"text-align: left; color: {theme.TEXT};")
             layout.addWidget(btn)
             return btn
         lbl = QLabel(text.upper())
@@ -1262,9 +1262,9 @@ class _ColorButton(QPushButton):
             QPushButton {{
                 background-color: {self._color};
                 border-radius: {radius}px;
-                border: 2px solid #3a3a5e;
+                border: 2px solid {theme.LINE_STRONG};
             }}
-            QPushButton:hover {{ border-color: #7c83fd; }}
+            QPushButton:hover {{ border-color: {theme.ACCENT}; }}
         """)
 
 
@@ -1285,12 +1285,12 @@ class _SnapshotThumb(QFrame):
         self._pixmap = QPixmap(str(image_path))
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.setToolTip(f"Click to reload this snapshot\n{image_path.name}")
-        self.setStyleSheet("""
-            QFrame {
-                border: 1px solid #2a2a4e;
+        self.setStyleSheet(f"""
+            QFrame {{
+                border: 1px solid {theme.LINE};
                 border-radius: 8px;
-            }
-            QFrame:hover { border-color: #7c83fd; }
+            }}
+            QFrame:hover {{ border-color: {theme.ACCENT}; }}
         """)
 
         layout = QVBoxLayout(self)
@@ -1377,13 +1377,13 @@ class _RecordingThumb(QFrame):
             if self._is_kept_frames
             else (f"Click to open in your video player\n{recording_path.name}")
         )
-        self.setStyleSheet("""
-            QFrame {
-                border: 1px solid #4a3a2a;
+        self.setStyleSheet(f"""
+            QFrame {{
+                border: 1px solid {theme.LINE_STRONG};
                 border-radius: 8px;
-                background: rgba(200,120,60,0.06);
-            }
-            QFrame:hover { border-color: #c8763a; }
+                background: {theme.BG_800};
+            }}
+            QFrame:hover {{ border-color: {theme.ACCENT}; }}
         """)
 
         layout = QVBoxLayout(self)
