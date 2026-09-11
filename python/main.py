@@ -17,7 +17,7 @@ import paths
 from editor import EditorWindow
 from launcher import FloatingLauncher
 from single_instance import AcquireOutcome, SingleInstanceManager
-from theme import EDITOR_STYLE
+from theme import EDITOR_STYLE, ui_font
 
 
 _FLAGS = ("--version", "--selftest")
@@ -55,7 +55,7 @@ def _make_tray_icon() -> QIcon:
     p.setBrush(QColor("#d7873d"))
     p.drawRoundedRect(4, 4, 56, 56, 14, 14)
     p.setPen(QColor("#1f1208"))
-    p.setFont(QFont("Segoe UI", 22, QFont.Weight.Bold))
+    p.setFont(ui_font(22, QFont.Weight.Bold))
     p.drawText(pix.rect(), Qt.AlignmentFlag.AlignCenter, "TA")
     p.end()
     return QIcon(pix)
