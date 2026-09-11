@@ -91,7 +91,7 @@ pytest -q                            # expect green; note the count in the relea
 cd ..
 ```
 
-In `CHANGELOG.md`, convert `## [Unreleased]` to `## [1.4.0] — 2026-09-11` and
+In `CHANGELOG.md`, convert `## [Unreleased]` to `## [1.4.0] — 2026-09-12` and
 add the two capture entries from §3 below. A fresh empty `## [Unreleased]`
 goes above it.
 
