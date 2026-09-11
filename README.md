@@ -47,7 +47,7 @@ are in the left rail.*
 | | Browser | Desktop |
 |---|---|---|
 | **Stack** | Vanilla JavaScript, Canvas API | Python, PySide6 (Qt) |
-| **Install** | None — open the live URL | Download the release zip and run `TestAssist.exe`, or run from source |
+| **Install** | None — open the live URL | Download the release zip — `TestAssist.exe` on Windows, `Test Assist.app` on macOS — or run from source |
 | **Capture** | `getDisplayMedia`, `MediaRecorder` | Native screenshot overlay, frame recorder |
 | **Best for** | Trying the full capture → annotate → export loop in ten seconds, with nothing to install | Long test sessions — a tray launcher that stays above the application under test |
 | **Tests** | 55 Playwright tests — smoke suite in CI, regression suite on demand | 229 pytest tests across a regression and a functional suite, in CI |
@@ -194,11 +194,32 @@ pip install -r requirements.txt
 python main.py          # or: ./run.ps1 on Windows
 ```
 
+**Desktop — macOS**:
+
+Download `TestAssist-<version>-macos.zip` from
+[Releases](https://github.com/emil3663/test-assist/releases), unzip, and drag
+`Test Assist.app` to Applications.
+
+The bundle is **not signed or notarised** — signing needs a paid Apple
+Developer account — so Gatekeeper blocks the first launch. Right-click the app
+and choose **Open**, then **Open** again on the dialog; macOS remembers the
+choice. After that it launches normally.
+
+Screen capture needs permission the first time: macOS prompts, or grant it
+under **System Settings → Privacy & Security → Screen Recording**. Without it
+captures come back black rather than failing loudly — a macOS behaviour, not
+an app one.
+
 **Desktop — building it yourself**:
 
 ```powershell
 cd python
-.\build.ps1 -Zip -Shortcut
+.\build.ps1 -Zip -Shortcut      # Windows
+```
+
+```bash
+cd python
+./build.sh --zip                 # macOS
 ```
 
 That produces `dist/TestAssist/TestAssist.exe`, verifies it actually runs, zips
