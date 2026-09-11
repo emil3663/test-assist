@@ -544,9 +544,12 @@ def test_TA211_global_hotkeys_register_and_are_advertised(qapp) -> None:
         assert launcher._hotkey_registered == {
             "photo": True, "full_capture": True, "video": True,
         }
-        assert "(Alt+P)" in launcher._btn_photo.toolTip()
+        # The mode toggle these used to label is gone; Alt+P belongs to
+        # Capture Region and Alt+V to the record control, which is where
+        # those actions actually live now.
+        assert "(Alt+P)" in launcher._btn_capture.toolTip()
         assert "(Alt+Shift+P)" in launcher._btn_full_capture.toolTip()
-        assert "(Alt+V)" in launcher._btn_video.toolTip()
+        assert "(Alt+V)" in launcher._btn_record.toolTip()
         assert "Alt+P" in launcher._hint_lbl.text()
         assert "Alt+V" in launcher._hint_lbl.text()
     finally:
@@ -570,17 +573,20 @@ def test_TA211_global_hotkey_dispatch_routes_to_the_right_action(qapp) -> None:
         launcher._start_full_capture = lambda: calls.append("full_capture")
         launcher._toggle_recording = lambda: calls.append("video")
 
-        for hotkey_id, expected_mode, expected_call in [
-            (launcher._HOTKEY_PHOTO, "photo", "photo"),
-            (launcher._HOTKEY_FULL_CAPTURE, "photo", "full_capture"),
-            (launcher._HOTKEY_VIDEO, "video", "video"),
+        # Each hotkey dispatches straight to its action. There is no mode to
+        # set first and none to assert afterwards - which was the point of
+        # removing it: the shortcut and the button now do the same single
+        # thing, rather than both depending on hidden state.
+        for hotkey_id, expected_call in [
+            (launcher._HOTKEY_PHOTO, "photo"),
+            (launcher._HOTKEY_FULL_CAPTURE, "full_capture"),
+            (launcher._HOTKEY_VIDEO, "video"),
         ]:
             msg = wintypes.MSG()
             msg.message = WM_HOTKEY
             msg.wParam = hotkey_id
             launcher._hotkeys.nativeEventFilter(b"windows_generic_MSG", ctypes.addressof(msg))
             assert calls[-1] == expected_call
-            assert launcher._mode == expected_mode
     finally:
         launcher.close()
 
@@ -816,7 +822,7 @@ def test_TA211_a_failed_registration_is_surfaced_and_not_advertised(qapp) -> Non
                 "a conflict on one combination must not block the other two"
             assert launcher._hotkey_registered["video"] is True
 
-            assert "Alt+P" not in launcher._btn_photo.toolTip()
+            assert "Alt+P" not in launcher._btn_capture.toolTip()
             assert "(Alt+Shift+P)" in launcher._btn_full_capture.toolTip()
             assert "Alt+P" not in launcher._hint_lbl.text()
 
@@ -2705,3 +2711,42 @@ def test_LAUNCH_08_hotkey_labels_reach_buttons_that_still_exist(qapp) -> None:
         assert launcher._hint_lbl.text() == ""
     finally:
         launcher.close()
+
+
+def test_LAUNCH_09_every_launcher_attribute_this_suite_names_exists(qapp) -> None:
+    """Catch, on any platform, references to launcher attributes that no
+    longer exist.
+
+    Three TA-211 tests are skipif-guarded to Windows because they call real
+    RegisterHotKey. When the launcher rebuild removed _btn_photo, _btn_video
+    and _mode, those three kept referencing them - and every test run on a
+    Mac reported green, because the only tests that would have failed were
+    the ones that never ran. The break surfaced on someone else's Windows
+    machine, which is the worst place to find it.
+
+    A guard rather than a fix: it does not make the guarded tests runnable,
+    it just stops them silently rotting between the runs that do execute
+    them. Scans this file for `launcher.<attr>` and asserts a real
+    FloatingLauncher has each one.
+    """
+    import re
+    from pathlib import Path
+
+    # Names the suite deliberately asserts the ABSENCE of.
+    expected_absent = {"_btn_photo", "_btn_video", "_mode"}
+
+    source = Path(__file__).read_text(encoding="utf-8")
+    referenced = set(re.findall(r"\blauncher\.(_[A-Za-z0-9_]+)", source))
+    referenced -= expected_absent
+
+    launcher = FloatingLauncher(_EditorStub())
+    try:
+        missing = sorted(name for name in referenced if not hasattr(launcher, name))
+    finally:
+        launcher.close()
+
+    assert not missing, (
+        "these tests reference launcher attributes that do not exist: "
+        + ", ".join(missing)
+        + " - if one was renamed, the skipif-guarded tests need updating too"
+    )
