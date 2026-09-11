@@ -1085,6 +1085,43 @@ def test_launcher_full_capture_uses_the_screen_the_widget_is_on(qapp, monkeypatc
     launcher.close()
 
 
+def test_HIDPI_04_full_screen_capture_normalises_the_device_pixel_ratio(qapp, monkeypatch) -> None:
+    """grabWindow(0) returns a pixmap tagged with the screen's own
+    devicePixelRatio. canvas.py measures its own geometry and every
+    annotation's coordinates from _pixmap.width(), which is device pixels,
+    so a tagged pixmap is painted at its device-independent size inside a
+    device-sized surface: on a 125% screen, 1536x864 of picture inside a
+    1920x1080 file, black filling the remaining column and row.
+
+    capture.py already strips this tag on both of its own paths (the
+    composited grab and its no-pieces fallback) - the full-screen path
+    here never goes through capture.py, so it needed the same fix on its
+    own."""
+    launcher = FloatingLauncher(_EditorStub())
+    launcher.show()
+    qapp.processEvents()
+
+    class _FakeHiDPIScreen:
+        def grabWindow(self, _wid):
+            # 1920x1080 logical at ratio 1.25 -> 2400x1350 real pixels,
+            # exactly as a real QScreen.grabWindow() returns.
+            pixmap = QPixmap(2400, 1350)
+            pixmap.setDevicePixelRatio(1.25)
+            return pixmap
+
+    monkeypatch.setattr(launcher, "_current_screen", lambda: _FakeHiDPIScreen())
+
+    launcher._grab_full_capture()
+
+    assert len(launcher._editor.recorded) == 1
+    result = launcher._editor.recorded[0]
+    assert result.devicePixelRatio() == 1.0, \
+        "still tagged - canvas.py would paint it at its logical (smaller) size"
+    assert (result.width(), result.height()) == (2400, 1350), \
+        "must keep every device pixel, not shrink to the logical size"
+    launcher.close()
+
+
 def test_TA215_docked_capture_icon_shows_recording_state(qapp) -> None:
     """The docked strip's capture icon was set once at construction and
     never updated - unlike the undocked action button, whose text/style

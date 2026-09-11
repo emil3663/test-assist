@@ -7,6 +7,7 @@ hardware; see DESKTOP_STABILITY_MATRIX.md for what stays manual (CAP-12).
 """
 from __future__ import annotations
 
+import pytest
 from PySide6.QtCore import QPoint, QRect, QSize
 
 from screen_geometry import (
@@ -476,11 +477,63 @@ def test_device_pieces_tile_the_result_without_gap_or_overlap() -> None:
     """The property that actually matters: scaled up, the pieces must still
     exactly cover the result. An off-by-one in the rounding shows up as a
     1px unpainted seam, which every viewer renders as a black line down the
-    middle of the evidence."""
+    middle of the evidence.
+
+    1.25 and 1.5 are the ratios that actually matter here - 125% and 150%
+    are the common Windows scaling presets, not 2.0/3.0 - and are included
+    alongside the integers rather than replacing them. For this two-piece
+    layout they are safe by construction: piece 2's dest.x equals piece 1's
+    width, so both the per-piece rounding and the whole-result rounding
+    round the same expression, round(w1*ratio). See
+    test_three_piece_layout_can_seam_at_a_fractional_ratio below for why
+    that guarantee does not extend to three or more pieces."""
     retina = QRect(0, 0, 1512, 982)
     external = QRect(1512, 0, 1920, 1080)
-    for ratio in (1.0, 2.0, 3.0):
+    for ratio in (1.0, 1.25, 1.5, 2.0, 3.0):
         pieces = plan_capture(QRect(1000, 100, 1000, 400), [retina, external])
+        size = device_result_size(pieces, ratio)
+        rects = [to_device_rect(p.dest, p.screen_local_rect.size(), ratio) for p in pieces]
+
+        covered = sum(r.width() * r.height() for r in rects)
+        assert covered == size.width() * size.height(), f"gap or overlap at ratio {ratio}"
+        for a, b in zip(rects, rects[1:]):
+            assert not a.intersects(b), f"pieces overlap at ratio {ratio}"
+
+
+@pytest.mark.xfail(
+    reason=(
+        "Known limitation, tracked as TA-229 in TESTASSIST_BACKLOG.md: "
+        "to_device_rect() rounds each piece's x, y, w and h independently, "
+        "so for three or more pieces at a fractional ratio, round(w1*r) + "
+        "round(w2*r) + round(w3*r) is not guaranteed to equal "
+        "round((w1+w2+w3)*r). Two pieces are safe (see the test above); "
+        "three are not. Not fixed here: cannot be exercised on the "
+        "available hardware (needs three real screens at fractional "
+        "scaling), and this release does not claim three-screen spans. "
+        "Distinct from TA-209, which documents an axis-packing gap for "
+        "the same L-shaped three-screen layout - TA-209 covers a "
+        "different mechanism and does not cover this rounding defect."
+    ),
+    strict=True,
+)
+def test_three_piece_layout_can_seam_at_a_fractional_ratio() -> None:
+    """Diagnostic, not a regression guard: demonstrates that the two-piece
+    safety in the test above does not generalise to three pieces. Three
+    screens side by side, widths 297/297/298 (chosen so the individual
+    roundings do not sum back to the whole's rounding at 1.25 or 1.5):
+
+        ratio  per-piece rounded widths   sum    whole-rect rounding
+        1.25   371, 371, 372              1114   1115   <- 1px short
+        1.5    446, 446, 447              1339   1338   <- 1px over
+
+    Both are real defects (an unpainted seam at 1.25, an overlap at 1.5),
+    just not ones reachable with only two monitors."""
+    left = QRect(0, 0, 297, 400)
+    middle = QRect(297, 0, 297, 400)
+    right = QRect(594, 0, 298, 400)
+    for ratio in (1.25, 1.5):
+        pieces = plan_capture(QRect(0, 0, 892, 400), [left, middle, right])
+        assert len(pieces) == 3, "test setup: the selection must actually produce three pieces"
         size = device_result_size(pieces, ratio)
         rects = [to_device_rect(p.dest, p.screen_local_rect.size(), ratio) for p in pieces]
 
