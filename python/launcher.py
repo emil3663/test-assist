@@ -19,6 +19,7 @@ from PySide6.QtGui import (
 from PySide6.QtNetwork import QNetworkAccessManager
 from PySide6.QtWidgets import (
     QApplication,
+    QFrame,
     QHBoxLayout,
     QLabel,
     QMessageBox,
@@ -28,10 +29,12 @@ from PySide6.QtWidgets import (
 )
 
 import debug_log
+import paths
 from capture import FrameRecorder, ScreenshotOverlay
 from global_hotkeys import MOD_ALT, MOD_SHIFT, GlobalHotkeyManager
 from screen_geometry import is_within_dock_band, screen_for_rect
 from update_check import UpdateChecker
+import theme
 from theme import ui_font
 
 
@@ -43,8 +46,11 @@ class FloatingLauncher(QWidget):
     """
     Small always-on-top overlay window that drives the capture workflow.
 
-    • Photo mode  → drag-select a screen region → editor opens in background.
-    • Video mode  → start / stop screen recording → file saved to home folder.
+    • Capture Region → drag-select a screen region → editor opens behind.
+    • Full Screen    → grab the whole screen you are working on.
+    • Record         → start / stop a screen recording, saved to Documents.
+
+    Each is its own control; there is no mode to set first.
 
     Drag anywhere on the widget (outside a button) to reposition it.
     Right-click for a context menu with a Quit option.
@@ -65,7 +71,6 @@ class FloatingLauncher(QWidget):
     ) -> None:
         super().__init__(parent)
         self._editor  = editor
-        self._mode    = "photo"
         self._version = version
         # Off by default: real Win32 RegisterHotKey calls are shared,
         # global OS state - every test in this suite that just needs *a*
@@ -108,7 +113,6 @@ class FloatingLauncher(QWidget):
         self._drag_pos: QPoint | None = None
 
         self._build_ui()
-        self._set_mode("photo")
         self._position_top_right()
         self._register_hotkeys()
 
@@ -119,44 +123,50 @@ class FloatingLauncher(QWidget):
         outer.setContentsMargins(0, 0, 0, 0)
         outer.setSpacing(0)
 
-        # ── Floating panel (full UI) ──────────────────────────────────────────
+        # ── Floating panel ────────────────────────────────────────────────────
         self._float_panel = QWidget(self)
+        # Transparent so the rounded panel painted in paintEvent shows
+        # through, border included. Without this the global stylesheet's
+        # QWidget background paints an opaque rectangle over it - which was
+        # invisible while the two colours matched, and would have hidden the
+        # red recording border entirely.
+        self._float_panel.setStyleSheet("background: transparent;")
         float_layout = QVBoxLayout(self._float_panel)
-        float_layout.setContentsMargins(14, 14, 14, 14)
-        float_layout.setSpacing(8)
+        float_layout.setContentsMargins(14, 10, 14, 12)
+        float_layout.setSpacing(9)
 
-        # Grip handle
-        grip = QLabel()
-        grip.setFixedHeight(4)
-        grip.setStyleSheet(
-            "QLabel { background-color: rgba(200,120,60,0.25); border-radius: 2px;"
-            " margin: 0px 70px; }"
-        )
-        float_layout.addWidget(grip, alignment=Qt.AlignmentFlag.AlignHCenter)
-
-        # Header row: title + dock + close
+        # Header: identity on the left, window controls on the right.
         header_row = QHBoxLayout()
         header_row.setContentsMargins(0, 0, 0, 0)
-        header_row.setSpacing(6)
+        header_row.setSpacing(8)
 
-        title = QLabel("Test Assist")
-        title.setStyleSheet(
-            "color:#f0d0a0; font-size:14px; font-weight:700;"
-            " background:transparent; letter-spacing:1px;"
+        badge = QLabel("TA")
+        badge.setFixedSize(24, 24)
+        badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        badge.setStyleSheet(
+            f"background:{theme.ACCENT}; color:#ffffff; border-radius:6px;"
+            f" font-size:10px; font-weight:800;"
         )
-        header_row.addWidget(title, 1)
+        header_row.addWidget(badge)
 
-        self._btn_dock_right = QPushButton()
-        self._btn_dock_right.setFixedSize(26, 26)
-        self._btn_dock_right.setIcon(self._make_dock_icon())
-        self._btn_dock_right.setIconSize(QSize(14, 14))
-        self._btn_dock_right.setToolTip("Dock to right side")
-        self._btn_dock_right.setStyleSheet(self._style_icon_btn())
+        name_col = QVBoxLayout()
+        name_col.setSpacing(0)
+        title_lbl = QLabel("Test Assist")
+        title_lbl.setStyleSheet(
+            f"color:{theme.TEXT}; font-size:13px; font-weight:700; background:transparent;"
+        )
+        version_lbl = QLabel(f"v{self._version}" if self._version else "")
+        version_lbl.setStyleSheet(
+            f"color:{theme.MUTED}; font-size:9px; background:transparent;"
+        )
+        name_col.addWidget(title_lbl)
+        name_col.addWidget(version_lbl)
+        header_row.addLayout(name_col)
+        header_row.addStretch(1)
 
         self._btn_open_editor = QPushButton()
-        self._btn_open_editor.setFixedSize(26, 26)
-        self._btn_open_editor.setIcon(self._make_ta_icon())
-        self._btn_open_editor.setIconSize(QSize(14, 14))
+        self._btn_open_editor.setFixedSize(22, 22)
+        self._btn_open_editor.setIcon(theme.icon_pixmap("pen", 13, theme.MUTED))
         self._btn_open_editor.setToolTip("Open Editor")
         # setAccessibleName(), not just the tooltip (TA-228): this is an
         # icon-only button, indistinguishable from its unlabeled siblings
@@ -164,88 +174,163 @@ class FloatingLauncher(QWidget):
         # reliable way to find it from outside the process, and a real
         # accessible name is also what a screen reader would announce.
         self._btn_open_editor.setAccessibleName("Open Editor")
-        self._btn_open_editor.setStyleSheet(self._style_icon_btn())
-        self._btn_open_editor.setEnabled(True)
+        self._btn_open_editor.setStyleSheet(self._style_ghost())
 
         self._btn_check_updates = QPushButton()
-        self._btn_check_updates.setFixedSize(26, 26)
-        self._btn_check_updates.setIcon(self._make_update_icon())
-        self._btn_check_updates.setIconSize(QSize(14, 14))
+        self._btn_check_updates.setFixedSize(22, 22)
+        self._btn_check_updates.setIcon(theme.icon_pixmap("updates", 13, theme.MUTED))
         self._btn_check_updates.setToolTip("Check for Updates")
-        self._btn_check_updates.setStyleSheet(self._style_icon_btn())
+        self._btn_check_updates.setAccessibleName("Check for Updates")
+        self._btn_check_updates.setStyleSheet(self._style_ghost())
+
+        # One reduced form, not two: this shrinks to the docked strip, which
+        # is the compact mode. Named _btn_dock_right still because that is
+        # what it does and what the suite already calls it.
+        self._btn_dock_right = QPushButton()
+        self._btn_dock_right.setFixedSize(22, 22)
+        self._btn_dock_right.setIcon(theme.icon_pixmap("minimise", 13, theme.MUTED))
+        self._btn_dock_right.setToolTip("Shrink to the compact strip")
+        self._btn_dock_right.setAccessibleName("Shrink to strip")
+        self._btn_dock_right.setStyleSheet(self._style_ghost())
 
         self._btn_close = QPushButton()
-        self._btn_close.setFixedSize(26, 26)
-        self._btn_close.setIcon(self._make_close_icon())
-        self._btn_close.setIconSize(QSize(12, 12))
-        self._btn_close.setToolTip("Hide to tray")
-        self._btn_close.setStyleSheet(self._style_icon_btn())
+        self._btn_close.setFixedSize(22, 22)
+        self._btn_close.setIcon(theme.icon_pixmap("close", 13, theme.MUTED))
+        self._btn_close.setToolTip("Hide to the tray - click the tray icon to bring it back")
+        self._btn_close.setAccessibleName("Hide to tray")
+        self._btn_close.setStyleSheet(self._style_ghost())
 
-        header_row.addWidget(self._btn_open_editor)
-        header_row.addWidget(self._btn_check_updates)
-        header_row.addWidget(self._btn_dock_right)
-        header_row.addWidget(self._btn_close)
+        for button in (
+            self._btn_open_editor, self._btn_check_updates,
+            self._btn_dock_right, self._btn_close,
+        ):
+            header_row.addWidget(button)
         float_layout.addLayout(header_row)
+        float_layout.addWidget(self._rule())
 
-        # Action row: [Quick Capture] [📷] [🎥]
-        action_row = QHBoxLayout()
-        action_row.setSpacing(6)
-
-        self._btn_capture = QPushButton("Quick Capture")
-        self._btn_capture.setFixedHeight(36)
+        # ── Capture: three direct actions, no mode to set first ───────────
+        #
+        # There was a Photo/Video toggle beside the capture button, so what
+        # "Quick Capture" did depended on an unlabeled control next to it.
+        # Each action is now its own button: click the thing you want.
+        self._btn_capture = QPushButton("  Capture Region")
+        self._btn_capture.setIcon(theme.icon_pixmap("region", 16, "#ffffff"))
+        self._btn_capture.setFixedHeight(38)
+        self._btn_capture.setProperty("iconLabel", True)
         self._btn_capture.setStyleSheet(self._style_primary())
+        self._btn_capture.setAccessibleName("Capture Region")
+        float_layout.addWidget(self._btn_capture)
 
-        self._btn_photo = QPushButton()
-        self._btn_photo.setFixedSize(36, 36)
-        self._btn_photo.setCheckable(True)
-        self._btn_photo.setChecked(True)
-        # The "(Alt+P)" suffix is appended only once _register_hotkeys()
-        # knows whether that combination actually registered - see
-        # _apply_hotkey_labels(). Advertising a shortcut that did not bind
-        # is exactly the bug (TA-211) this exists to not repeat.
-        self._btn_photo.setToolTip("Photo mode — capture screenshot")
-        self._btn_photo.setStyleSheet(self._style_mode_icon(active=True))
+        action_row = QHBoxLayout()
+        action_row.setSpacing(8)
 
-        self._btn_video = QPushButton()
-        self._btn_video.setFixedSize(36, 36)
-        self._btn_video.setCheckable(True)
-        self._btn_video.setToolTip("Video mode — record screen")
-        self._btn_video.setStyleSheet(self._style_mode_icon(active=False))
+        self._btn_full_capture = QPushButton("  Full Screen")
+        self._btn_full_capture.setIcon(theme.icon_pixmap("fullscreen", 14, theme.MUTED))
+        self._btn_full_capture.setFixedHeight(32)
+        self._btn_full_capture.setToolTip("Capture the whole screen, including the taskbar and clock")
+        self._btn_full_capture.setAccessibleName("Full Screen")
+        self._btn_full_capture.setProperty("iconLabel", True)
+        self._btn_full_capture.setStyleSheet(self._style_outline())
+        action_row.addWidget(self._btn_full_capture, 1)
 
-        self._btn_full_capture = QPushButton()
-        self._btn_full_capture.setFixedSize(36, 36)
-        self._btn_full_capture.setIcon(self._make_screen_icon("#b88d6f"))
-        self._btn_full_capture.setIconSize(QSize(18, 18))
-        self._btn_full_capture.setToolTip(
-            "Capture full primary screen including taskbar/time"
-        )
-        self._btn_full_capture.setStyleSheet(self._style_mode_icon(active=False))
-
-        self._refresh_mode_icons()
-
-        action_row.addWidget(self._btn_capture, 1)
-        action_row.addWidget(self._btn_full_capture)
-        action_row.addWidget(self._btn_photo)
-        action_row.addWidget(self._btn_video)
+        # Round and red, the convention every recorder uses, and the one
+        # control here that is not a still. It becomes stop in place rather
+        # than moving or handing off to something elsewhere, so the thing
+        # you pressed to start is the thing you press to finish.
+        self._btn_record = QPushButton()
+        self._btn_record.setFixedSize(32, 32)
+        self._btn_record.setStyleSheet(self._style_record())
+        self._btn_record.setAccessibleName("Record")
+        action_row.addWidget(self._btn_record)
         float_layout.addLayout(action_row)
 
-        # Shortcut hint line below action row - text filled in by
-        # _apply_hotkey_labels() once registration outcomes are known;
-        # starts empty and hidden rather than claiming anything upfront.
+        # Recording status: a dot, the word, and a running clock.
+        self._rec_row = QWidget()
+        rec_row = QHBoxLayout(self._rec_row)
+        rec_row.setContentsMargins(0, 0, 0, 0)
+        rec_row.setSpacing(6)
+        self._rec_dot = QLabel("\u25cf")
+        self._rec_dot.setStyleSheet(
+            f"color:{theme.DANGER}; font-size:15px; background:transparent;"
+        )
+        rec_word = QLabel("Recording")
+        rec_word.setStyleSheet(
+            f"color:{theme.DANGER}; font-size:12px; font-weight:700; background:transparent;"
+        )
+        self._rec_label = QLabel("00:00")
+        self._rec_label.setStyleSheet(
+            f"color:{theme.TEXT}; font-size:15px; font-weight:700; background:transparent;"
+        )
+        rec_row.addWidget(self._rec_dot)
+        rec_row.addWidget(rec_word)
+        rec_row.addStretch(1)
+        rec_row.addWidget(self._rec_label)
+        self._rec_row.hide()
+        float_layout.addWidget(self._rec_row)
+
+        self._btn_stop = QPushButton("  Stop Recording")
+        self._btn_stop.setIcon(theme.icon_pixmap("stop", 18, "#ffffff"))
+        self._btn_stop.setFixedHeight(44)
+        self._btn_stop.setProperty("iconLabel", True)
+        self._btn_stop.setStyleSheet(self._style_danger())
+        self._btn_stop.setAccessibleName("Stop Recording")
+        self._btn_stop.hide()
+        float_layout.addWidget(self._btn_stop)
+
+        # ── Recent captures ───────────────────────────────────────────────
+        self._recent_hdr = QLabel("RECENT")
+        self._recent_hdr.setStyleSheet(
+            f"color:{theme.MUTED}; font-size:9px; font-weight:700;"
+            f" letter-spacing:1.2px; background:transparent;"
+        )
+        float_layout.addWidget(self._recent_hdr)
+
+        recent_row = QHBoxLayout()
+        recent_row.setSpacing(6)
+        self._recent_slots: list[QLabel] = []
+        for _ in range(3):
+            slot = QLabel()
+            slot.setFixedSize(76, 50)
+            slot.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            slot.setScaledContents(False)
+            slot.setStyleSheet(
+                f"background:{theme.BG_700}; border:1px solid {theme.LINE};"
+                f" border-radius:6px;"
+            )
+            self._recent_slots.append(slot)
+            recent_row.addWidget(slot)
+        float_layout.addLayout(recent_row)
+
+        self._btn_open_editor_wide = QPushButton("  Open Editor")
+        self._btn_open_editor_wide.setIcon(theme.icon_pixmap("pen", 14, theme.MUTED))
+        self._btn_open_editor_wide.setFixedHeight(30)
+        self._btn_open_editor_wide.setProperty("iconLabel", True)
+        self._btn_open_editor_wide.setStyleSheet(self._style_outline())
+        self._btn_open_editor_wide.setAccessibleName("Open Editor")
+        float_layout.addWidget(self._btn_open_editor_wide)
+
+        float_layout.addWidget(self._rule())
+
+        # Shortcut hint line - text filled in by _apply_hotkey_labels() once
+        # registration outcomes are known; starts empty and hidden rather
+        # than claiming anything upfront.
         self._hint_lbl = QLabel("")
         self._hint_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self._hint_lbl.setStyleSheet("color:#7a6050; font-size:10px; background:transparent;")
+        self._hint_lbl.setStyleSheet(
+            f"color:{theme.MUTED}; font-size:9px; background:transparent;"
+        )
         self._hint_lbl.hide()
         float_layout.addWidget(self._hint_lbl)
 
-        # Recording timer (hidden until recording starts)
-        self._rec_label = QLabel()
-        self._rec_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self._rec_label.setStyleSheet(
-            "color:#c04040; font-size:12px; font-weight:700; background:transparent;"
+        # How to get it back, and how to quit. Both were undiscoverable:
+        # the close button hides to the tray with no on-screen sign that is
+        # what happened, and quitting is a context menu nothing announced.
+        self._exit_hint = QLabel("Hides to the tray  \u00b7  right-click  \u2192  Quit")
+        self._exit_hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._exit_hint.setStyleSheet(
+            f"color:{theme.MUTED}; font-size:9px; background:transparent;"
         )
-        self._rec_label.hide()
-        float_layout.addWidget(self._rec_label)
+        float_layout.addWidget(self._exit_hint)
 
         # Status text
         self._status_lbl = QLabel()
@@ -262,11 +347,12 @@ class FloatingLauncher(QWidget):
         self._last_recording_path: Path | None = None
 
         # Wire signals
-        self._btn_photo.clicked.connect(lambda: self._set_mode("photo"))
-        self._btn_video.clicked.connect(lambda: self._set_mode("video"))
-        self._btn_capture.clicked.connect(self._on_action_click)
+        self._btn_capture.clicked.connect(self._on_capture_click)
         self._btn_full_capture.clicked.connect(self._start_full_capture)
+        self._btn_record.clicked.connect(self._toggle_recording)
+        self._btn_stop.clicked.connect(self._toggle_recording)
         self._btn_open_editor.clicked.connect(self._editor.bring_forward)
+        self._btn_open_editor_wide.clicked.connect(self._editor.bring_forward)
         self._btn_check_updates.clicked.connect(self._check_for_updates)
         self._btn_open_folder.clicked.connect(self._open_last_recording_folder)
         self._btn_dock_right.clicked.connect(self._dock_right)
@@ -274,54 +360,95 @@ class FloatingLauncher(QWidget):
 
         outer.addWidget(self._float_panel)
 
-        # ── Docked panel (compact vertical icon strip) ────────────────────────
+        # ── Docked strip: the one reduced form ────────────────────────────
         self._dock_panel = QWidget(self)
+        self._dock_panel.setStyleSheet("background: transparent;")
         dock_layout = QVBoxLayout(self._dock_panel)
-        dock_layout.setContentsMargins(7, 14, 7, 14)
-        dock_layout.setSpacing(10)
+        dock_layout.setContentsMargins(8, 10, 8, 10)
+        dock_layout.setSpacing(7)
         dock_layout.setAlignment(Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignTop)
 
-        _btn_dock_editor = QPushButton()
-        _btn_dock_editor.setFixedSize(36, 36)
-        _btn_dock_editor.setIcon(self._make_ta_icon())
-        _btn_dock_editor.setIconSize(QSize(18, 18))
-        _btn_dock_editor.setToolTip("Open Editor")
-        _btn_dock_editor.setStyleSheet(self._style_icon_btn())
-        _btn_dock_editor.clicked.connect(self._editor.bring_forward)
-        dock_layout.addWidget(_btn_dock_editor)
+        dock_badge = QLabel("TA")
+        dock_badge.setFixedSize(28, 28)
+        dock_badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        dock_badge.setStyleSheet(
+            f"background:{theme.ACCENT}; color:#ffffff; border-radius:7px;"
+            f" font-size:10px; font-weight:800;"
+        )
+        dock_layout.addWidget(dock_badge, 0, Qt.AlignmentFlag.AlignHCenter)
+        dock_layout.addWidget(self._rule())
 
+        # Same three actions as the panel, same order, so the strip is the
+        # panel with the labels removed rather than a different tool.
         self._btn_dock_capture = QPushButton()
-        self._btn_dock_capture.setFixedSize(36, 36)
-        self._btn_dock_capture.setIcon(self._make_camera_icon("#f0d0a0"))
-        self._btn_dock_capture.setIconSize(QSize(20, 20))
-        self._btn_dock_capture.setToolTip("Quick Capture")
+        self._btn_dock_capture.setFixedSize(40, 36)
+        self._btn_dock_capture.setIcon(theme.icon_pixmap("region", 18, theme.TEXT))
+        self._btn_dock_capture.setToolTip("Capture region")
+        self._btn_dock_capture.setAccessibleName("Capture Region")
         self._btn_dock_capture.setStyleSheet(self._style_icon_btn())
-        self._btn_dock_capture.clicked.connect(self._on_action_click)
-        dock_layout.addWidget(self._btn_dock_capture)
+        dock_layout.addWidget(self._btn_dock_capture, 0, Qt.AlignmentFlag.AlignHCenter)
 
-        # Minimal running-time readout, docked-strip width - TA-215: the
-        # icon swap alone is easy to miss at 20x20px, and the compact dock
-        # is exactly the mode this needs to be visible in, since it's the
-        # one place recording state previously had zero feedback at all.
+        self._btn_dock_full = QPushButton()
+        self._btn_dock_full.setFixedSize(40, 36)
+        self._btn_dock_full.setIcon(theme.icon_pixmap("fullscreen", 18, theme.TEXT))
+        self._btn_dock_full.setToolTip("Capture full screen")
+        self._btn_dock_full.setAccessibleName("Full Screen")
+        self._btn_dock_full.setStyleSheet(self._style_icon_btn())
+        dock_layout.addWidget(self._btn_dock_full, 0, Qt.AlignmentFlag.AlignHCenter)
+
+        self._btn_dock_record = QPushButton()
+        self._btn_dock_record.setFixedSize(40, 40)
+        self._btn_dock_record.setStyleSheet(self._style_record(radius=20))
+        self._btn_dock_record.setAccessibleName("Record")
+        dock_layout.addWidget(self._btn_dock_record, 0, Qt.AlignmentFlag.AlignHCenter)
+
+        # TA-215: the strip is the mode a tester actually leaves on screen
+        # for a long session, so it is the one that most needs to say a
+        # recording is running - and to be one click from stopping it.
         self._dock_rec_label = QLabel()
         self._dock_rec_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._dock_rec_label.setFixedHeight(13)
         self._dock_rec_label.setStyleSheet(
-            "color:#c04040; font-size:9px; font-weight:700; background:transparent;"
+            f"color:{theme.DANGER}; font-size:10px; font-weight:700; background:transparent;"
         )
         self._dock_rec_label.hide()
         dock_layout.addWidget(self._dock_rec_label)
 
-        _btn_undock = QPushButton()
-        _btn_undock.setFixedSize(36, 36)
-        _btn_undock.setIcon(self._make_undock_icon())
-        _btn_undock.setIconSize(QSize(14, 14))
-        _btn_undock.setToolTip("Restore floating launcher")
-        _btn_undock.setStyleSheet(self._style_icon_btn())
-        _btn_undock.clicked.connect(self._undock)
-        dock_layout.addWidget(_btn_undock)
+        dock_layout.addWidget(self._rule())
+
+        btn_dock_editor = QPushButton()
+        btn_dock_editor.setFixedSize(40, 30)
+        btn_dock_editor.setIcon(theme.icon_pixmap("pen", 15, theme.MUTED))
+        btn_dock_editor.setToolTip("Open Editor")
+        btn_dock_editor.setAccessibleName("Open Editor")
+        btn_dock_editor.setStyleSheet(self._style_ghost())
+        btn_dock_editor.clicked.connect(self._editor.bring_forward)
+        dock_layout.addWidget(btn_dock_editor, 0, Qt.AlignmentFlag.AlignHCenter)
+
+        self._btn_undock = QPushButton()
+        self._btn_undock.setFixedSize(40, 30)
+        self._btn_undock.setIcon(theme.icon_pixmap("expand", 15, theme.MUTED))
+        self._btn_undock.setToolTip("Expand to the full panel")
+        self._btn_undock.setAccessibleName("Expand")
+        self._btn_undock.setStyleSheet(self._style_ghost())
+        self._btn_undock.clicked.connect(self._undock)
+        dock_layout.addWidget(self._btn_undock, 0, Qt.AlignmentFlag.AlignHCenter)
+
+        self._btn_dock_capture.clicked.connect(self._on_capture_click)
+        self._btn_dock_full.clicked.connect(self._start_full_capture)
+        self._btn_dock_record.clicked.connect(self._toggle_recording)
 
         self._dock_panel.hide()
         outer.addWidget(self._dock_panel)
+
+        self._refresh_recording_ui()
+        self.refresh_recent()
+
+    def _rule(self) -> QFrame:
+        line = QFrame()
+        line.setFixedHeight(1)
+        line.setStyleSheet(f"background:{theme.LINE}; border:none;")
+        return line
 
     # ── Global hotkeys ───────────────────────────────────────────────────────
     #
@@ -364,11 +491,13 @@ class FloatingLauncher(QWidget):
         test-constructed launchers skip it entirely; see
         register_global_hotkeys)."""
         if self._hotkey_registered["photo"]:
-            self._btn_photo.setToolTip(self._btn_photo.toolTip() + " (Alt+P)")
+            self._btn_capture.setToolTip("Capture a region (Alt+P)")
         if self._hotkey_registered["full_capture"]:
-            self._btn_full_capture.setToolTip(self._btn_full_capture.toolTip() + " (Alt+Shift+P)")
+            self._btn_full_capture.setToolTip(
+                self._btn_full_capture.toolTip() + " (Alt+Shift+P)"
+            )
         if self._hotkey_registered["video"]:
-            self._btn_video.setToolTip(self._btn_video.toolTip() + " (Alt+V)")
+            self._btn_record.setToolTip("Start recording (Alt+V)")
 
         hints = []
         if self._hotkey_registered["photo"]:
@@ -404,12 +533,10 @@ class FloatingLauncher(QWidget):
         # leaving the user with a silently non-interactive overlay.
         self._dismiss_active_modal_dialog()
         if hotkey_id == self._HOTKEY_PHOTO:
-            self._set_mode("photo")
             self._start_capture()
         elif hotkey_id == self._HOTKEY_FULL_CAPTURE:
             self._start_full_capture()
         elif hotkey_id == self._HOTKEY_VIDEO:
-            self._set_mode("video")
             self._toggle_recording()
 
     def closeEvent(self, event) -> None:
@@ -435,50 +562,108 @@ class FloatingLauncher(QWidget):
 
     # ── Action dispatch ───────────────────────────────────────────────────────
 
-    def _on_action_click(self) -> None:
-        """Single action button dispatches to photo capture or video toggle.
+    def _on_capture_click(self) -> None:
+        """Region capture, from either panel.
 
         _dismiss_active_modal_dialog() first (TA-217): the hotkey path
         already closes a blocking modal before dispatching - the button
-        click handler never did, so clicking Quick Capture while e.g. the
-        About dialog was open was silently swallowed by Qt's
-        application-modal block exactly as if the fix had never shipped.
+        click handler never did, so clicking capture while e.g. the About
+        dialog was open was silently swallowed by Qt's application-modal
+        block exactly as if the fix had never shipped.
         """
         self._dismiss_active_modal_dialog()
-        if self._mode == "photo":
-            self._start_capture()
-        else:
-            self._toggle_recording()
+        self._start_capture()
 
-    # ── Mode management ───────────────────────────────────────────────────────
+    # ── Recording state ───────────────────────────────────────────────────────
 
-    def _set_mode(self, mode: str) -> None:
-        self._mode = mode
-        is_photo = mode == "photo"
+    def is_recording(self) -> bool:
+        return self._rec_timer.isActive()
 
-        self._btn_photo.setChecked(is_photo)
-        self._btn_video.setChecked(not is_photo)
-        self._btn_photo.setStyleSheet(self._style_mode_icon(active=is_photo))
-        self._btn_video.setStyleSheet(self._style_mode_icon(active=not is_photo))
-        self._refresh_mode_icons()
-        self._refresh_dock_recording_indicator()
+    def _refresh_recording_ui(self) -> None:
+        """Put both panels into the recording state, or out of it.
 
-        if is_photo:
-            self._btn_capture.setText("Quick Capture")
-            self._btn_capture.setStyleSheet(self._style_primary())
-            self._status_lbl.setText(
-                "Drag to select a region after clicking Quick Capture."
+        Stopping used to be the same button that started, relabelled - and
+        in the strip, an icon swap on a 20px control with nothing else to
+        signal it. A tester who has been recording for two minutes should
+        not have to work out which control stops it; that is the specific
+        thing QuickTime gets wrong by hiding stop in the menu bar, and the
+        thing this is meant to beat.
+
+        So while recording: the panel's capture actions give way to one
+        full-width Stop, a dot and a running clock appear, the strip's
+        round record button becomes a square stop in place - same position,
+        same colour, so the control never moves - and both panels take a
+        red border, which is what makes the state readable peripherally
+        rather than only on inspection.
+        """
+        recording = self._rec_timer.isActive()
+
+        for widget in (self._btn_capture, self._btn_full_capture, self._btn_record):
+            widget.setVisible(not recording)
+        self._rec_row.setVisible(recording)
+        self._btn_stop.setVisible(recording)
+
+        self._btn_record.setIcon(
+            theme.icon_pixmap("stop" if recording else "record", 16, "#ffffff")
+        )
+        self._btn_record.setToolTip("Stop recording" if recording else "Start recording")
+
+        self._btn_dock_record.setIcon(
+            theme.icon_pixmap("stop" if recording else "record", 18, "#ffffff")
+        )
+        self._btn_dock_record.setToolTip("Stop recording" if recording else "Start recording")
+        self._btn_dock_record.setAccessibleName("Stop Recording" if recording else "Record")
+        self._dock_rec_label.setVisible(recording)
+        if not recording:
+            self._dock_rec_label.setText("")
+
+        # Stills are meaningless mid-recording and would only compete for
+        # the click that stops it.
+        self._btn_dock_capture.setVisible(not recording)
+        self._btn_dock_full.setVisible(not recording)
+
+        self.update()
+
+    def refresh_recent(self) -> None:
+        """Fill the three RECENT slots from the capture history.
+
+        Read from paths.history_dir() rather than asked of the editor: the
+        panel should say whether a capture worked without the editor having
+        been opened at all, which is the confirmation it previously gave
+        nowhere. Never raises - a launcher that will not build because a
+        thumbnail would not load is a worse failure than an empty slot.
+        """
+        slots = getattr(self, "_recent_slots", [])
+        if not slots:
+            return
+        try:
+            files = sorted(
+                (f for f in paths.history_dir().iterdir()
+                 if f.suffix.lower() in {".png", ".jpg", ".jpeg"}),
+                key=lambda f: f.stat().st_mtime,
+                reverse=True,
+            )[:len(slots)]
+        except Exception:
+            files = []
+
+        for index, slot in enumerate(slots):
+            newest = index == 0 and bool(files)
+            slot.setStyleSheet(
+                f"background:{theme.BG_700}; border:1px solid "
+                f"{theme.ACCENT if newest else theme.LINE}; border-radius:6px;"
             )
-        else:
-            # Don't overwrite "■ Stop Recording" if recording is in progress
-            if not self._rec_timer.isActive():
-                self._btn_capture.setText("⏺  Start Recording")
-                self._btn_capture.setStyleSheet(self._style_danger())
-            self._status_lbl.setText("Click to start a full-screen recording.")
-
-        self.adjustSize()
-
-    # ── Capture flow ─────────────────────────────────────────────────────────
+            if index < len(files):
+                pixmap = QPixmap(str(files[index]))
+                if not pixmap.isNull():
+                    slot.setPixmap(pixmap.scaled(
+                        slot.width() - 2, slot.height() - 2,
+                        Qt.AspectRatioMode.KeepAspectRatio,
+                        Qt.TransformationMode.SmoothTransformation,
+                    ))
+                    slot.setToolTip(files[index].name)
+                    continue
+            slot.setPixmap(QPixmap())
+            slot.setToolTip("")
 
     def _start_capture(self) -> None:
         self.hide()
@@ -527,63 +712,24 @@ class FloatingLauncher(QWidget):
         self._recorder.start(self._current_screen())
         self._rec_seconds = 0
         self._rec_timer.start(1000)
-        self._btn_capture.setText("■  Stop Recording")
-        self._btn_capture.setStyleSheet(self._style_danger())
-        self._rec_label.setText("⏺  00:00")
-        self._rec_label.show()
+        self._rec_label.setText("00:00")
+        self._dock_rec_label.setText("00:00")
         self._status_lbl.setText(
-            "Recording in progress — click to stop and save."
+            "Recording in progress — click Stop to finish and save."
         )
-        self._refresh_dock_recording_indicator()
+        self._refresh_recording_ui()
 
     def _stop_recording(self) -> None:
         self._rec_timer.stop()
-        self._rec_label.hide()
         self._recorder.stop()
-        self._btn_capture.setText("⏺  Start Recording")
-        self._btn_capture.setStyleSheet(self._style_danger())
         self._status_lbl.setText("Recording stopped. Saving file…")
-        self._refresh_dock_recording_indicator()
+        self._refresh_recording_ui()
 
     def _tick(self) -> None:
         self._rec_seconds += 1
         m, s = divmod(self._rec_seconds, 60)
-        self._rec_label.setText(f"⏺  {m:02d}:{s:02d}")
+        self._rec_label.setText(f"{m:02d}:{s:02d}")
         self._dock_rec_label.setText(f"{m:02d}:{s:02d}")
-
-    def _refresh_dock_recording_indicator(self) -> None:
-        """TA-215: the docked strip's single capture icon was set once at
-        construction and never updated, unlike the undocked action button
-        (whose text/style do change) - so a user working from the compact
-        dock got no visual confirmation a recording was running, and the
-        one control available to stop it gave no cue that clicking it
-        again would. The underlying toggle was already correctly wired
-        either way - clicking the docked icon a second time does call
-        _stop_recording() - this is a state-feedback gap, not a broken
-        stop mechanism.
-
-        Also gives the docked icon a distinct "video mode selected"
-        appearance before recording starts (re-tested on rc4: recording
-        feedback itself works, but Photo vs Video mode was indistinguishable
-        on the docked icon until a recording was actually running) - reuses
-        _make_video_icon(), the same glyph the undocked mode buttons already
-        use for exactly this distinction, rather than inventing a new one.
-        """
-        recording = self._rec_timer.isActive()
-        if recording:
-            icon = self._make_stop_icon()
-            icon_size = QSize(16, 16)
-        elif self._mode == "video":
-            icon = self._make_video_icon("#f0d0a0")
-            icon_size = QSize(20, 20)
-        else:
-            icon = self._make_camera_icon("#f0d0a0")
-            icon_size = QSize(20, 20)
-        self._btn_dock_capture.setIcon(icon)
-        self._btn_dock_capture.setIconSize(icon_size)
-        self._btn_dock_capture.setToolTip("Stop Recording" if recording else "Quick Capture")
-        self._dock_rec_label.setText("00:00" if recording else "")
-        self._dock_rec_label.setVisible(recording)
 
     def _on_record_finished(self, path: str) -> None:
         if not path:
@@ -659,19 +805,6 @@ class FloatingLauncher(QWidget):
         box.exec()
         if open_btn is not None and box.clickedButton() is open_btn:
             QDesktopServices.openUrl(QUrl(result.html_url))
-
-    def _refresh_mode_icons(self) -> None:
-        """Repaint camera/video glyphs with active vs inactive colors."""
-        active = "#f0d0a0"
-        inactive = "#9b7a64"
-        self._btn_photo.setIcon(
-            self._make_camera_icon(active if self._mode == "photo" else inactive)
-        )
-        self._btn_video.setIcon(
-            self._make_video_icon(active if self._mode == "video" else inactive)
-        )
-        self._btn_photo.setIconSize(QSize(18, 18))
-        self._btn_video.setIconSize(QSize(18, 18))
 
     def _close_launcher(self) -> None:
         """Hides to the tray rather than quitting.
@@ -760,8 +893,17 @@ class FloatingLauncher(QWidget):
     def paintEvent(self, _event) -> None:
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
-        p.setPen(QPen(QColor(200, 120, 60, 80), 1))
-        p.setBrush(QBrush(QColor(18, 12, 8, 242)))
+        # A red border while recording. The state is then readable from the
+        # shape of the thing at the edge of vision, rather than only by
+        # reading a label - which is the difference between noticing a
+        # recording is still running and not.
+        if self._rec_timer.isActive():
+            border = QColor(theme.DANGER)
+            border.setAlpha(220)
+            p.setPen(QPen(border, 2))
+        else:
+            p.setPen(QPen(QColor(*theme.PANEL_BORDER), 1))
+        p.setBrush(QBrush(QColor(*theme.PANEL_BG)))
         p.drawRoundedRect(self.rect().adjusted(1, 1, -1, -1), 20, 20)
         p.end()
 
@@ -811,7 +953,10 @@ class FloatingLauncher(QWidget):
         screen = self._current_screen()
         self._float_panel.hide()
         self._dock_panel.show()
-        self.setFixedWidth(50)
+        # 40px controls inside 8px margins need 56, not 50: at 50 the strip
+        # was 6px narrower than its own contents, so every button in it was
+        # pushed off-centre rather than centred with AlignHCenter.
+        self.setFixedWidth(56)
         self.adjustSize()
         geom = screen.availableGeometry()
         y = geom.top() + max(20, (geom.height() - self.height()) // 2)
@@ -831,245 +976,94 @@ class FloatingLauncher(QWidget):
 
     @staticmethod
     def _style_primary() -> str:
-        return """
-            QPushButton {
-                background-color: #c8763a;
-                color: #fff8f0;
-                border: none;
-                border-radius: 10px;
-                font-weight: 700;
-                font-size: 13px;
-            }
-            QPushButton:hover   { background-color: #d88848; }
-            QPushButton:pressed { background-color: #a86030; }
-        """
-
-    @staticmethod
-    def _style_danger() -> str:
-        return """
-            QPushButton {
-                background-color: #c04040;
+        return f"""
+            QPushButton {{
+                background-color: {theme.ACCENT};
                 color: #ffffff;
                 border: none;
                 border-radius: 10px;
                 font-weight: 700;
                 font-size: 13px;
-            }
-            QPushButton:hover   { background-color: #d05050; }
-            QPushButton:pressed { background-color: #a03030; }
+            }}
+            QPushButton:hover   {{ background-color: {theme.ACCENT_HOVER}; }}
+            QPushButton:pressed {{ background-color: {theme.ACCENT_PRESSED}; }}
+        """
+
+    @staticmethod
+    def _style_danger() -> str:
+        return f"""
+            QPushButton {{
+                background-color: {theme.DANGER};
+                color: #ffffff;
+                border: none;
+                border-radius: 10px;
+                font-weight: 700;
+                font-size: 13px;
+            }}
+            QPushButton:hover   {{ background-color: {theme.DANGER_HOVER}; }}
+            QPushButton:pressed {{ background-color: {theme.DANGER_PRESSED}; }}
         """
 
     @staticmethod
     def _style_outline() -> str:
-        return """
-            QPushButton {
+        return f"""
+            QPushButton {{
                 background-color: transparent;
-                color: #b09070;
-                border: 1px solid rgba(200,120,60,0.3);
+                color: {theme.MUTED};
+                border: 1px solid rgba(124,131,253,0.30);
                 border-radius: 10px;
                 font-weight: 600;
                 font-size: 13px;
-            }
-            QPushButton:hover    { border-color: #c8763a; color: #f0b880; }
-            QPushButton:disabled { color: #5a4030; border-color: rgba(200,120,60,0.1); }
+            }}
+            QPushButton:hover    {{ border-color: {theme.ACCENT}; color: {theme.ACCENT}; }}
+            QPushButton:disabled {{ color: #4a4f63; border-color: rgba(124,131,253,0.10); }}
+        """
+
+    @staticmethod
+    def _style_ghost() -> str:
+        """A header control: no chrome until hovered. These sit beside the
+        app's own name, so a visible border on each would make the header
+        busier than the actions below it."""
+        return f"""
+            QPushButton {{
+                background-color: transparent;
+                border: 1px solid transparent;
+                border-radius: 5px;
+            }}
+            QPushButton:hover {{ background-color: {theme.BG_700}; }}
+        """
+
+    @staticmethod
+    def _style_record(radius: int = 16) -> str:
+        """The record control: round and red in both panels, so it reads as
+        a different class of thing from the stills beside it - and so the
+        square it becomes while recording is recognisably the same button."""
+        return f"""
+            QPushButton {{
+                background-color: {theme.DANGER};
+                border: none;
+                border-radius: {radius}px;
+            }}
+            QPushButton:hover {{ background-color: {theme.DANGER_HOVER}; }}
+            QPushButton:pressed {{ background-color: {theme.DANGER_PRESSED}; }}
         """
 
     @staticmethod
     def _style_icon_btn() -> str:
-        """Small icon button (dock / close) in muted orange."""
-        return """
-            QPushButton {
-                background-color: rgba(200,120,60,0.08);
-                color: #c8906a;
-                border: 1px solid rgba(200,120,60,0.25);
+        """Small icon button (dock / close), muted against the panel."""
+        return f"""
+            QPushButton {{
+                background-color: rgba(124,131,253,0.08);
+                color: {theme.MUTED};
+                border: 1px solid rgba(124,131,253,0.25);
                 border-radius: 6px;
                 font-size: 11px;
                 font-weight: 600;
-            }
-            QPushButton:hover {
-                background-color: rgba(200,120,60,0.18);
-                color: #f0b880;
-                border-color: rgba(200,120,60,0.5);
-            }
-            QPushButton:pressed { background-color: rgba(200,120,60,0.30); }
+            }}
+            QPushButton:hover {{
+                background-color: rgba(124,131,253,0.18);
+                color: {theme.ACCENT};
+                border-color: rgba(124,131,253,0.50);
+            }}
+            QPushButton:pressed {{ background-color: rgba(124,131,253,0.30); }}
         """
-
-    @staticmethod
-    def _style_mode_icon(active: bool) -> str:
-        if active:
-            return """
-                QPushButton {
-                    background-color: rgba(200,120,60,0.22);
-                    border: 1px solid rgba(200,120,60,0.65);
-                    border-radius: 8px;
-                }
-                QPushButton:hover { background-color: rgba(200,120,60,0.32); }
-            """
-        return """
-            QPushButton {
-                background-color: transparent;
-                border: 1px solid rgba(200,120,60,0.18);
-                border-radius: 8px;
-            }
-            QPushButton:hover {
-                background-color: rgba(200,120,60,0.10);
-            }
-        """
-
-    @staticmethod
-    def _make_close_icon(color: str = "#f8d3ad") -> QIcon:
-        pix = QPixmap(14, 14)
-        pix.fill(Qt.GlobalColor.transparent)
-        p = QPainter(pix)
-        p.setRenderHint(QPainter.RenderHint.Antialiasing)
-        pen = QPen(QColor(color), 1.8)
-        p.setPen(pen)
-        p.drawLine(3, 3, 11, 11)
-        p.drawLine(11, 3, 3, 11)
-        p.end()
-        return QIcon(pix)
-
-    @staticmethod
-    def _make_undock_icon(color: str = "#f8d3ad") -> QIcon:
-        pix = QPixmap(14, 14)
-        pix.fill(Qt.GlobalColor.transparent)
-        p = QPainter(pix)
-        p.setRenderHint(QPainter.RenderHint.Antialiasing)
-        pen = QPen(QColor(color), 1.6)
-        p.setPen(pen)
-        # Left-pointing arrow (restore/float)
-        p.drawLine(11, 7, 4, 7)
-        p.drawLine(4, 7, 7, 4)
-        p.drawLine(4, 7, 7, 10)
-        # Vertical bar on right (representing the docked edge)
-        p.drawLine(12, 2, 12, 12)
-        p.end()
-        return QIcon(pix)
-
-    @staticmethod
-    def _make_dock_icon(color: str = "#f8d3ad") -> QIcon:
-        pix = QPixmap(14, 14)
-        pix.fill(Qt.GlobalColor.transparent)
-        p = QPainter(pix)
-        p.setRenderHint(QPainter.RenderHint.Antialiasing)
-        pen = QPen(QColor(color), 1.6)
-        p.setPen(pen)
-        p.drawLine(2, 2, 2, 12)
-        p.drawLine(4, 7, 11, 7)
-        p.drawLine(8, 4, 11, 7)
-        p.drawLine(8, 10, 11, 7)
-        p.end()
-        return QIcon(pix)
-
-    @staticmethod
-    def _make_pencil_icon(color: str = "#f8d3ad") -> QIcon:
-        pix = QPixmap(14, 14)
-        pix.fill(Qt.GlobalColor.transparent)
-        p = QPainter(pix)
-        p.setRenderHint(QPainter.RenderHint.Antialiasing)
-        pen = QPen(QColor(color), 1.6)
-        p.setPen(pen)
-        p.drawLine(3, 11, 10, 4)
-        p.drawLine(9, 3, 11, 5)
-        p.drawLine(2, 12, 4, 10)
-        p.end()
-        return QIcon(pix)
-
-    @staticmethod
-    def _make_ta_icon() -> QIcon:
-        """Mini TA badge used for the editor-open toolbar button."""
-        pix = QPixmap(14, 14)
-        pix.fill(Qt.GlobalColor.transparent)
-        p = QPainter(pix)
-        p.setRenderHint(QPainter.RenderHint.Antialiasing)
-        p.setPen(QPen(QColor("#d7873d"), 1))
-        p.setBrush(QColor("#d7873d"))
-        p.drawRoundedRect(1, 1, 12, 12, 3, 3)
-        p.setPen(QColor("#1f1208"))
-        p.setFont(ui_font(6, QFont.Weight.Bold))
-        p.drawText(pix.rect(), Qt.AlignmentFlag.AlignCenter, "TA")
-        p.end()
-        return QIcon(pix)
-
-    @staticmethod
-    def _make_update_icon(color: str = "#f8d3ad") -> QIcon:
-        """A circular refresh arrow - the standard visual convention for
-        "check for updates". The previous icon (a plain arrow into a
-        tray) was a generic download shape with no such convention behind
-        it, indistinguishable from its neighbours at 14x14 (TA-218)."""
-        pix = QPixmap(14, 14)
-        pix.fill(Qt.GlobalColor.transparent)
-        p = QPainter(pix)
-        p.setRenderHint(QPainter.RenderHint.Antialiasing)
-        pen = QPen(QColor(color), 1.6)
-        pen.setCapStyle(Qt.PenCapStyle.RoundCap)
-        p.setPen(pen)
-        p.setBrush(Qt.BrushStyle.NoBrush)
-        p.drawArc(QRectF(2, 2, 10, 10), 20 * 16, 280 * 16)
-        p.setBrush(QColor(color))
-        p.setPen(Qt.PenStyle.NoPen)
-        p.drawPolygon(QPolygonF([QPoint(12, 1), QPoint(14, 6), QPoint(9, 5)]))
-        p.end()
-        return QIcon(pix)
-
-    @staticmethod
-    def _make_camera_icon(color: str) -> QIcon:
-        pix = QPixmap(18, 18)
-        pix.fill(Qt.GlobalColor.transparent)
-        p = QPainter(pix)
-        p.setRenderHint(QPainter.RenderHint.Antialiasing)
-        pen = QPen(QColor(color), 1.6)
-        p.setPen(pen)
-        p.setBrush(Qt.BrushStyle.NoBrush)
-        p.drawRoundedRect(2, 5, 14, 10, 2, 2)
-        p.drawEllipse(7, 8, 4, 4)
-        p.drawLine(5, 5, 7, 3)
-        p.drawLine(7, 3, 11, 3)
-        p.drawLine(11, 3, 13, 5)
-        p.end()
-        return QIcon(pix)
-
-    @staticmethod
-    def _make_stop_icon(color: str = "#ff5050") -> QIcon:
-        """Filled red square - the docked capture icon's recording state
-        (TA-215), mirroring the "■" the undocked action button already
-        shows in its text while recording."""
-        pix = QPixmap(18, 18)
-        pix.fill(Qt.GlobalColor.transparent)
-        p = QPainter(pix)
-        p.setRenderHint(QPainter.RenderHint.Antialiasing)
-        p.setPen(Qt.PenStyle.NoPen)
-        p.setBrush(QColor(color))
-        p.drawRoundedRect(3, 3, 12, 12, 2, 2)
-        p.end()
-        return QIcon(pix)
-
-    @staticmethod
-    def _make_video_icon(color: str) -> QIcon:
-        pix = QPixmap(18, 18)
-        pix.fill(Qt.GlobalColor.transparent)
-        p = QPainter(pix)
-        p.setRenderHint(QPainter.RenderHint.Antialiasing)
-        pen = QPen(QColor(color), 1.6)
-        p.setPen(pen)
-        p.setBrush(Qt.BrushStyle.NoBrush)
-        p.drawRoundedRect(2, 6, 9, 8, 1.5, 1.5)
-        tri = QPolygonF([QPoint(11, 8), QPoint(16, 6), QPoint(16, 14), QPoint(11, 12)])
-        p.drawPolygon(tri)
-        p.end()
-        return QIcon(pix)
-
-    @staticmethod
-    def _make_screen_icon(color: str) -> QIcon:
-        pix = QPixmap(18, 18)
-        pix.fill(Qt.GlobalColor.transparent)
-        p = QPainter(pix)
-        p.setRenderHint(QPainter.RenderHint.Antialiasing)
-        pen = QPen(QColor(color), 1.6)
-        p.setPen(pen)
-        p.setBrush(Qt.BrushStyle.NoBrush)
-        p.drawRoundedRect(2, 3, 14, 10, 1.5, 1.5)
-        p.drawLine(7, 14, 11, 14)
-        p.drawLine(9, 13, 9, 11)
-        p.end()
-        return QIcon(pix)

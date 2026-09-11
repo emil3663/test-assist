@@ -7,7 +7,7 @@ import os
 import sys
 from pathlib import Path
 
-__version__ = "1.3.0"
+__version__ = "1.4.0"
 
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QAction, QColor, QFont, QIcon, QPainter, QPen, QPixmap
@@ -17,7 +17,8 @@ import paths
 from editor import EditorWindow
 from launcher import FloatingLauncher
 from single_instance import AcquireOutcome, SingleInstanceManager
-from theme import EDITOR_STYLE, ui_font
+import theme
+from theme import ui_font
 
 
 _FLAGS = ("--version", "--selftest")
@@ -213,7 +214,21 @@ def main() -> None:
     # hardcoded server name), so there is nothing to preserve by keeping it.
     app.setApplicationName("Test Assist")
     app.setStyle("Fusion")
-    app.setStyleSheet(EDITOR_STYLE)
+
+    # Follow whatever the OS is set to, and only that: a binary, chosen
+    # once, with no in-app toggle and nothing persisted. Must happen before
+    # any widget is constructed, since a widget already built has its
+    # stylesheet baked in - which is also why a mid-session OS theme change
+    # needs a restart rather than being followed live. Unknown (a platform
+    # that does not report one) falls to dark, the palette this app has
+    # always had.
+    theme.use_scheme(
+        light=app.styleHints().colorScheme() == Qt.ColorScheme.Light
+    )
+    # After use_scheme, because the tint comes from the resolved palette;
+    # before any widget, because buttons ask for their icon on construction.
+    theme.load_icon_font(_asset_path("MaterialIcons-Regular.ttf"))
+    app.setStyleSheet(theme.editor_style())
     app.setWindowIcon(_make_tray_icon())
 
     # Keep the process alive even when all windows are hidden
@@ -239,6 +254,13 @@ def main() -> None:
     launcher = FloatingLauncher(editor, version=__version__, register_global_hotkeys=True)
     tray = _setup_tray(app, launcher, editor)
     app.setProperty("trayIcon", tray)
+
+    # Parentless, so it is the application-wide menu bar rather than one
+    # belonging to a window that normally is not shown - see
+    # EditorWindow.build_menu_bar(). Held on the QApplication for the same
+    # reason as the tray icon: nothing else owns it, and letting it go out
+    # of scope takes the menu with it.
+    app.setProperty("menuBar", editor.build_menu_bar())
 
     # A second launch's handoff lands here too, once this instance is the
     # one running - same destinations either way.

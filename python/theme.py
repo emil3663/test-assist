@@ -2,7 +2,8 @@
 
 import sys
 
-from PySide6.QtGui import QFont
+from PySide6.QtCore import QRectF
+from PySide6.QtGui import QColor, QFont, QIcon
 
 # A fallback chain, not a change of font: whichever platform you are on,
 # its own UI face is asked for first and the rest follow as backstops.
@@ -67,19 +68,152 @@ def ui_font(point_size: int, weight: QFont.Weight = QFont.Weight.Normal) -> QFon
     font.setWeight(weight)
     return font
 
-# Colour tokens
-ACCENT      = "#7c83fd"
-DANGER      = "#e94560"
-BG_900      = "#0d0d1a"
-BG_800      = "#13132a"
-BG_700      = "#1a1b35"
-LINE        = "#2a2a4e"
-LINE_STRONG = "#3a3a5e"
-TEXT        = "#e0e6f0"
-MUTED       = "#8892a4"
+# ── Colour tokens ────────────────────────────────────────────────────────────
+#
+# Two palettes, chosen once at startup from whatever the OS is set to (see
+# use_scheme()). Deliberately a binary: light or dark, no in-app toggle and
+# nothing persisted, because a third state is a preference to store, migrate
+# and keep in step with the OS, and this does not need one.
+#
+# SCOPE, and the line that keeps this small: these tokens style the
+# application's own chrome only - the launcher panel, the editor's toolbars
+# and docks. They do NOT reach canvas.py. Annotations are painted on top of
+# the user's screenshot, not on app background, so their colours must not
+# depend on the tester's OS setting: the same defect marked up on two
+# machines has to export the same evidence. canvas.py solves "unknown
+# background" its own way already - see the black dashed line drawn under
+# the white one for the selection marquee, which is legible over anything.
+#
+# The launcher is a frameless panel painted by hand, so it needs PANEL_* as
+# RGBA values rather than stylesheet rules.
 
-# Applied to the editor QApplication so all Qt widgets inherit the dark look.
-EDITOR_STYLE = f"""
+_DARK = {
+    "ACCENT":         "#7c83fd",
+    # Deepens on hover rather than lightening, which is the less obvious
+    # direction on a dark UI and the one the contrast test forces: these
+    # buttons carry white labels, and the lighter #8f95ff measured 2.65:1
+    # against white - under the 3:1 floor. ACCENT -> HOVER -> PRESSED is
+    # therefore one consistent darkening ramp.
+    "ACCENT_HOVER":   "#6f77f2",
+    "ACCENT_PRESSED": "#666dd4",
+    "DANGER":         "#e94560",
+    "DANGER_HOVER":   "#f25a73",
+    "DANGER_PRESSED": "#c9364e",
+    "BG_900":         "#0d0d1a",
+    "BG_800":         "#13132a",
+    "BG_700":         "#1a1b35",
+    "LINE":           "#2a2a4e",
+    "LINE_STRONG":    "#3a3a5e",
+    "TEXT":           "#e0e6f0",
+    "MUTED":          "#8892a4",
+    "PANEL_BG":       (13, 13, 26, 242),
+    "PANEL_BORDER":   (124, 131, 253, 80),
+
+    # Depth layer. Additive by construction: these are background-image
+    # gradients with alpha stops, so every fill still comes from the
+    # background-color the tokens above set. Nothing here changes a
+    # colour, a size or a contrast ratio - which is what makes it safe to
+    # apply broadly and easy to take back off.
+    #
+    # Qt has no box-shadow, so the edge-lighting half of this idea does not
+    # survive the port; the sheens do, and they are the half that carries
+    # the effect.
+    "LIFT_PAGE": (
+        "qlineargradient(x1:0, y1:0, x2:0.75, y2:1,"
+        " stop:0 rgba(124,131,253,40), stop:0.35 rgba(110,118,240,22),"
+        " stop:0.7 rgba(86,96,205,16), stop:1 rgba(64,74,175,26))"
+    ),
+    "LIFT_SURFACE": (
+        "qlineargradient(x1:0, y1:0, x2:0, y2:1,"
+        " stop:0 rgba(255,255,255,18), stop:0.42 rgba(255,255,255,0))"
+    ),
+    "LIFT_BUTTON": (
+        "qlineargradient(x1:0, y1:0, x2:0, y2:1,"
+        " stop:0 rgba(255,255,255,30), stop:0.55 rgba(255,255,255,0))"
+    ),
+}
+
+# Amber rather than a lightened indigo: the launcher was originally amber,
+# and it reads better against a light ground than the indigo does. Darker
+# than that original #c8763a on purpose - white label text on the lighter
+# shade falls below 4.5:1, which is fine on near-black and not on white.
+_LIGHT = {
+    "ACCENT":         "#b0591f",
+    "ACCENT_HOVER":   "#c76a2b",
+    "ACCENT_PRESSED": "#8f4718",
+    "DANGER":         "#c0392b",
+    "DANGER_HOVER":   "#d4503f",
+    "DANGER_PRESSED": "#9c2b1f",
+    "BG_900":         "#f7f7fa",
+    "BG_800":         "#eeeef4",
+    "BG_700":         "#e4e4ec",
+    "LINE":           "#d8d8e2",
+    "LINE_STRONG":    "#c2c2d0",
+    "TEXT":           "#1a1a24",
+    "MUTED":          "#5f6676",
+    "PANEL_BG":       (247, 247, 250, 242),
+    "PANEL_BORDER":   (176, 89, 31, 90),
+
+    # Same shapes, quieter: on a near-white ground a white sheen does
+    # almost nothing, so the page glow carries the accent instead and the
+    # surface light is a touch of white over an already-light fill.
+    "LIFT_PAGE": (
+        "qlineargradient(x1:0, y1:0, x2:0.75, y2:1,"
+        " stop:0 rgba(176,89,31,26), stop:0.35 rgba(176,89,31,14),"
+        " stop:0.7 rgba(140,110,90,12), stop:1 rgba(120,100,140,18))"
+    ),
+    "LIFT_SURFACE": (
+        "qlineargradient(x1:0, y1:0, x2:0, y2:1,"
+        " stop:0 rgba(255,255,255,150), stop:0.42 rgba(255,255,255,0))"
+    ),
+    "LIFT_BUTTON": (
+        "qlineargradient(x1:0, y1:0, x2:0, y2:1,"
+        " stop:0 rgba(255,255,255,45), stop:0.55 rgba(255,255,255,0))"
+    ),
+}
+
+# Dark is the default so that importing this module never depends on a live
+# QApplication - use_scheme() replaces these once one exists.
+LIFT_PAGE = LIFT_SURFACE = LIFT_BUTTON = ""
+ACCENT = ACCENT_HOVER = ACCENT_PRESSED = ""
+DANGER = DANGER_HOVER = DANGER_PRESSED = ""
+BG_900 = BG_800 = BG_700 = LINE = LINE_STRONG = TEXT = MUTED = ""
+PANEL_BG = PANEL_BORDER = ()
+is_light = False
+
+
+def use_scheme(light: bool) -> None:
+    """Swap the module's tokens to one palette or the other.
+
+    Must be called before any widget is constructed: consumers read these
+    through the module (`theme.ACCENT`) rather than binding them at import,
+    but a widget already built has its stylesheet string baked in. That is
+    also why there is no live switching when the OS theme changes mid-run -
+    restyling every existing widget is a different and much larger job than
+    picking a palette at startup, and the failure mode of getting it wrong
+    is a half-recoloured window.
+    """
+    global ACCENT, ACCENT_HOVER, ACCENT_PRESSED
+    global DANGER, DANGER_HOVER, DANGER_PRESSED
+    global BG_900, BG_800, BG_700, LINE, LINE_STRONG, TEXT, MUTED
+    global PANEL_BG, PANEL_BORDER, is_light
+    global LIFT_PAGE, LIFT_SURFACE, LIFT_BUTTON
+
+    palette = _LIGHT if light else _DARK
+    globals().update(palette)
+    is_light = light
+
+
+use_scheme(light=False)
+
+
+def editor_style() -> str:
+    """The application stylesheet, built from whichever palette is active.
+
+    A function rather than a module constant because the palette is not
+    known until a QApplication exists to be asked what the OS is set to.
+    """
+    return f"""
 QMainWindow, QDialog {{
     background-color: {BG_900};
 }}
@@ -109,6 +243,20 @@ QPushButton {{
     padding: 7px 14px;
     font-weight: 600;
     font-size: 12px;
+}}
+/* A button carrying both an icon and a label. Qt centres the icon+text
+   pair as one group, so in a column of buttons whose labels differ in
+   length - Undo, Delete Selected, Bring to Front - every icon lands at a
+   different x and the column reads as ragged. Left-aligning pins the
+   icons to one edge, and since they are all the same size the labels line
+   up behind them too.
+
+   Qt has no selector for "has an icon", so this is opted into with a
+   dynamic property rather than applied to every QPushButton: a short
+   text-only button like Copy or Fit still looks right centred. */
+QPushButton[iconLabel="true"] {{
+    text-align: left;
+    padding-left: 12px;
 }}
 QPushButton:hover {{
     border-color: {ACCENT};
@@ -140,8 +288,8 @@ QPushButton#btn_primary:hover {{
     /* #9098fe (a bigger lighten) dropped white text to 2.59:1, below the
     3:1 floor - found by the contrast test added for item 3, not reported
     separately. This lighten is smaller specifically to stay above it. */
-    background-color: #7f86fd;
-    border-color: #7f86fd;
+    background-color: {ACCENT_HOVER};
+    border-color: {ACCENT_HOVER};
     color: #ffffff;
 }}
 QPushButton#btn_danger {{
@@ -150,12 +298,12 @@ QPushButton#btn_danger {{
     border-color: {DANGER};
 }}
 QPushButton#btn_danger:hover {{
-    background-color: #ef6070;
-    border-color: #ef6070;
+    background-color: {DANGER_HOVER};
+    border-color: {DANGER_HOVER};
     color: #ffffff;
 }}
 QPushButton#btn_help {{
-    background-color: #1a6fc4;
+    background-color: {ACCENT};
     color: #ffffff;
     border: none;
     border-radius: 14px;
@@ -174,7 +322,7 @@ QPushButton[smallIconButton="true"] {{
     font-size: 12px;
 }}
 QPushButton#btn_help:hover {{
-    background-color: #2585e0;
+    background-color: {ACCENT_HOVER};
     color: #ffffff;
     border: none;
 }}
@@ -195,6 +343,22 @@ QSlider::sub-page:horizontal {{
     background: {ACCENT};
     border-radius: 2px;
 }}
+/* ── Depth layer ──────────────────────────────────────────────────────
+   Additive only: background-image, never background-color, so every fill
+   still comes from the tokens and no contrast ratio moves. Targeted by
+   objectName rather than applied to QWidget, because a gradient on
+   QWidget would also land on the canvas - which paints the user's
+   screenshot and must stay exactly what was captured. */
+QMainWindow {{
+    background-image: {LIFT_PAGE};
+}}
+QWidget#tools_bar, QWidget#settings_bar, QWidget#right_panel {{
+    background-image: {LIFT_SURFACE};
+}}
+QPushButton#btn_primary, QPushButton#btn_danger, QPushButton#btn_help {{
+    background-image: {LIFT_BUTTON};
+}}
+
 QLabel {{
     color: {MUTED};
     font-size: 11px;
@@ -235,6 +399,15 @@ QScrollBar::add-line, QScrollBar::sub-line {{
 }}
 QScrollArea {{
     border: none;
+    background: transparent;
+}}
+/* The viewport is a plain child QWidget, so it picks up the flat QWidget
+   fill above and paints it over the window's gradient - which is why the
+   depth was invisible on the largest surface in the app. Transparent here
+   lets QMainWindow show through around the canvas; the canvas itself is
+   sized to the image and paints its own pixels, so nothing of the capture
+   is affected. */
+QScrollArea > QWidget#qt_scrollarea_viewport {{
     background: transparent;
 }}
 QSplitter::handle {{
@@ -291,3 +464,152 @@ QMessageBox QPushButton {{
     min-width: 80px;
 }}
 """
+
+# ── Icons ────────────────────────────────────────────────────────────────────
+#
+# Material Icons (Apache-2.0, see assets/MaterialIcons-LICENSE.txt) as a font
+# rather than image assets.
+#
+# The editor previously used emoji characters as button labels. Emoji render
+# through the platform's colour-emoji font, which is a *bitmap* face: it
+# pixelates at any size the bitmaps were not cut for, and - the reason this
+# mattered once there were two palettes - it ignores the stylesheet `color`
+# entirely, because each glyph carries its own. Light mode therefore turned
+# the chrome pale while the icons stayed exactly as they were, which is the
+# "light on light" everyone could see and nobody could fix by editing a
+# colour.
+#
+# A font fixes both at once: glyphs are outlines, so they are crisp at every
+# size, and they take the colour of the text they are, so they follow the
+# palette for free and will keep doing so for any palette added later.
+# Codepoints rather than the font's ligature names ("home"), which depend on
+# ligature shaping being on and fail silently to tofu when it is not.
+
+ICON_FONT_FAMILY = ""
+
+ICONS = {
+    "open":        "\ue2c8",  # folder_open
+    "updates":     "\ue5d5",  # refresh
+    "home":        "\ue88a",  # home
+    "about":       "\ue88e",  # info
+    "help":        "\ue887",  # help
+    "save":        "\ue161",  # save
+    "copy":        "\ue14d",  # content_copy
+    "export":      "\ue2c4",  # file_download
+    "undo":        "\ue166",  # undo
+    "redo":        "\ue15a",  # redo
+    "delete":      "\ue872",  # delete
+    "to_front":    "\ue883",  # flip_to_front
+    "backward":    "\ue5db",  # arrow_downward
+    "to_back":     "\ue882",  # flip_to_back
+    "clear":       "\ue872",  # delete
+    "zoom_in":     "\ue145",  # add
+    "zoom_out":    "\ue15b",  # remove
+    "select":      "\ue323",  # mouse
+    "crop":        "\ue3be",  # crop
+    "blur":        "\ue3a5",  # blur_on
+    "text":        "\ue262",  # text_fields
+    "highlight":   "\ue3ae",  # brush
+    "circle":      "\ue836",  # radio_button_unchecked
+    "arrow":       "\ue5c8",  # arrow_forward
+    "rect":        "\ue835",  # check_box_outline_blank
+    "pen":         "\ue3c9",  # edit
+    # Launcher chrome
+    "close":       "\ue5cd",  # close
+    "minimise":    "\ue931",  # minimize
+    "fullscreen":  "\ue30c",  # desktop_windows
+    "expand":      "\ue5d0",  # fullscreen
+    "region":      "\ue3be",  # crop
+    "record":      "\ue061",  # fiber_manual_record
+    "camera":      "\ue412",  # photo_camera
+    "video":       "\ue04b",  # videocam
+    "history":     "\ue889",  # history
+    "dock":        "\uef6f",  # push_pin
+    "stop":        "\ue047",  # stop
+}
+
+
+def load_icon_font(path) -> str:
+    """Register the icon font and return its family name.
+
+    Needs a live QApplication, so it is called at startup rather than on
+    import. Returns "" if the font cannot be loaded - callers then fall back
+    to a text label, because an icon-only button showing tofu is worse than
+    a word.
+    """
+    global ICON_FONT_FAMILY
+    from PySide6.QtGui import QFontDatabase
+
+    font_id = QFontDatabase.addApplicationFont(str(path))
+    if font_id == -1:
+        return ""
+    families = QFontDatabase.applicationFontFamilies(font_id)
+    ICON_FONT_FAMILY = families[0] if families else ""
+    return ICON_FONT_FAMILY
+
+
+def icon_font(pixel_size: int) -> QFont:
+    """The icon face at a given size, in pixels rather than points: these are
+    glyphs sized to a box, not text sized to a reading measure."""
+    font = QFont(ICON_FONT_FAMILY)
+    font.setPixelSize(pixel_size)
+    return font
+
+
+def icon(name: str) -> str:
+    """The character for an icon, or "" when the font is unavailable."""
+    return ICONS.get(name, "") if ICON_FONT_FAMILY else ""
+
+
+def icon_pixmap(name: str, pixel_size: int = 18, colour: str | None = None) -> QIcon:
+    """One icon glyph rendered into a QIcon, tinted.
+
+    setIcon() rather than putting the glyph in the button's text, because a
+    button like "Save PNG" needs the label in the UI face and the mark in
+    the icon face, and a widget has only one font. Rendering also makes the
+    colour explicit: passing the palette's TEXT is what keeps these
+    following light and dark, which is the whole reason for moving off
+    emoji.
+
+    Rendered at exactly the device resolution and tagged with the ratio, so
+    Qt blits it 1:1. Both halves of that matter and a previous version got
+    both wrong: it drew the glyph at 3x and then scaled the pixmap down,
+    which is a resample - the softness everyone could see - and it produced
+    an untagged pixmap sized in logical pixels, which a HiDPI screen then
+    had to scale *up* again to fill the same button. Two resamples for a
+    glyph that is an outline and could simply have been drawn at the size
+    actually needed.
+
+    Returns an empty QIcon when the font is unavailable, which QPushButton
+    draws as no icon at all - so a button falls back to its text label
+    rather than to tofu.
+    """
+    from PySide6.QtCore import Qt
+    from PySide6.QtGui import QGuiApplication, QPainter, QPixmap
+
+    glyph = icon(name)
+    if not glyph:
+        return QIcon()
+
+    screen = QGuiApplication.primaryScreen()
+    ratio = screen.devicePixelRatio() if screen is not None else 1.0
+
+    pixmap = QPixmap(round(pixel_size * ratio), round(pixel_size * ratio))
+    pixmap.fill(Qt.GlobalColor.transparent)
+    pixmap.setDevicePixelRatio(ratio)
+
+    painter = QPainter(pixmap)
+    painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+    painter.setRenderHint(QPainter.RenderHint.TextAntialiasing)
+    # Font size in logical pixels: the painter is already scaled by the
+    # pixmap's ratio, so asking for the device size here would draw the
+    # glyph at ratio-squared.
+    painter.setFont(icon_font(pixel_size))
+    painter.setPen(QColor(colour or TEXT))
+    painter.drawText(
+        QRectF(0, 0, pixel_size, pixel_size),
+        Qt.AlignmentFlag.AlignCenter,
+        glyph,
+    )
+    painter.end()
+    return QIcon(pixmap)

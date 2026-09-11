@@ -47,10 +47,10 @@ are in the left rail.*
 | | Browser | Desktop |
 |---|---|---|
 | **Stack** | Vanilla JavaScript, Canvas API | Python, PySide6 (Qt) |
-| **Install** | None — open the live URL | Download the release zip and run `TestAssist.exe`, or run from source |
+| **Install** | None — open the live URL | Download the release zip — `TestAssist.exe` on Windows, `Test Assist.app` on macOS — or run from source |
 | **Capture** | `getDisplayMedia`, `MediaRecorder` | Native screenshot overlay, frame recorder |
 | **Best for** | Trying the full capture → annotate → export loop in ten seconds, with nothing to install | Long test sessions — a tray launcher that stays above the application under test |
-| **Tests** | 55 Playwright tests — smoke suite in CI, regression suite on demand | 229 pytest tests across a regression and a functional suite, in CI |
+| **Tests** | 55 Playwright tests — smoke suite in CI, regression suite on demand | 351 pytest tests across a regression and a functional suite, in CI |
 
 Both produce the same two outputs: a composited PNG for attaching to a defect,
 and a structured JSON annotation layer.
@@ -79,6 +79,12 @@ sandboxed; some of it is simply where the work went.
 - An About dialog with one-click "Copy details for a bug report" — version,
   OS, and the full display layout, so a bug report never needs a screenshot of
   your monitor settings just to describe them
+- A File / Edit / Window / Help menu bar that follows each platform's own
+  convention — About and Quit sit in the application menu on macOS and under
+  Help and File on Windows
+- Light and dark, following whatever the operating system is set to. The app's
+  own chrome only: annotations never change with the theme, so the same defect
+  marked up on a light machine and a dark one exports identical evidence
 
 Everything under **What it does** below is the browser build.
 
@@ -194,12 +200,40 @@ pip install -r requirements.txt
 python main.py          # or: ./run.ps1 on Windows
 ```
 
+**Desktop — macOS**:
+
+Download `TestAssist-<version>-macos.zip` from
+[Releases](https://github.com/emil3663/test-assist/releases), unzip, and drag
+`Test Assist.app` to Applications.
+
+The bundle is **not signed or notarised** — signing needs a paid Apple
+Developer account — so Gatekeeper blocks the first launch. Right-click the app
+and choose **Open**, then **Open** again on the dialog; macOS remembers the
+choice. After that it launches normally.
+
+Screen capture needs permission the first time: macOS prompts, or grant it
+under **System Settings → Privacy & Security → Screen Recording**. Without it
+captures come back black rather than failing loudly — a macOS behaviour, not
+an app one.
+
 **Desktop — building it yourself**:
 
 ```powershell
 cd python
-.\build.ps1 -Zip -Shortcut
+.\build.ps1 -Zip -Shortcut      # Windows
 ```
+
+```bash
+cd python
+./build.sh --zip                 # macOS
+```
+
+The macOS artefact is `python/dist/Test Assist.app`. Ignore `python/build/` —
+that is PyInstaller's scratch directory, and the `TestAssist.pkg` inside it is
+PyInstaller's own compressed archive rather than a macOS installer package.
+Double-clicking it produces `com.apple.installer.pagecontroller error -1`,
+which is Installer.app declining to open something that was never meant for
+it.
 
 That produces `dist/TestAssist/TestAssist.exe`, verifies it actually runs, zips
 it, and drops a Desktop shortcut you can pin. The tagged-release workflow runs
@@ -243,7 +277,7 @@ is browser chrome that no automation can drive, so capture and recording tests
 substitute a canvas-backed `MediaStream`. They prove what the app does with a
 stream, not that the picker appears.
 
-**Desktop build — 229 pytest tests**
+**Desktop build — 351 pytest tests**
 
 ```bash
 cd python

@@ -13,7 +13,7 @@ from pathlib import Path
 
 import pytest
 from PySide6.QtCore import QEvent, QPoint, QPointF, QRect, QSize, Qt
-from PySide6.QtGui import QColor, QImage, QKeyEvent, QPixmap
+from PySide6.QtGui import QAction, QColor, QImage, QKeyEvent, QPixmap
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication
 
@@ -1328,7 +1328,8 @@ def test_a_recording_thumb_backfills_a_missing_thumbnail_off_the_ui_thread(qapp,
     capture.thumbnail_path_for(output).unlink()  # force the backfill path
 
     thumb = _RecordingThumb(output, 1)
-    assert thumb._preview.text() == "🎥", "the fallback icon must show while the backfill is still running"
+    assert thumb._fallback_icon == "record", "the fallback icon must show while the backfill is still running"
+    assert not thumb._preview.pixmap().isNull()
 
     assert _wait_until(lambda: not thumb._preview.pixmap().isNull()), \
         "the background-extracted thumbnail never arrived"
@@ -1376,8 +1377,12 @@ def test_a_recording_thumb_falls_back_to_the_icon_when_extraction_fails(qapp, mo
     assert _wait_until(lambda: bool(calls)), "the backfill worker never ran"
     _pump_events(0.3)  # let the queued (None) result actually be delivered
 
-    assert thumb._preview.text() == "🎥", "a failed backfill must leave the fallback icon in place"
-    assert thumb._preview.pixmap().isNull()
+    # The old assertion here was "the preview holds no pixmap", which meant
+    # "no poster frame was loaded" only while the fallback was a text emoji.
+    # The fallback is now itself a pixmap, so the thing to check is which
+    # image is showing, not whether one is.
+    assert thumb._fallback_icon == "record", "a failed backfill must leave the fallback icon in place"
+    assert not thumb._preview.pixmap().isNull(), "the fallback icon is not drawn"
 
 
 def test_a_kept_frame_sequence_never_attempts_a_thumbnail(qapp, tmp_path):
@@ -1390,7 +1395,7 @@ def test_a_kept_frame_sequence_never_attempts_a_thumbnail(qapp, tmp_path):
 
     thumb = _RecordingThumb(frames_dir, 1)
 
-    assert thumb._preview.text() == "🎞"
+    assert thumb._fallback_icon == "video", "a kept frame sequence gets its own fallback icon"
 
 
 def test_every_recording_tile_shows_a_play_badge(qapp, isolate_home, tmp_path):
@@ -2087,3 +2092,259 @@ def test_KEY_05_tool_shortcuts_are_suppressed_while_typing(editor):
 
     assert all(s.isEnabled() for s in editor._tool_shortcuts), \
         "tool shortcuts were not restored after the text was committed"
+
+
+# ── Application menu bar ─────────────────────────────────────────────────────
+
+
+def _menu_titles(bar):
+    return [a.text().replace("&", "") for a in bar.actions()]
+
+
+def _items(bar, title):
+    for action in bar.actions():
+        if action.text().replace("&", "") == title:
+            return [a.text() for a in action.menu().actions() if not a.isSeparator()]
+    raise AssertionError(f"no {title} menu")
+
+
+def test_MENU_01_the_menu_bar_is_parentless(qapp) -> None:
+    """It must be the application-wide menu bar, not one owned by a window.
+
+    Test Assist normally starts with the editor constructed but not shown -
+    an editor-owned menu bar would leave the macOS menu strip empty in
+    exactly the case that matters, which is what this guards."""
+    editor = EditorWindow()
+    try:
+        bar = editor.build_menu_bar()
+        assert bar.parent() is None
+    finally:
+        editor.close()
+
+
+def test_MENU_02_menus_follow_the_platform_convention(qapp) -> None:
+    """File / Edit / Window / Help, in that order - the convention on both
+    macOS and Windows."""
+    editor = EditorWindow()
+    try:
+        assert _menu_titles(editor.build_menu_bar()) == ["File", "Edit", "Window", "Help"]
+    finally:
+        editor.close()
+
+
+def test_MENU_03_about_and_quit_carry_the_roles_that_relocate_them(qapp) -> None:
+    """On macOS these two belong in the application menu, not under Help and
+    File. Setting the role is what moves them there - without it they stay
+    put and a Mac user finds them in the wrong place. The role is the whole
+    mechanism, so it is the thing worth pinning."""
+    editor = EditorWindow()
+    try:
+        bar = editor.build_menu_bar()
+        roles = {
+            a.text(): a.menuRole()
+            for menu in bar.actions()
+            for a in menu.menu().actions()
+        }
+        assert roles["About Test Assist"] == QAction.MenuRole.AboutRole
+        assert roles["Quit Test Assist"] == QAction.MenuRole.QuitRole
+    finally:
+        editor.close()
+
+
+def test_MENU_04_clear_all_keeps_its_confirmation(qapp) -> None:
+    """Clear All is the one irreversible action in the Edit menu. Reaching
+    it a second way must not be a way around the confirmation the dock
+    button goes through."""
+    editor = EditorWindow()
+    try:
+        bar = editor.build_menu_bar()
+        clear = next(
+            a for menu in bar.actions() for a in menu.menu().actions()
+            if a.text() == "Clear All Annotations"
+        )
+        called = []
+        editor._confirm_clear = lambda: called.append(True)
+        # rebuild so the action binds to the replacement
+        clear = next(
+            a for menu in editor.build_menu_bar().actions() for a in menu.menu().actions()
+            if a.text() == "Clear All Annotations"
+        )
+        clear.trigger()
+        assert called == [True], "Clear All bypassed _confirm_clear"
+    finally:
+        editor.close()
+
+
+def test_MENU_05_help_and_about_are_reachable_from_the_menu(qapp) -> None:
+    """The complaint this menu bar answers: File, Help and About existed
+    only as buttons inside a window the user had not necessarily opened."""
+    editor = EditorWindow()
+    try:
+        bar = editor.build_menu_bar()
+        assert "Test Assist Help" in _items(bar, "Help")
+        assert "Check for Updates…" in _items(bar, "Help")
+        assert "Open Image…" in _items(bar, "File")
+        assert "Show Launcher" in _items(bar, "Window")
+    finally:
+        editor.close()
+
+
+# ── Text annotation backing plate ────────────────────────────────────────────
+
+
+def _text_canvas(bg_opacity, base_colour="#ff0000"):
+    """A text annotation in the annotation colour, over a background of the
+    same colour - the case where a missing plate makes it invisible."""
+    from canvas import AnnotationCanvas
+    canvas = AnnotationCanvas()
+    base = QPixmap(400, 120)
+    base.fill(QColor(base_colour))
+    canvas.set_pixmap(base)
+    canvas._annotations.append({
+        "type": "text", "x1": 20, "y1": 20, "width": 300, "height": 40,
+        "color": base_colour, "size": 3, "text": "Total ignores the discount",
+        "bgColor": "#000000", "bgOpacity": bg_opacity,
+    })
+    return canvas
+
+
+def test_TEXT_BG_01_committed_text_is_legible_over_its_own_colour(qapp) -> None:
+    """The defect: the backing plate existed only while typing, so text was
+    readable as you authored it and lost its backing the moment you
+    committed - including in the exported PNG, which is the artefact that
+    gets attached to a defect report.
+
+    Asserting on the export rather than the on-screen widget on purpose:
+    the export is what the bug actually damaged."""
+    exported = _text_canvas(0.55).export_pixmap().toImage()
+
+    # Somewhere inside the text box there must be pixels darkened away from
+    # the base colour. Without a plate every pixel there is either the base
+    # colour or the identically-coloured glyphs.
+    darkened = sum(
+        1
+        for x in range(24, 310, 3)
+        for y in range(24, 56, 3)
+        if exported.pixelColor(x, y).red() < 200
+    )
+    assert darkened > 0, "no backing plate: annotation is invisible against its own colour"
+
+
+def test_TEXT_BG_02_zero_opacity_restores_bare_text(qapp) -> None:
+    """0 must genuinely mean off, not "nearly off" - it is the escape hatch
+    for anyone annotating a plain area who wants nothing behind the glyphs."""
+    exported = _text_canvas(0.0).export_pixmap().toImage()
+    darkened = sum(
+        1
+        for x in range(24, 310, 3)
+        for y in range(24, 56, 3)
+        if exported.pixelColor(x, y).red() < 200
+    )
+    assert darkened == 0, "a plate was painted at zero opacity"
+
+
+def test_TEXT_BG_03_the_plate_is_stored_on_the_annotation(qapp) -> None:
+    """Read from the annotation at paint time, not from the canvas, so an
+    exported JSON layer re-renders the way it looked when it was made -
+    changing the default later must not restyle evidence already taken."""
+    from canvas import AnnotationCanvas
+    canvas = AnnotationCanvas()
+    canvas.set_pixmap(QPixmap(200, 100))
+    canvas.text_bg_opacity = 0.8
+    canvas._text_editing = True
+    canvas._text_buffer = "note"
+    canvas._text_pos = QPointF(10, 10)
+    canvas._text_width, canvas._text_height = 100, 20
+    canvas._commit_text()
+
+    anno = canvas._annotations[-1]
+    assert anno["bgOpacity"] == 0.8
+    assert anno["bgColor"] == "#000000"
+    assert "bgOpacity" in canvas.serialisable_annotations()[-1], "must survive JSON export"
+
+
+# ── Per-tool settings controls ───────────────────────────────────────────────
+
+
+def _select_tool(editor, tool_id):
+    for btn in editor._tool_group.buttons():
+        if btn.property("tool_id") == tool_id:
+            btn.click()
+            return btn
+    raise AssertionError(f"no {tool_id} tool button")
+
+
+def test_TOOLSET_01_the_size_slider_says_what_it_sets(qapp) -> None:
+    """canvas.py computes a text annotation's font size as
+    max(14, stroke_size * 4), so this slider has always been the text size
+    control - while reading "3 px" with a "Stroke size" tooltip. The only
+    control over how big annotation text came out was undiscoverable."""
+    editor = EditorWindow()
+    try:
+        _select_tool(editor, "rect")
+        assert editor._size_lbl.text() == "3 px"
+        assert editor._size_slider.toolTip() == "Stroke size"
+
+        _select_tool(editor, "text")
+        assert editor._size_lbl.text() == "14 pt", "text size not shown in its own unit"
+        assert editor._size_slider.toolTip() == "Text size"
+    finally:
+        editor.close()
+
+
+def test_TOOLSET_02_the_background_swatch_belongs_to_the_text_tool(qapp) -> None:
+    """Text is the only annotation with a plate behind it. A swatch sitting
+    there disabled for every other tool would be the settings bar's widest
+    piece of dead space."""
+    editor = EditorWindow()
+    try:
+        # isHidden() rather than isVisible(): the latter reports *effective*
+        # visibility, which is False for every child of a window that has not
+        # been shown, so it would pass this test for the wrong reason.
+        _select_tool(editor, "highlight")
+        assert editor._text_bg_color_btn.isHidden()
+
+        _select_tool(editor, "text")
+        assert not editor._text_bg_color_btn.isHidden()
+    finally:
+        editor.close()
+
+
+def test_TOOLSET_03_the_opacity_slider_follows_the_active_tool(qapp) -> None:
+    """One slider serves both fills. Switching tools must restore that
+    tool's own value rather than carrying the other's across."""
+    editor = EditorWindow()
+    try:
+        _select_tool(editor, "highlight")
+        editor._opacity_slider.setValue(20)
+        assert editor._canvas.fill_opacity == pytest.approx(0.20)
+
+        _select_tool(editor, "text")
+        assert editor._opacity_slider.value() == round(editor._canvas.text_bg_opacity * 100)
+        editor._opacity_slider.setValue(80)
+        assert editor._canvas.text_bg_opacity == pytest.approx(0.80)
+        assert editor._canvas.fill_opacity == pytest.approx(0.20), "highlight's fill was overwritten"
+
+        _select_tool(editor, "highlight")
+        assert editor._opacity_slider.value() == 20, "highlight's own value was not restored"
+    finally:
+        editor.close()
+
+
+def test_TOOLSET_04_restoring_a_value_does_not_read_as_a_drag(qapp) -> None:
+    """The slider is set programmatically on every tool change. If that
+    emitted valueChanged the restore would immediately write itself back as
+    if the user had moved it - harmless while the values agree, and a silent
+    corruption the moment they do not."""
+    editor = EditorWindow()
+    try:
+        _select_tool(editor, "text")
+        editor._canvas.text_bg_opacity = 0.55
+        editor._canvas.fill_opacity = 0.30
+
+        _select_tool(editor, "highlight")
+        assert editor._canvas.text_bg_opacity == pytest.approx(0.55), "text opacity clobbered"
+        _select_tool(editor, "text")
+        assert editor._canvas.fill_opacity == pytest.approx(0.30), "highlight opacity clobbered"
+    finally:
+        editor.close()

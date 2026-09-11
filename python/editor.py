@@ -11,7 +11,7 @@ import time
 import webbrowser
 
 from PySide6.QtCore import QObject, Qt, QSize, QSysInfo, QThread, QUrl, Signal
-from PySide6.QtGui import QColor, QDesktopServices, QIcon, QImage, QKeySequence, QPixmap, QShortcut
+from PySide6.QtGui import QAction, QColor, QDesktopServices, QIcon, QImage, QKeySequence, QPixmap, QShortcut
 from PySide6.QtWidgets import (
     QApplication,
     QButtonGroup,
@@ -24,6 +24,7 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QMainWindow,
+    QMenuBar,
     QMessageBox,
     QPushButton,
     QScrollArea,
@@ -37,7 +38,7 @@ from PySide6.QtWidgets import (
 import debug_log
 import paths
 from canvas import AnnotationCanvas
-from theme import ACCENT, BG_800, LINE, MUTED, TEXT
+import theme
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -293,8 +294,8 @@ class EditorWindow(QMainWindow):
         bar = QFrame()
         bar.setObjectName("tools_bar")
         bar.setStyleSheet(
-            f"QFrame#tools_bar {{ background-color: {BG_800};"
-            f" border-bottom: 1px solid {LINE}; }}"
+            f"QFrame#tools_bar {{ background-color: {theme.BG_800};"
+            f" border-bottom: 1px solid {theme.LINE}; }}"
         )
         bar.setFixedHeight(92)
 
@@ -314,16 +315,21 @@ class EditorWindow(QMainWindow):
             "pen":       "#ff3b30",
         }
 
+        # The second field is an icon name from theme.ICONS, not a glyph:
+        # these were emoji, which the colour-emoji font draws as bitmaps in
+        # its own colours - pixelated at any size it has no bitmap for, and
+        # unable to follow the palette, which is what made them illegible
+        # once there was a light one.
         _TOOLS = [
-            ("select",    "🖱",  "Select (S)",       False),
-            ("crop",      "✂",  "Crop (X)",          False),
-            ("blur",      "▒",  "Blur (B)",          False),
-            ("text",      "T",   "Text (T)",          True),
-            ("highlight", "🟡", "Highlight (H)",      True),
-            ("circle",    "⭕", "Circle (C)",         True),
-            ("arrow",     "→",  "Arrow (A)",          True),
-            ("rect",      "▭",  "Rectangle (R)",      True),
-            ("pen",       "✏", "Pen (P)",             True),
+            ("select",    "select",    "Select (S)",     False),
+            ("crop",      "crop",      "Crop (X)",       False),
+            ("blur",      "blur",      "Blur (B)",       False),
+            ("text",      "text",      "Text (T)",       True),
+            ("highlight", "highlight", "Highlight (H)",  True),
+            ("circle",    "circle",    "Circle (C)",     True),
+            ("arrow",     "arrow",     "Arrow (A)",      True),
+            ("rect",      "rect",      "Rectangle (R)",  True),
+            ("pen",       "pen",       "Pen (P)",        True),
         ]
 
         layout.addStretch()
@@ -339,12 +345,14 @@ class EditorWindow(QMainWindow):
             name_lbl = QLabel(short_name)
             name_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
             name_lbl.setFixedHeight(14)
-            name_lbl.setStyleSheet("font-size: 9px; color: #b0b0c8; background: transparent;")
+            name_lbl.setStyleSheet(f"font-size: 9px; color: {theme.MUTED}; background: transparent;")
             vl.addWidget(name_lbl, 0, Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignHCenter)
 
             vl.addStretch(1)
 
-            btn = QPushButton(icon)
+            btn = QPushButton()
+            btn.setIcon(theme.icon_pixmap(icon, 18, theme.TEXT))
+            btn.setIconSize(QSize(18, 18))
             btn.setCheckable(True)
             btn.setFixedSize(44, 30)
             btn.setToolTip(tip)
@@ -375,7 +383,8 @@ class EditorWindow(QMainWindow):
         # History (past app-generated exports) and a fresh capture were
         # the only ways to bring an image in; there was no way to pull in
         # an external file (TA-214).
-        self._btn_open_image = QPushButton("📂")
+        self._btn_open_image = QPushButton()
+        self._btn_open_image.setIcon(theme.icon_pixmap("open", 16, theme.MUTED))
         self._btn_open_image.setObjectName("btn_open_image")
         self._btn_open_image.setProperty("smallIconButton", True)
         self._btn_open_image.setFixedSize(28, 28)
@@ -387,7 +396,8 @@ class EditorWindow(QMainWindow):
         # launcher, so a user working from the Editor had no path to it
         # without switching back (TA-218). No-op until
         # set_check_updates_callback() is wired, same as Show Launcher.
-        self._btn_check_updates = QPushButton("🔄")
+        self._btn_check_updates = QPushButton()
+        self._btn_check_updates.setIcon(theme.icon_pixmap("updates", 16, theme.MUTED))
         self._btn_check_updates.setObjectName("btn_check_updates")
         self._btn_check_updates.setProperty("smallIconButton", True)
         self._btn_check_updates.setFixedSize(28, 28)
@@ -399,7 +409,8 @@ class EditorWindow(QMainWindow):
         # Once the launcher is hidden (its own X, or the tray), this is the
         # only route back besides the tray icon, which Windows hides in the
         # overflow by default.
-        self._show_launcher_btn = QPushButton("🏠")
+        self._show_launcher_btn = QPushButton()
+        self._show_launcher_btn.setIcon(theme.icon_pixmap("home", 16, theme.MUTED))
         self._show_launcher_btn.setObjectName("btn_show_launcher")
         self._show_launcher_btn.setProperty("smallIconButton", True)
         self._show_launcher_btn.setFixedSize(28, 28)
@@ -408,7 +419,8 @@ class EditorWindow(QMainWindow):
         layout.addWidget(self._show_launcher_btn, 0, Qt.AlignmentFlag.AlignVCenter)
 
         # About button — beside Help, far right of toolbar
-        self._about_btn = QPushButton("ⓘ")
+        self._about_btn = QPushButton()
+        self._about_btn.setIcon(theme.icon_pixmap("about", 16, theme.MUTED))
         self._about_btn.setObjectName("btn_about")
         self._about_btn.setProperty("smallIconButton", True)
         self._about_btn.setFixedSize(28, 28)
@@ -417,11 +429,12 @@ class EditorWindow(QMainWindow):
         layout.addWidget(self._about_btn, 0, Qt.AlignmentFlag.AlignVCenter)
 
         # Help button — far right of toolbar
-        help_btn = QPushButton("?")
+        help_btn = QPushButton("" if theme.ICON_FONT_FAMILY else "?")
+        help_btn.setIcon(theme.icon_pixmap("help", 16, "#ffffff"))
         help_btn.setObjectName("btn_help")
         help_btn.setFixedSize(28, 28)
         help_btn.setToolTip("Open Help")
-        help_btn.clicked.connect(self._open_help)
+        help_btn.clicked.connect(self.open_help)
         layout.addWidget(help_btn, 0, Qt.AlignmentFlag.AlignVCenter)
 
         return bar
@@ -442,8 +455,8 @@ class EditorWindow(QMainWindow):
         bar = QFrame()
         bar.setObjectName("settings_bar")
         bar.setStyleSheet(
-            f"QFrame#settings_bar {{ background-color: {BG_800};"
-            f" border-bottom: 1px solid {LINE}; }}"
+            f"QFrame#settings_bar {{ background-color: {theme.BG_800};"
+            f" border-bottom: 1px solid {theme.LINE}; }}"
         )
         bar.setFixedHeight(40)
 
@@ -528,6 +541,16 @@ class EditorWindow(QMainWindow):
         layout.addWidget(self._opacity_slider)
         layout.addWidget(self._opacity_lbl)
 
+        # Text background colour. Shown only while the Text tool is active,
+        # because it is the only annotation with a plate behind it - a
+        # swatch permanently sitting there disabled would be the settings
+        # bar's widest piece of dead space.
+        self._text_bg_color_btn = _ColorButton(self._canvas.text_bg_color, size=(24, 24))
+        self._text_bg_color_btn.setToolTip("Text background colour")
+        self._text_bg_color_btn.color_changed.connect(self._on_text_bg_color_changed)
+        self._text_bg_color_btn.hide()
+        layout.addWidget(self._text_bg_color_btn)
+
         layout.addStretch(1)
 
         # ── Export ────────────────────────────────────────────────────────
@@ -548,7 +571,9 @@ class EditorWindow(QMainWindow):
         # Kept visually primary via the accent-filled btn_primary style and
         # a taller, wider button than the strip around it - this is still
         # the main action of the screen, not just another button in a row.
-        self._btn_save_png = QPushButton("💾  Save PNG")
+        self._btn_save_png = QPushButton("Save PNG")
+        self._btn_save_png.setIcon(theme.icon_pixmap("save", 15, "#ffffff"))
+        self._btn_save_png.setProperty("iconLabel", True)
         self._btn_save_png.setObjectName("btn_primary")
         self._btn_save_png.setFixedHeight(28)
         layout.addWidget(self._btn_save_png)
@@ -561,7 +586,7 @@ class EditorWindow(QMainWindow):
         panel = QWidget()
         panel.setObjectName("right_panel")
         panel.setFixedWidth(185)
-        panel.setStyleSheet(f"QWidget#right_panel {{ border-left: 1px solid {LINE}; }}")
+        panel.setStyleSheet(f"QWidget#right_panel {{ border-left: 1px solid {theme.LINE}; }}")
 
         layout = QVBoxLayout(panel)
         layout.setSpacing(5)
@@ -570,13 +595,20 @@ class EditorWindow(QMainWindow):
         # ── Edit controls stacked vertically ─────────────────────────────
         self._add_section(layout, "Edit")
 
-        self._btn_undo     = QPushButton("↩  Undo")
-        self._btn_redo     = QPushButton("↪  Redo")
-        self._btn_delete   = QPushButton("✂  Delete Selected")
-        self._btn_front    = QPushButton("⬆  Bring to Front")
-        self._btn_back     = QPushButton("⬇  Send Backward")
-        self._btn_backmost = QPushButton("⤓  Send to Back")
-        self._btn_clear    = QPushButton("🗑  Clear All")
+        self._btn_undo     = QPushButton("Undo")
+        self._btn_undo.setIcon(theme.icon_pixmap("undo", 15, theme.MUTED))
+        self._btn_redo     = QPushButton("Redo")
+        self._btn_redo.setIcon(theme.icon_pixmap("redo", 15, theme.MUTED))
+        self._btn_delete     = QPushButton("Delete Selected")
+        self._btn_delete.setIcon(theme.icon_pixmap("delete", 15, theme.MUTED))
+        self._btn_front     = QPushButton("Bring to Front")
+        self._btn_front.setIcon(theme.icon_pixmap("to_front", 15, theme.MUTED))
+        self._btn_back     = QPushButton("Send Backward")
+        self._btn_back.setIcon(theme.icon_pixmap("backward", 15, theme.MUTED))
+        self._btn_backmost     = QPushButton("Send to Back")
+        self._btn_backmost.setIcon(theme.icon_pixmap("to_back", 15, theme.MUTED))
+        self._btn_clear     = QPushButton("Clear All")
+        self._btn_clear.setIcon(theme.icon_pixmap("clear", 15, "#ffffff"))
         self._btn_clear.setObjectName("btn_danger")
 
         self._btn_undo.setToolTip("Undo (Ctrl+Z)")
@@ -592,6 +624,9 @@ class EditorWindow(QMainWindow):
             self._btn_front, self._btn_back, self._btn_backmost, self._btn_clear,
         ):
             btn.setFixedHeight(30)
+            # These sit in a column with labels of very different lengths, so
+            # a centred icon+text pair puts every icon at a different x.
+            btn.setProperty("iconLabel", True)
             layout.addWidget(btn)
 
         layout.addWidget(self._separator())
@@ -689,6 +724,35 @@ class EditorWindow(QMainWindow):
         # Apply this tool's colour to the canvas
         if tool_id in self._tool_colors:
             self._canvas.color = self._tool_colors[tool_id]
+        self._sync_tool_settings(tool_id)
+
+    def _sync_tool_settings(self, tool_id: str) -> None:
+        """Put the shared settings controls into the active tool's state.
+
+        The settings bar has one size slider and one opacity slider serving
+        every tool, which is why both were labelled for whichever tool the
+        author had in mind rather than the one in use. Highlight and Text
+        are the only tools with a fill and are never both active, so a
+        second set of controls would sit disabled for every tool but one.
+
+        Signals are blocked while values are restored, or writing a stored
+        value back into the slider would read as the user having dragged it.
+        """
+        is_text = tool_id == "text"
+
+        self._size_slider.setToolTip("Text size" if is_text else "Stroke size")
+        self._size_lbl.setText(self._size_label_for(tool_id, self._canvas.stroke_size))
+
+        opacity = self._canvas.text_bg_opacity if is_text else self._canvas.fill_opacity
+        self._opacity_slider.setToolTip(
+            "Text background opacity" if is_text else "Highlight fill opacity"
+        )
+        self._opacity_slider.blockSignals(True)
+        self._opacity_slider.setValue(round(opacity * 100))
+        self._opacity_slider.blockSignals(False)
+        self._opacity_lbl.setText(f"{round(opacity * 100)} %")
+
+        self._text_bg_color_btn.setVisible(is_text)
 
     def _on_tool_color_changed(self, tool_id: str, color: str) -> None:
         self._tool_colors[tool_id] = color
@@ -720,8 +784,26 @@ class EditorWindow(QMainWindow):
 
     def _on_size_changed(self, value: int) -> None:
         self._canvas.stroke_size = value
-        self._size_lbl.setText(f"{value} px")
+        self._size_lbl.setText(self._size_label_for(self._canvas.tool, value))
         self._canvas.update_selected_style(size=value)
+
+    @staticmethod
+    def _size_label_for(tool_id: str, value: int) -> str:
+        """What the size slider is actually setting, for the active tool.
+
+        For text this slider has always been the font size - canvas.py
+        computes it as max(14, stroke_size * 4) - but it read "3 px" with a
+        "Stroke size" tooltip, so the only control over how big an
+        annotation's text came out was undiscoverable. Showing the value it
+        produces, in the unit it produces it in, is the whole fix.
+        """
+        if tool_id == "text":
+            return f"{max(14, value * 4)} pt"
+        return f"{value} px"
+
+    def _on_text_bg_color_changed(self, color: str) -> None:
+        self._canvas.text_bg_color = color
+        self._canvas.update_selected_style(bgColor=color)
 
     def _on_zoom_slider_changed(self, value: int) -> None:
         self._fit_mode = False
@@ -748,8 +830,14 @@ class EditorWindow(QMainWindow):
         self._canvas.update_selected_style(arrow_style=style)
 
     def _on_opacity_changed(self, value: int) -> None:
-        self._canvas.fill_opacity = value / 100.0
         self._opacity_lbl.setText(f"{value} %")
+        if self._canvas.tool == "text":
+            # 0 gives bare glyphs over the screenshot - the old behaviour,
+            # now a choice rather than the only option.
+            self._canvas.text_bg_opacity = value / 100.0
+            self._canvas.update_selected_style(bgOpacity=self._canvas.text_bg_opacity)
+            return
+        self._canvas.fill_opacity = value / 100.0
         self._canvas.update_selected_style(opacity=self._canvas.fill_opacity)
 
     def _confirm_clear(self) -> None:
@@ -763,6 +851,103 @@ class EditorWindow(QMainWindow):
         )
         if reply == QMessageBox.StandardButton.Yes:
             self._canvas.clear_annotations()
+
+    # ── Application menu bar ──────────────────────────────────────────────────
+
+    def build_menu_bar(self) -> QMenuBar:
+        """The application's menu bar, deliberately built with no parent.
+
+        A QMenuBar owned by a window only becomes the macOS menu bar while
+        that window is active. Test Assist normally starts with the editor
+        constructed but *not shown* - the floating launcher is the surface
+        you get - so an editor-owned menu bar left the menu strip empty in
+        the case that matters most: the app's own menu showed nothing but
+        the interpreter's name, and File/Help/About were reachable only
+        from a toolbar inside a window the user had not opened yet.
+
+        A parentless menu bar is Qt's documented answer to exactly that: it
+        becomes the application-wide default, used whenever no window
+        supplies one of its own. On Windows a parentless menu bar draws
+        nowhere, which is why the toolbar buttons stay - there the toolbar
+        is the primary affordance and a menu strip would be the unusual
+        thing.
+
+        Caller keeps the reference: nothing else owns it, so letting it go
+        out of scope takes the menu bar with it.
+        """
+        bar = QMenuBar()
+
+        file_menu = bar.addMenu("&File")
+        self._add_action(file_menu, "Open Image\u2026", QKeySequence.StandardKey.Open,
+                         self._open_image_file)
+        file_menu.addSeparator()
+        self._add_action(file_menu, "Save PNG\u2026", QKeySequence.StandardKey.Save,
+                         self._save_png)
+        self._add_action(file_menu, "Export JSON\u2026", None, self._export_json)
+        file_menu.addSeparator()
+        # QuitRole moves this into the application menu on macOS, where a
+        # Mac user looks for it; on Windows it stays under File, which is
+        # where a Windows user looks. One action, both conventions.
+        self._add_action(file_menu, "Quit Test Assist", QKeySequence.StandardKey.Quit,
+                         QApplication.quit, role=QAction.MenuRole.QuitRole)
+
+        # Order is File / Edit / Window / Help, which is the convention on
+        # both platforms - every one of these actions already exists in the
+        # right-hand dock; the menu is a second, conventional route to them,
+        # not a new capability.
+        edit_menu = bar.addMenu("&Edit")
+        self._add_action(edit_menu, "Undo", QKeySequence.StandardKey.Undo,
+                         self._canvas.undo)
+        self._add_action(edit_menu, "Redo", QKeySequence.StandardKey.Redo,
+                         self._canvas.redo)
+        edit_menu.addSeparator()
+        self._add_action(edit_menu, "Delete Selected", QKeySequence.StandardKey.Delete,
+                         self._canvas.delete_selected)
+        edit_menu.addSeparator()
+        self._add_action(edit_menu, "Bring to Front", None,
+                         self._canvas.bring_selected_to_front)
+        self._add_action(edit_menu, "Send Backward", None,
+                         self._canvas.send_selected_backward)
+        self._add_action(edit_menu, "Send to Back", None,
+                         self._canvas.send_selected_to_back)
+        edit_menu.addSeparator()
+        # Behind its own separator, and routed through _confirm_clear rather
+        # than the canvas directly - the one irreversible action here should
+        # not sit flush against Send to Back, and must not lose its
+        # confirmation by being reachable a second way.
+        self._add_action(edit_menu, "Clear All Annotations", None, self._confirm_clear)
+
+        window_menu = bar.addMenu("&Window")
+        self._add_action(window_menu, "Show Launcher", None, self._on_show_launcher_clicked)
+        self._add_action(window_menu, "Show Editor", None, self.bring_forward)
+
+        help_menu = bar.addMenu("&Help")
+        self._add_action(help_menu, "Test Assist Help", QKeySequence.StandardKey.HelpContents,
+                         self.open_help)
+        self._add_action(help_menu, "Check for Updates\u2026", None,
+                         self._on_check_updates_clicked)
+        help_menu.addSeparator()
+        # AboutRole likewise relocates to the application menu on macOS.
+        self._add_action(help_menu, "About Test Assist", None, self._open_about,
+                         role=QAction.MenuRole.AboutRole)
+
+        self._menu_bar = bar
+        return bar
+
+    def _add_action(self, menu, text: str, shortcut, slot, role=None) -> QAction:
+        """One action, wired the same way every time.
+
+        Parented to the window rather than the menu so its shortcut stays
+        live even on macOS, where the menu bar itself is not in the window.
+        """
+        action = QAction(text, self)
+        if shortcut is not None:
+            action.setShortcut(shortcut)
+        if role is not None:
+            action.setMenuRole(role)
+        action.triggered.connect(slot)
+        menu.addAction(action)
+        return action
 
     def _on_show_launcher_clicked(self) -> None:
         if self._show_launcher_callback is not None:
@@ -803,7 +988,7 @@ class EditorWindow(QMainWindow):
             return
         self.load_pixmap(QPixmap.fromImage(image), background=False)
 
-    def _open_help(self) -> None:
+    def open_help(self) -> None:
         # resolves both from a source checkout and from a PyInstaller bundle
         base = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent))
         help_file = base / "help.html"
@@ -819,17 +1004,17 @@ class EditorWindow(QMainWindow):
         layout.setSpacing(10)
 
         title = QLabel(f"Test Assist {self._version}")
-        title.setStyleSheet(f"font-size: 16px; font-weight: 700; color: {TEXT};")
+        title.setStyleSheet(f"font-size: 16px; font-weight: 700; color: {theme.TEXT};")
         layout.addWidget(title)
 
         os_line = QLabel(QSysInfo.prettyProductName())
-        os_line.setStyleSheet(f"color: {MUTED};")
+        os_line.setStyleSheet(f"color: {theme.MUTED};")
         layout.addWidget(os_line)
 
         screens_label = QLabel(_format_screen_summary(_collect_screen_info()))
         screens_label.setWordWrap(True)
         screens_label.setStyleSheet(
-            f"color: {MUTED}; font-family: Consolas, 'Cascadia Code', monospace; font-size: 12px;"
+            f"color: {theme.MUTED}; font-family: Consolas, 'Cascadia Code', monospace; font-size: 12px;"
         )
         layout.addWidget(screens_label)
 
@@ -930,7 +1115,7 @@ class EditorWindow(QMainWindow):
         if not files:
             empty = QLabel("No snapshots in this range")
             empty.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            empty.setStyleSheet(f"color: {MUTED}; padding: 8px;")
+            empty.setStyleSheet(f"color: {theme.MUTED}; padding: 8px;")
             self._snap_layout.insertWidget(0, empty)
             return
 
@@ -993,7 +1178,7 @@ class EditorWindow(QMainWindow):
         root.setSpacing(8)
 
         subtitle = QLabel("Browse snapshots by category and click a thumbnail to load it in the editor.")
-        subtitle.setStyleSheet(f"color: {MUTED};")
+        subtitle.setStyleSheet(f"color: {theme.MUTED};")
         root.addWidget(subtitle)
 
         tabs = QTabWidget()
@@ -1022,7 +1207,7 @@ class EditorWindow(QMainWindow):
             if not files:
                 empty = QLabel("No snapshots in this category")
                 empty.setAlignment(Qt.AlignmentFlag.AlignCenter)
-                empty.setStyleSheet(f"color: {MUTED}; padding: 20px;")
+                empty.setStyleSheet(f"color: {theme.MUTED}; padding: 20px;")
                 grid.addWidget(empty, 0, 0)
             else:
                 for idx, path in enumerate(files, start=1):
@@ -1070,14 +1255,14 @@ class EditorWindow(QMainWindow):
     def _separator() -> QFrame:
         line = QFrame()
         line.setFrameShape(QFrame.Shape.HLine)
-        line.setStyleSheet(f"background-color: {LINE}; border: none; max-height: 1px;")
+        line.setStyleSheet(f"background-color: {theme.LINE}; border: none; max-height: 1px;")
         return line
 
     @staticmethod
     def _vseparator() -> QFrame:
         line = QFrame()
         line.setFrameShape(QFrame.Shape.VLine)
-        line.setStyleSheet(f"background-color: {LINE}; border: none; max-width: 1px;")
+        line.setStyleSheet(f"background-color: {theme.LINE}; border: none; max-width: 1px;")
         line.setFixedWidth(1)
         return line
 
@@ -1088,7 +1273,7 @@ class EditorWindow(QMainWindow):
             btn.setObjectName("section_title")
             btn.setFlat(True)
             btn.setCursor(Qt.CursorShape.PointingHandCursor)
-            btn.setStyleSheet(f"text-align: left; color: {TEXT};")
+            btn.setStyleSheet(f"text-align: left; color: {theme.TEXT};")
             layout.addWidget(btn)
             return btn
         lbl = QLabel(text.upper())
@@ -1136,9 +1321,9 @@ class _ColorButton(QPushButton):
             QPushButton {{
                 background-color: {self._color};
                 border-radius: {radius}px;
-                border: 2px solid #3a3a5e;
+                border: 2px solid {theme.LINE_STRONG};
             }}
-            QPushButton:hover {{ border-color: #7c83fd; }}
+            QPushButton:hover {{ border-color: {theme.ACCENT}; }}
         """)
 
 
@@ -1159,12 +1344,12 @@ class _SnapshotThumb(QFrame):
         self._pixmap = QPixmap(str(image_path))
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.setToolTip(f"Click to reload this snapshot\n{image_path.name}")
-        self.setStyleSheet("""
-            QFrame {
-                border: 1px solid #2a2a4e;
+        self.setStyleSheet(f"""
+            QFrame {{
+                border: 1px solid {theme.LINE};
                 border-radius: 8px;
-            }
-            QFrame:hover { border-color: #7c83fd; }
+            }}
+            QFrame:hover {{ border-color: {theme.ACCENT}; }}
         """)
 
         layout = QVBoxLayout(self)
@@ -1251,13 +1436,13 @@ class _RecordingThumb(QFrame):
             if self._is_kept_frames
             else (f"Click to open in your video player\n{recording_path.name}")
         )
-        self.setStyleSheet("""
-            QFrame {
-                border: 1px solid #4a3a2a;
+        self.setStyleSheet(f"""
+            QFrame {{
+                border: 1px solid {theme.LINE_STRONG};
                 border-radius: 8px;
-                background: rgba(200,120,60,0.06);
-            }
-            QFrame:hover { border-color: #c8763a; }
+                background: {theme.BG_800};
+            }}
+            QFrame:hover {{ border-color: {theme.ACCENT}; }}
         """)
 
         layout = QVBoxLayout(self)
@@ -1296,14 +1481,33 @@ class _RecordingThumb(QFrame):
             self._load_thumbnail()
 
     def _show_fallback_icon(self) -> None:
-        self._preview.setPixmap(QPixmap())
-        self._preview.setText("🎞" if self._is_kept_frames else "🎥")
-        self._preview.setStyleSheet("font-size: 28px; background: transparent;")
+        """Shown when a recording has no poster frame to display.
+
+        A glyph rather than an emoji for the same reason as everywhere else:
+        emoji are bitmaps in their own colours, so they pixelate and ignore
+        the palette - here against a thumbnail tile that does follow it.
+        """
+        # Recorded as a name as well as drawn: the fallback used to be an
+        # emoji, so a test could assert on the character. A pixmap has no
+        # such handle, and "some pixmap is set" would not distinguish a
+        # frame sequence from an mp4 - which is the distinction the tests
+        # are actually about.
+        self._fallback_icon = "video" if self._is_kept_frames else "record"
+        self._preview.setText("")
+        self._preview.setStyleSheet("background: transparent;")
+        self._preview.setPixmap(
+            theme.icon_pixmap(self._fallback_icon, 28, theme.MUTED).pixmap(28, 28)
+        )
 
     def _show_thumbnail(self, thumbnail_path: Path) -> None:
         pixmap = QPixmap(str(thumbnail_path))
         if pixmap.isNull():
             return
+        # Cleared here rather than only set in _show_fallback_icon, so the
+        # attribute answers "which image is showing" rather than "which one
+        # was shown first" - a real poster frame arriving late must not
+        # leave the tile still claiming to be a fallback.
+        self._fallback_icon = None
         self._preview.setStyleSheet("background: transparent;")
         self._preview.setText("")
         self._preview.setPixmap(
