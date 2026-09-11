@@ -50,7 +50,7 @@ are in the left rail.*
 | **Install** | None — open the live URL | Download the release zip — `TestAssist.exe` on Windows, `Test Assist.app` on macOS — or run from source |
 | **Capture** | `getDisplayMedia`, `MediaRecorder` | Native screenshot overlay, frame recorder |
 | **Best for** | Trying the full capture → annotate → export loop in ten seconds, with nothing to install | Long test sessions — a tray launcher that stays above the application under test |
-| **Tests** | 55 Playwright tests — smoke suite in CI, regression suite on demand | 229 pytest tests across a regression and a functional suite, in CI |
+| **Tests** | 55 Playwright tests — smoke suite in CI, regression suite on demand | 351 pytest tests across a regression and a functional suite, in CI |
 
 Both produce the same two outputs: a composited PNG for attaching to a defect,
 and a structured JSON annotation layer.
@@ -79,6 +79,12 @@ sandboxed; some of it is simply where the work went.
 - An About dialog with one-click "Copy details for a bug report" — version,
   OS, and the full display layout, so a bug report never needs a screenshot of
   your monitor settings just to describe them
+- A File / Edit / Window / Help menu bar that follows each platform's own
+  convention — About and Quit sit in the application menu on macOS and under
+  Help and File on Windows
+- Light and dark, following whatever the operating system is set to. The app's
+  own chrome only: annotations never change with the theme, so the same defect
+  marked up on a light machine and a dark one exports identical evidence
 
 Everything under **What it does** below is the browser build.
 
@@ -271,7 +277,7 @@ is browser chrome that no automation can drive, so capture and recording tests
 substitute a canvas-backed `MediaStream`. They prove what the app does with a
 stream, not that the picker appears.
 
-**Desktop build — 229 pytest tests**
+**Desktop build — 351 pytest tests**
 
 ```bash
 cd python
