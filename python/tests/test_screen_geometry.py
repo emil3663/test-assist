@@ -7,13 +7,17 @@ hardware; see DESKTOP_STABILITY_MATRIX.md for what stays manual (CAP-12).
 """
 from __future__ import annotations
 
-from PySide6.QtCore import QPoint, QRect
+import pytest
+from PySide6.QtCore import QPoint, QRect, QSize
 
 from screen_geometry import (
+    composite_ratio,
+    device_result_size,
     is_within_dock_band,
     plan_capture,
     screen_for_rect,
     screens_intersecting,
+    to_device_rect,
     to_screen_local,
 )
 
@@ -406,3 +410,141 @@ def test_DSP_13_dock_band_requires_the_pointer_on_the_same_screen():
     widget_right = _LAPTOP.right() - 5
     pointer_on_external = QPoint(500, 100)
     assert not is_within_dock_band(widget_right, pointer_on_external, _LAPTOP, threshold=12)
+
+
+# ── Device-pixel scaling ─────────────────────────────────────────────────────
+#
+# A selection is dragged in logical pixels, but a screen with a
+# devicePixelRatio above 1 holds more real pixels than that and
+# grabWindow() returns all of them. Compositing into a logically-sized
+# pixmap threw them away - a 400x300 selection on a 2.0 screen grabbed
+# 800x600 and resampled down to 400x300, discarding 3/4 of the capture.
+#
+# CI runs on 1.0-ratio hardware, where every one of these cases is a
+# no-op. That is exactly why they are here as literal ratios rather than
+# left to a real HiDPI machine nobody's CI has.
+
+
+def test_composite_ratio_is_one_for_ordinary_screens() -> None:
+    """The overwhelmingly common case must be untouched: on 1.0 hardware
+    the result is the same size it always was, byte for byte."""
+    screens = [QRect(0, 0, 1920, 1080)]
+    pieces = plan_capture(QRect(100, 100, 400, 300), screens)
+    assert composite_ratio(pieces, [1.0]) == 1.0
+    assert device_result_size(pieces, 1.0) == QSize(400, 300)
+
+
+def test_composite_ratio_follows_a_hidpi_screen() -> None:
+    screens = [QRect(0, 0, 1512, 982)]
+    pieces = plan_capture(QRect(200, 200, 400, 300), screens)
+    ratio = composite_ratio(pieces, [2.0])
+    assert ratio == 2.0
+    assert device_result_size(pieces, ratio) == QSize(800, 600)
+
+
+def test_a_span_takes_the_sharpest_screen_not_the_coarsest() -> None:
+    """Taking the lowest ratio would discard real pixels from the sharper
+    screen permanently. Scaling the coarser piece up cannot invent detail,
+    but it does not destroy any either - and it keeps one consistent grid."""
+    retina = QRect(0, 0, 1512, 982)
+    external = QRect(1512, 0, 1920, 1080)
+    pieces = plan_capture(QRect(1000, 100, 1000, 400), [retina, external])
+
+    assert len(pieces) == 2, "selection must span both screens for this to mean anything"
+    assert composite_ratio(pieces, [2.0, 1.0]) == 2.0
+    assert composite_ratio(pieces, [1.0, 2.0]) == 2.0
+
+
+def test_a_span_that_misses_the_hidpi_screen_stays_at_one() -> None:
+    """The ratio comes from the screens actually contributing, not from
+    the sharpest screen attached to the machine."""
+    retina = QRect(0, 0, 1512, 982)
+    left = QRect(-1920, 0, 1920, 1080)
+    right = QRect(1512, 0, 1920, 1080)
+    # entirely on the two 1.0 externals, nowhere near the retina panel
+    pieces = plan_capture(QRect(-500, 100, 400, 300), [retina, left, right])
+
+    assert composite_ratio(pieces, [2.0, 1.0, 1.0]) == 1.0
+
+
+def test_to_device_rect_scales_placement_and_size_together() -> None:
+    assert to_device_rect(QPoint(0, 0), QSize(400, 300), 1.0) == QRect(0, 0, 400, 300)
+    assert to_device_rect(QPoint(0, 0), QSize(400, 300), 2.0) == QRect(0, 0, 800, 600)
+    assert to_device_rect(QPoint(512, 0), QSize(488, 400), 2.0) == QRect(1024, 0, 976, 800)
+
+
+def test_device_pieces_tile_the_result_without_gap_or_overlap() -> None:
+    """The property that actually matters: scaled up, the pieces must still
+    exactly cover the result. An off-by-one in the rounding shows up as a
+    1px unpainted seam, which every viewer renders as a black line down the
+    middle of the evidence.
+
+    1.25 and 1.5 are the ratios that actually matter here - 125% and 150%
+    are the common Windows scaling presets, not 2.0/3.0 - and are included
+    alongside the integers rather than replacing them. For this two-piece
+    layout they are safe by construction: piece 2's dest.x equals piece 1's
+    width, so both the per-piece rounding and the whole-result rounding
+    round the same expression, round(w1*ratio). See
+    test_three_piece_layout_can_seam_at_a_fractional_ratio below for why
+    that guarantee does not extend to three or more pieces."""
+    retina = QRect(0, 0, 1512, 982)
+    external = QRect(1512, 0, 1920, 1080)
+    for ratio in (1.0, 1.25, 1.5, 2.0, 3.0):
+        pieces = plan_capture(QRect(1000, 100, 1000, 400), [retina, external])
+        size = device_result_size(pieces, ratio)
+        rects = [to_device_rect(p.dest, p.screen_local_rect.size(), ratio) for p in pieces]
+
+        covered = sum(r.width() * r.height() for r in rects)
+        assert covered == size.width() * size.height(), f"gap or overlap at ratio {ratio}"
+        for a, b in zip(rects, rects[1:]):
+            assert not a.intersects(b), f"pieces overlap at ratio {ratio}"
+
+
+@pytest.mark.xfail(
+    reason=(
+        "Known limitation, tracked as TA-229 in TESTASSIST_BACKLOG.md: "
+        "to_device_rect() rounds each piece's x, y, w and h independently, "
+        "so for three or more pieces at a fractional ratio, round(w1*r) + "
+        "round(w2*r) + round(w3*r) is not guaranteed to equal "
+        "round((w1+w2+w3)*r). Two pieces are safe (see the test above); "
+        "three are not. Not fixed here: cannot be exercised on the "
+        "available hardware (needs three real screens at fractional "
+        "scaling), and this release does not claim three-screen spans. "
+        "Distinct from TA-209, which documents an axis-packing gap for "
+        "the same L-shaped three-screen layout - TA-209 covers a "
+        "different mechanism and does not cover this rounding defect."
+    ),
+    strict=True,
+)
+def test_three_piece_layout_can_seam_at_a_fractional_ratio() -> None:
+    """Diagnostic, not a regression guard: demonstrates that the two-piece
+    safety in the test above does not generalise to three pieces. Three
+    screens side by side, widths 297/297/298 (chosen so the individual
+    roundings do not sum back to the whole's rounding at 1.25 or 1.5):
+
+        ratio  per-piece rounded widths   sum    whole-rect rounding
+        1.25   371, 371, 372              1114   1115   <- 1px short
+        1.5    446, 446, 447              1339   1338   <- 1px over
+
+    Both are real defects (an unpainted seam at 1.25, an overlap at 1.5),
+    just not ones reachable with only two monitors."""
+    left = QRect(0, 0, 297, 400)
+    middle = QRect(297, 0, 297, 400)
+    right = QRect(594, 0, 298, 400)
+    for ratio in (1.25, 1.5):
+        pieces = plan_capture(QRect(0, 0, 892, 400), [left, middle, right])
+        assert len(pieces) == 3, "test setup: the selection must actually produce three pieces"
+        size = device_result_size(pieces, ratio)
+        rects = [to_device_rect(p.dest, p.screen_local_rect.size(), ratio) for p in pieces]
+
+        covered = sum(r.width() * r.height() for r in rects)
+        assert covered == size.width() * size.height(), f"gap or overlap at ratio {ratio}"
+        for a, b in zip(rects, rects[1:]):
+            assert not a.intersects(b), f"pieces overlap at ratio {ratio}"
+
+
+def test_an_empty_plan_yields_a_usable_ratio_and_size() -> None:
+    """A selection touching no screen should not make a caller divide by a
+    meaningless ratio or build a negative-sized pixmap."""
+    assert composite_ratio([], [2.0]) == 1.0
+    assert device_result_size([], 1.0) == QSize(0, 0)

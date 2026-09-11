@@ -1373,6 +1373,49 @@ that will actually ship.
   an app-behavior reason rather than an infrastructure one. CI-vs-manual
   decision unchanged.
 
+### TA-229 — `to_device_rect()` can seam a three-or-more-piece capture at a fractional device pixel ratio
+
+- **Phase:** 3
+- **Priority:** P3
+- **Suggested labels:** `bug`, `capture`
+- **Problem it solves:** `to_device_rect()` rounds each piece's x, y, width
+  and height independently. For two pieces this is safe by construction —
+  piece 2's `dest.x` equals piece 1's width, so both the per-piece rounding
+  and `device_result_size()`'s whole-rect rounding round the same
+  expression, `round(w1*ratio)`. For three or more pieces that guarantee
+  does not hold: `round(w1*r) + round(w2*r) + round(w3*r)` is not
+  guaranteed to equal `round((w1+w2+w3)*r)`. Confirmed, not merely
+  reasoned: three synthetic screens 297/297/298px wide produce a 1px
+  unpainted gap at ratio 1.25 (1114 covered vs. 1115 wanted) and a 1px
+  overlap at ratio 1.5 (1339 vs. 1338) — see
+  `test_three_piece_layout_can_seam_at_a_fractional_ratio` in
+  `python/tests/test_screen_geometry.py`, added and confirmed failing
+  (`xfail(strict=True)`) while completing PR #8. The two-piece case (every
+  real layout this project has hardware to test) is unaffected — see
+  `test_device_pieces_tile_the_result_without_gap_or_overlap`, now covering
+  1.25 and 1.5 alongside the integer ratios and staying green throughout.
+  1.25 and 1.5 are the ratios that matter (Windows' 125%/150% presets),
+  not the integers the original test used.
+- **Scope:**
+  - A packing/rounding scheme where a piece's placement is derived from
+    the *previous* piece's already-rounded edge (cumulative rounding)
+    rather than each piece rounding its own offset from zero independently
+    — the same class of fix as carry-propagated rounding elsewhere.
+  - Extend `test_three_piece_layout_can_seam_at_a_fractional_ratio` (or
+    replace it) to a real regression guard once fixed, removing the
+    `xfail`.
+- **Deliverables:** Either a fix with the `xfail` removed and turned into a
+  passing regression test, or this entry staying open with the limitation
+  documented — not both left silently inconsistent.
+- **Acceptance criteria:** Three-or-more-piece layouts tile without gap or
+  overlap at 1.25 and 1.5, not just at integer ratios.
+- **Dependencies:** Related to but distinct from TA-209 (which is about
+  `plan_capture()` leaving an axis-packing gap for layouts separated on
+  both axes) — this is a rounding defect within a single axis's packing,
+  reachable even when TA-209 is fixed. Real-hardware verification needs
+  three screens at fractional scaling, which is not available; not
+  blocking this release, which does not claim three-screen spans.
+
 ### Gate A — Code complete
 - TA-201, TA-202, TA-203 merged
 - Suite green, no skips, no test opens a socket

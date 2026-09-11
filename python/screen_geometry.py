@@ -18,7 +18,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from PySide6.QtCore import QPoint, QRect
+from PySide6.QtCore import QPoint, QRect, QSize
 
 
 def screens_intersecting(global_rect: QRect, screen_geometries: list[QRect]) -> list[int]:
@@ -149,3 +149,51 @@ def plan_capture(global_rect: QRect, screen_geometries: list[QRect]) -> list[Gra
         pieces.append(GrabPiece(index, local, dest))
         x_cursor += intersection.width()
     return pieces
+
+
+def composite_ratio(pieces: list[GrabPiece], screen_ratios: list[float]) -> float:
+    """The device-pixel ratio a composited capture should be rendered at.
+
+    The highest ratio among the contributing screens, so a selection
+    spanning a 2.0 screen and a 1.0 one keeps the sharp half at full
+    detail and scales the coarser half up to meet it. Taking the lowest
+    (or assuming 1.0, which is what sizing the result in logical pixels
+    amounted to) discards real captured pixels permanently: grabWindow()
+    returns every device pixel the screen holds, and a tool whose output
+    is evidence should not be the thing that throws them away.
+
+    Falls back to 1.0 for an empty plan so a caller never divides by or
+    multiplies with a meaningless ratio.
+    """
+    if not pieces:
+        return 1.0
+    return max(screen_ratios[piece.screen_index] for piece in pieces)
+
+
+def to_device_rect(dest: QPoint, local_size: QSize, ratio: float) -> QRect:
+    """Where one piece lands in a result measured in device pixels.
+
+    `plan_capture()` places pieces in logical pixels, because that is the
+    space a selection is dragged in; this is the same placement scaled
+    onto the device-pixel grid the result is actually stored on.
+    """
+    return QRect(
+        round(dest.x() * ratio),
+        round(dest.y() * ratio),
+        round(local_size.width() * ratio),
+        round(local_size.height() * ratio),
+    )
+
+
+def device_result_size(pieces: list[GrabPiece], ratio: float) -> QSize:
+    """The size, in device pixels, of the pixmap the pieces composite into.
+
+    max(dest + size) per axis rather than summing, for the same reason
+    plan_capture() places pieces the way it does: which axis was packed
+    is that function's decision, and this must stay correct either way.
+    """
+    if not pieces:
+        return QSize(0, 0)
+    width = max(piece.dest.x() + piece.screen_local_rect.width() for piece in pieces)
+    height = max(piece.dest.y() + piece.screen_local_rect.height() for piece in pieces)
+    return QSize(round(width * ratio), round(height * ratio))

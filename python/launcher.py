@@ -498,6 +498,13 @@ class FloatingLauncher(QWidget):
 
     def _grab_full_capture(self) -> None:
         pixmap = self._current_screen().grabWindow(0)
+        # Same normalisation capture.py applies to both of its own results:
+        # canvas.py measures its own geometry and every annotation's
+        # coordinates from _pixmap.width(), which is device pixels, so a
+        # ratio-tagged pixmap is painted at its device-independent size
+        # inside a device-sized surface - on a 125% screen, 1536x864 of
+        # picture inside a 1920x1080 file, black filling the rest.
+        pixmap.setDevicePixelRatio(1.0)
         self._on_capture_ready(pixmap)
 
     def _on_capture_ready(self, pixmap: QPixmap) -> None:
