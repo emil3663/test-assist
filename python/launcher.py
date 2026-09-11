@@ -46,8 +46,11 @@ class FloatingLauncher(QWidget):
     """
     Small always-on-top overlay window that drives the capture workflow.
 
-    • Photo mode  → drag-select a screen region → editor opens in background.
-    • Video mode  → start / stop screen recording → file saved to home folder.
+    • Capture Region → drag-select a screen region → editor opens behind.
+    • Full Screen    → grab the whole screen you are working on.
+    • Record         → start / stop a screen recording, saved to Documents.
+
+    Each is its own control; there is no mode to set first.
 
     Drag anywhere on the widget (outside a button) to reposition it.
     Right-click for a context menu with a Quit option.
@@ -213,6 +216,7 @@ class FloatingLauncher(QWidget):
         self._btn_capture = QPushButton("  Capture Region")
         self._btn_capture.setIcon(theme.icon_pixmap("region", 16, "#ffffff"))
         self._btn_capture.setFixedHeight(38)
+        self._btn_capture.setProperty("iconLabel", True)
         self._btn_capture.setStyleSheet(self._style_primary())
         self._btn_capture.setAccessibleName("Capture Region")
         float_layout.addWidget(self._btn_capture)
@@ -225,6 +229,7 @@ class FloatingLauncher(QWidget):
         self._btn_full_capture.setFixedHeight(32)
         self._btn_full_capture.setToolTip("Capture the whole screen, including the taskbar and clock")
         self._btn_full_capture.setAccessibleName("Full Screen")
+        self._btn_full_capture.setProperty("iconLabel", True)
         self._btn_full_capture.setStyleSheet(self._style_outline())
         action_row.addWidget(self._btn_full_capture, 1)
 
@@ -266,6 +271,7 @@ class FloatingLauncher(QWidget):
         self._btn_stop = QPushButton("  Stop Recording")
         self._btn_stop.setIcon(theme.icon_pixmap("stop", 18, "#ffffff"))
         self._btn_stop.setFixedHeight(44)
+        self._btn_stop.setProperty("iconLabel", True)
         self._btn_stop.setStyleSheet(self._style_danger())
         self._btn_stop.setAccessibleName("Stop Recording")
         self._btn_stop.hide()
@@ -298,6 +304,7 @@ class FloatingLauncher(QWidget):
         self._btn_open_editor_wide = QPushButton("  Open Editor")
         self._btn_open_editor_wide.setIcon(theme.icon_pixmap("pen", 14, theme.MUTED))
         self._btn_open_editor_wide.setFixedHeight(30)
+        self._btn_open_editor_wide.setProperty("iconLabel", True)
         self._btn_open_editor_wide.setStyleSheet(self._style_outline())
         self._btn_open_editor_wide.setAccessibleName("Open Editor")
         float_layout.addWidget(self._btn_open_editor_wide)

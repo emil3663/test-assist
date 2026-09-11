@@ -1328,7 +1328,8 @@ def test_a_recording_thumb_backfills_a_missing_thumbnail_off_the_ui_thread(qapp,
     capture.thumbnail_path_for(output).unlink()  # force the backfill path
 
     thumb = _RecordingThumb(output, 1)
-    assert thumb._preview.text() == "🎥", "the fallback icon must show while the backfill is still running"
+    assert thumb._fallback_icon == "record", "the fallback icon must show while the backfill is still running"
+    assert not thumb._preview.pixmap().isNull()
 
     assert _wait_until(lambda: not thumb._preview.pixmap().isNull()), \
         "the background-extracted thumbnail never arrived"
@@ -1376,8 +1377,12 @@ def test_a_recording_thumb_falls_back_to_the_icon_when_extraction_fails(qapp, mo
     assert _wait_until(lambda: bool(calls)), "the backfill worker never ran"
     _pump_events(0.3)  # let the queued (None) result actually be delivered
 
-    assert thumb._preview.text() == "🎥", "a failed backfill must leave the fallback icon in place"
-    assert thumb._preview.pixmap().isNull()
+    # The old assertion here was "the preview holds no pixmap", which meant
+    # "no poster frame was loaded" only while the fallback was a text emoji.
+    # The fallback is now itself a pixmap, so the thing to check is which
+    # image is showing, not whether one is.
+    assert thumb._fallback_icon == "record", "a failed backfill must leave the fallback icon in place"
+    assert not thumb._preview.pixmap().isNull(), "the fallback icon is not drawn"
 
 
 def test_a_kept_frame_sequence_never_attempts_a_thumbnail(qapp, tmp_path):
@@ -1390,7 +1395,7 @@ def test_a_kept_frame_sequence_never_attempts_a_thumbnail(qapp, tmp_path):
 
     thumb = _RecordingThumb(frames_dir, 1)
 
-    assert thumb._preview.text() == "🎞"
+    assert thumb._fallback_icon == "video", "a kept frame sequence gets its own fallback icon"
 
 
 def test_every_recording_tile_shows_a_play_badge(qapp, isolate_home, tmp_path):
