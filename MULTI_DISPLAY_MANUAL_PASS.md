@@ -133,9 +133,15 @@ Unplug the external. **Restart the app.**
    configurations. Hot-plugging while running is not covered.
 2. **Three or more monitors are not covered.**
 3. **Only Windows.**
-4. **The overlay cannot cover taskbars** — it uses `availableVirtualGeometry`,
-   so a taskbar or notification cannot be selected. Pre-existing, not part of
-   this fix.
+4. ~~The overlay cannot cover taskbars~~ — **fixed in v1.4.0.** `activate()`
+   switched from `availableVirtualGeometry()` to `virtualGeometry()`
+   specifically so a taskbar or notification band can be selected, not just
+   the desktop area excluding it. Confirmed by measurement (not just intent):
+   nothing downstream re-clamps to `availableGeometry()`, and
+   `test_CAP_21_a_selection_extending_into_the_taskbar_band_is_captured`
+   (added alongside this correction) drives a selection into a synthetic
+   reserved band and asserts an uncropped capture — verified to fail against
+   the old `availableVirtualGeometry()` call and pass against the fix.
 
 ## Next Steps
 
