@@ -1645,6 +1645,73 @@ def test_CAP_14b_activate_stores_the_origin_and_hiding_does_not_change_it(qapp, 
         "hiding the overlay must not change the origin the capture pipeline relies on"
 
 
+def test_CAP_21_a_selection_extending_into_the_taskbar_band_is_captured(qapp, monkeypatch):
+    """activate() switched from availableVirtualGeometry() to
+    virtualGeometry() specifically so the overlay covers - and can
+    therefore be dragged across - the taskbar/notification band, not just
+    the desktop area that excludes it (see activate()'s own docstring).
+    CAP-14 already pins which method gets called; this proves the
+    end-to-end behaviour that change exists for: a screen whose
+    availableGeometry() reserves a band that geometry() does not, a
+    selection dragged into that band, and a real, uncropped capture of it -
+    not merely an overlay wide enough to start the drag."""
+    from capture import ScreenshotOverlay
+
+    full = QRect(0, 0, 1920, 1080)
+    available = QRect(0, 0, 1920, 1040)   # bottom 40px reserved, as a real taskbar would be
+
+    class _StubScreenWithTaskbar:
+        def geometry(self):
+            return full
+
+        def virtualGeometry(self):
+            return full
+
+        def availableGeometry(self):
+            return available
+
+        def availableVirtualGeometry(self):
+            return available
+
+        def devicePixelRatio(self):
+            return 1.0
+
+        def grabWindow(self, _wid, x=0, y=0, w=-1, h=-1):
+            pixmap = QPixmap(w, h)
+            pixmap.fill(QColor("red"))
+            return pixmap
+
+    screen = _StubScreenWithTaskbar()
+    monkeypatch.setattr(QApplication, "screens", staticmethod(lambda: [screen]))
+    monkeypatch.setattr(QApplication, "primaryScreen", staticmethod(lambda: screen))
+
+    overlay = ScreenshotOverlay()
+    overlay.activate()
+    qapp.processEvents()
+
+    assert overlay.geometry() == full, (
+        "the overlay must cover the taskbar band (virtualGeometry), not "
+        "stop at availableGeometry - otherwise a drag can never start or "
+        "end there in the first place"
+    )
+
+    captured: list[QPixmap] = []
+    overlay.capture_ready.connect(captured.append)
+    # Entirely inside the reserved band: y=1050..1070 is within full
+    # (height 1080) but outside available (height 1040).
+    overlay.mousePressEvent(_overlay_mouse(100, 1050))
+    overlay.mouseReleaseEvent(_overlay_mouse(300, 1070))
+    QTest.qWait(300)
+
+    assert len(captured) == 1, \
+        "a selection inside the reserved taskbar band must not be silently dropped"
+    result = captured[0]
+    # QRect(point, point) is Qt's inclusive-corner constructor: 201x21, not 200x20.
+    assert (result.width(), result.height()) == (201, 21), \
+        "the capture must cover exactly the dragged region, not be clipped to availableGeometry"
+    overlay.close()
+
+
 def test_CAP_15_the_dead_zone_between_mismatched_screens_is_not_dimmed(qapp, monkeypatch):
     """A virtual-desktop rectangle can include gaps that belong to no screen
     at all - e.g. a laptop panel and an external monitor of different
