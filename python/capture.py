@@ -8,7 +8,7 @@ import time
 from pathlib import Path
 
 from PySide6.QtCore import QObject, QPoint, QRect, QSize, Qt, QTimer, Signal
-from PySide6.QtGui import QColor, QImage, QPainter, QPixmap, QRegion
+from PySide6.QtGui import QColor, QImage, QPainter, QPixmap
 from PySide6.QtWidgets import QApplication, QRubberBand, QWidget
 
 import debug_log
@@ -132,10 +132,119 @@ def _resolve_ffmpeg_exe() -> str:
     return imageio_ffmpeg.get_ffmpeg_exe()
 
 
-class ScreenshotOverlay(QWidget):
+def overlay_device_coverage(
+    screen_geometries: list[QRect], screen_ratios: list[float]
+) -> list[QSize]:
+    """The device-pixel size a per-screen overlay window ends up covering,
+    for each screen, once it is set to that screen's own logical geometry.
+
+    TA-232: a single window spanning every screen can only ever be given
+    one devicePixelRatio - Qt assigns a top-level window the DPR of
+    whichever screen it considers the window's own (the primary's, for a
+    window spanning the whole virtual desktop) - so on any *other* screen
+    it under-covers by exactly that screen's ratio: 1536 logical units
+    painted 1:1 is 1536 device pixels on a panel that is actually 1920
+    wide at 1.25x. Giving each screen its own top-level window, each set to
+    that screen's own `.geometry()`, sidesteps the limitation rather than
+    working around it: Qt then reports *that* screen's own ratio for *that*
+    window, so logical-pixel geometry already implies full device-pixel
+    coverage - which is the claim this function exists to make checkable
+    against literal numbers (not live QScreen objects), so it can run
+    offscreen on single-screen CI.
     """
-    Fullscreen semi-transparent overlay.
-    The user drags a rectangle to define the capture region.
+    return [
+        QSize(round(geometry.width() * ratio), round(geometry.height() * ratio))
+        for geometry, ratio in zip(screen_geometries, screen_ratios)
+    ]
+
+
+class _OverlayWindow(QWidget):
+    """One capture-overlay window, covering exactly one screen.
+
+    Sized to that screen's own `.geometry()` rather than any shared
+    virtual-desktop rectangle, so Qt gives it that screen's own DPR (see
+    `overlay_device_coverage()`) instead of a borrowed one. Mouse and key
+    events are forwarded to the owning `ScreenshotOverlay`, which tracks the
+    drag as one shared selection rather than each window running its own -
+    a drag that starts on one screen and ends on another must still work,
+    and Qt only keeps delivering events to *this* window once the drag has
+    grabbed the mouse (see `ScreenshotOverlay.mousePressEvent`).
+    """
+
+    def __init__(self, owner: "ScreenshotOverlay", screen_index: int, screen_geometry: QRect) -> None:
+        super().__init__()
+        self._owner = owner
+        self.screen_index = screen_index
+        self.screen_geometry = QRect(screen_geometry)
+
+        self.setWindowFlags(
+            Qt.WindowType.FramelessWindowHint
+            | Qt.WindowType.WindowStaysOnTopHint
+            | Qt.WindowType.Tool
+        )
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+        self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, False)
+        self.setCursor(Qt.CursorShape.CrossCursor)
+
+        self._rubber = QRubberBand(QRubberBand.Shape.Rectangle, self)
+        self.setGeometry(self.screen_geometry)
+
+    def show_selection(self, global_rect: QRect) -> None:
+        """Draw this window's own share of a selection rect given in global
+        (virtual-desktop) coordinates - possibly none, if the drag is
+        currently entirely on another screen."""
+        local = global_rect.translated(-self.screen_geometry.topLeft())
+        visible = local.intersected(QRect(QPoint(0, 0), self.screen_geometry.size()))
+        if visible.isEmpty():
+            self._rubber.hide()
+        else:
+            self._rubber.setGeometry(visible)
+            self._rubber.show()
+
+    def clear_selection(self) -> None:
+        self._rubber.hide()
+
+    def mousePressEvent(self, event) -> None:
+        self._owner.mousePressEvent(event)
+
+    def mouseMoveEvent(self, event) -> None:
+        self._owner.mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self, event) -> None:
+        self._owner.mouseReleaseEvent(event)
+
+    def keyPressEvent(self, event) -> None:
+        self._owner.keyPressEvent(event)
+
+    def paintEvent(self, _event) -> None:
+        # No clipping needed: unlike the old single window spanning the
+        # whole virtual desktop, this window's rect *is* one real screen in
+        # full, so every pixel of it is real, selectable area. That also
+        # removes TA-231's unmapped-region case as a side effect - a gap
+        # between mismatched screens is simply not covered by any window at
+        # all now, rather than a region this one window had to know to
+        # exclude from its own dim (see docs/TA-231.md).
+        painter = QPainter(self)
+        painter.fillRect(self.rect(), QColor(0, 0, 0, 80))
+        painter.end()
+
+
+class ScreenshotOverlay(QObject):
+    """
+    Coordinates one semi-transparent `_OverlayWindow` per connected screen.
+    The user drags a rectangle, possibly spanning several of them, to
+    define the capture region.
+
+    One window per screen rather than one window spanning the virtual
+    desktop: see `overlay_device_coverage()` and `_OverlayWindow` for why -
+    in short, a single window can only take one screen's DPR, which
+    under-covered every other screen by its own ratio (TA-232). The drag
+    itself is tracked here, not per-window, because Qt delivers mouse
+    events to one widget at a time and a selection spanning two screens
+    must still move as one rectangle: whichever window receives
+    `mousePressEvent` grabs the mouse for the rest of the drag (see
+    `mousePressEvent` below), and every window's own visible share of the
+    selection is refreshed from here as it changes.
 
     Signals
     -------
@@ -149,82 +258,122 @@ class ScreenshotOverlay(QWidget):
 
     def __init__(self) -> None:
         super().__init__()
-        self.setWindowFlags(
-            Qt.WindowType.FramelessWindowHint
-            | Qt.WindowType.WindowStaysOnTopHint
-            | Qt.WindowType.Tool
-        )
-        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
-        self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, False)
-        self.setCursor(Qt.CursorShape.CrossCursor)
-
-        self._rubber  = QRubberBand(QRubberBand.Shape.Rectangle, self)
+        self._windows: list[_OverlayWindow] = []
         self._origin  = QPoint()
         self._active  = False
-        # The overlay's own top-left in global desktop coordinates, captured
-        # once when activate() actually shows it - see activate() for why
-        # this must not be re-read from self.geometry() later.
-        self._virtual_origin = QPoint()
+        # The window that received mousePressEvent and holds the mouse
+        # grab for the rest of the drag - see mousePressEvent().
+        self._press_window: _OverlayWindow | None = None
 
     # ── Public ──────────────────────────────────────────────────────────────
 
     def activate(self) -> None:
-        """Cover the whole virtual desktop and ask the user to drag a selection.
+        """Show one overlay window per currently connected screen and ask
+        the user to drag a selection.
+
+        Rebuilds the window list from QApplication.screens() every time
+        (rather than reusing whatever was there before) since this overlay
+        is a single instance shared and reused across captures (see
+        launcher.py) and the screen layout can change between them.
 
         showFullScreen() is fullscreen on *a* screen: it silently discards
         whatever geometry setGeometry() just requested and collapses the
         window onto whichever single screen Qt picks. On real multi-monitor
         hardware that left every screen but one not merely mis-grabbed but
-        genuinely uncovered - you could not even click on it. The window is
-        already frameless and always-on-top, so plain show() after
-        setGeometry() covers exactly what it is told to; no fullscreen state,
-        and none of its side effects, is needed.
+        genuinely uncovered - you could not even click on it. Each window
+        here is already frameless and always-on-top, so plain show() after
+        setGeometry() covers exactly what it is told to; no fullscreen
+        state, and none of its side effects, is needed.
 
-        virtualGeometry() rather than availableVirtualGeometry(): the
-        available variant excludes taskbars, so a taskbar or notification
-        could not be selected at all - wrong for an evidence-capture tool.
+        Each window is set to its own screen's `.geometry()`, not
+        `.availableGeometry()`: the available variant excludes taskbars, so
+        a taskbar or notification could not be selected at all - wrong for
+        an evidence-capture tool.
         """
-        virt = QApplication.primaryScreen().virtualGeometry()
-        self.setGeometry(virt)
-        self.show()
-        self.raise_()
-        self.activateWindow()
-        self.setFocus()
+        self._teardown_windows()
+        screens = QApplication.screens()
+        self._windows = [
+            _OverlayWindow(self, index, screen.geometry())
+            for index, screen in enumerate(screens)
+        ]
+        for window in self._windows:
+            window.show()
+        for window in self._windows:
+            window.raise_()
+            if window.geometry() != window.screen_geometry:
+                # Should never happen after the fix above - if it does, this
+                # window is silently not covering the screen it was asked
+                # to, which is exactly this defect. Surfaced rather than
+                # assumed away.
+                print(
+                    f"ScreenshotOverlay: requested geometry {window.screen_geometry} "
+                    f"for screen {window.screen_index} but the window reports "
+                    f"{window.geometry()} - it is not covering that screen.",
+                    file=sys.stderr,
+                )
+        if self._windows:
+            self._windows[0].activateWindow()
+            self._windows[0].setFocus()
 
-        if self.geometry() != virt:
-            # Should never happen after the fix above - if it does, the
-            # overlay is silently not covering what it was asked to, which
-            # is exactly this defect. Surfaced rather than assumed away.
-            print(
-                f"ScreenshotOverlay: requested geometry {virt} but the "
-                f"window reports {self.geometry()} - it is not covering the "
-                f"full virtual desktop.",
-                file=sys.stderr,
-            )
+    def isVisible(self) -> bool:
+        return any(window.isVisible() for window in self._windows)
 
-        # Captured now, while the window is actually showing its real
-        # geometry: _grab runs after hide(), and a hidden or restored window
-        # is not guaranteed to still report the geometry it had while shown.
-        self._virtual_origin = self.geometry().topLeft()
+    def hide(self) -> None:
+        for window in self._windows:
+            window.hide()
+
+    def close(self) -> None:
+        self._teardown_windows()
+
+    # ── Private: window bookkeeping ─────────────────────────────────────────
+
+    def _teardown_windows(self) -> None:
+        for window in self._windows:
+            window.hide()
+            window.deleteLater()
+        self._windows = []
+
+    def _window_at(self, global_point: QPoint) -> "_OverlayWindow | None":
+        for window in self._windows:
+            if window.screen_geometry.contains(global_point):
+                return window
+        # Falls back to the first window rather than None so a press just
+        # outside every screen's exact geometry (rounding at an edge) still
+        # grabs the mouse and can complete a drag, matching
+        # screen_for_rect()'s same fallback-to-index-0 reasoning.
+        return self._windows[0] if self._windows else None
+
+    def _update_selection(self, origin: QPoint, current: QPoint) -> None:
+        rect = QRect(origin, current).normalized()
+        for window in self._windows:
+            window.show_selection(rect)
+
+    def _clear_selection(self) -> None:
+        for window in self._windows:
+            window.clear_selection()
 
     # ── Mouse events ────────────────────────────────────────────────────────
     #
     # Positions are tracked via event.globalPosition() throughout, not
     # event.position(): the rect this produces is then already in the same
     # space as QScreen.geometry(), so _grab needs no translation step at all
-    # and has no dependency on window geometry left to get wrong. Local
-    # (widget-relative) coordinates are derived from it only where Qt
-    # requires them - positioning the rubber band, a child widget.
-
-    def _to_local(self, global_point: QPoint) -> QPoint:
-        return global_point - self._virtual_origin
+    # and has no dependency on window geometry left to get wrong.
 
     def mousePressEvent(self, event) -> None:
         if event.button() == Qt.MouseButton.LeftButton:
             self._origin = event.globalPosition().toPoint()
-            self._rubber.setGeometry(QRect(self._to_local(self._origin), QSize()))
-            self._rubber.show()
             self._active = True
+            # grabMouse() on whichever window the drag started on: Qt
+            # delivers mouse events per-widget, and a cursor crossing from
+            # this screen into another would otherwise stop reaching this
+            # window entirely the moment it left. Grabbing keeps every
+            # subsequent move/release event coming here regardless of which
+            # screen the cursor is physically over, so one shared drag can
+            # still span screens now that each screen is its own window.
+            self._press_window = self._window_at(self._origin)
+            if self._press_window is not None:
+                self._press_window.grabMouse()
+            self._update_selection(self._origin, self._origin)
 
     def mouseMoveEvent(self, event) -> None:
         if self._active:
@@ -235,21 +384,25 @@ class ScreenshotOverlay(QWidget):
             # logical-pixel rounding discontinuity at the boundary) has no
             # measurement from real hardware to confirm it yet. Logged
             # raw, every move, rather than guessed at - see
-            # docs/ta215-225-fix-brief.md.
+            # docs/ta215-225-fix-brief.md. Still fires from here,
+            # unconditionally on every move of the (now possibly
+            # cross-screen) drag, regardless of which window's grabMouse()
+            # is actually receiving the event.
             debug_log.log(
                 f"TA-223 drag move: globalPosition=({current.x()}, {current.y()}) "
                 f"screens={[s.geometry().getRect() for s in QApplication.screens()]}"
             )
-            self._rubber.setGeometry(
-                QRect(self._to_local(self._origin), self._to_local(current)).normalized()
-            )
+            self._update_selection(self._origin, current)
 
     def mouseReleaseEvent(self, event) -> None:
         if event.button() == Qt.MouseButton.LeftButton and self._active:
             self._active = False
             current = event.globalPosition().toPoint()
             rect = QRect(self._origin, current).normalized()   # already global
-            self._rubber.hide()
+            if self._press_window is not None:
+                self._press_window.releaseMouse()
+            self._press_window = None
+            self._clear_selection()
             self.hide()
             if rect.width() > 5 and rect.height() > 5:
                 # Small delay so the overlay fully vanishes before grabbing.
@@ -259,35 +412,15 @@ class ScreenshotOverlay(QWidget):
 
     def keyPressEvent(self, event) -> None:
         if event.key() == Qt.Key.Key_Escape:
-            self._rubber.hide()
+            self._active = False
+            if self._press_window is not None:
+                self._press_window.releaseMouse()
+                self._press_window = None
+            self._clear_selection()
             self.hide()
             self.cancelled.emit()
 
-    # ── Paint ───────────────────────────────────────────────────────────────
-
-    def _covered_region(self) -> QRegion:
-        """The part of the overlay that actually sits over a real screen.
-
-        A virtual-desktop rectangle can include gaps that belong to no
-        screen at all - e.g. two monitors of different heights sitting
-        top-aligned leaves a strip at the bottom of the shorter one. Dimming
-        that strip the same as a real, selectable area invites a selection
-        that silently yields nothing there; excluding it from the dim makes
-        the boundary visible before the user commits to a drag, rather than
-        only as a surprise in the result.
-        """
-        region = QRegion()
-        for screen in QApplication.screens():
-            region += QRegion(screen.geometry().translated(-self._virtual_origin))
-        return region
-
-    def paintEvent(self, _event) -> None:
-        painter = QPainter(self)
-        painter.setClipRegion(self._covered_region())
-        painter.fillRect(self.rect(), QColor(0, 0, 0, 80))
-        painter.end()
-
-    # ── Private ─────────────────────────────────────────────────────────────
+    # ── Private: grab ───────────────────────────────────────────────────────
 
     def _grab(self, global_rect: QRect) -> None:
         """Grab the selected region from whichever screen(s) it actually falls on.

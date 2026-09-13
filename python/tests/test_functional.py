@@ -1586,75 +1586,85 @@ def test_HIS_03b_a_small_but_valid_capture_is_not_deleted(qapp, isolate_home):
 
 # ── 3.1 Capture overlay ──────────────────────────────────────────────────────
 
-def test_CAP_14_activate_keeps_the_geometry_it_was_given(qapp, monkeypatch):
-    """Regression test for the root cause behind issue #1's real-hardware
-    symptoms: showFullScreen() silently discards whatever geometry
-    setGeometry() just requested and sizes the window to fullscreen on *a*
-    screen instead - the real, single one the underlying platform actually
-    has, not the virtual desktop `virt` describes. On real two-monitor
-    hardware that left one screen not merely mis-grabbed but genuinely
-    unreachable - you could not even click on it.
-
-    Reproducible with the one real screen the offscreen platform provides:
-    virtualGeometry() is mocked to look like the reported two-monitor
-    hardware, while showFullScreen()'s platform integration sizes the window
-    to the real, unmocked screen regardless - exactly the divergence it
-    produces on genuine multi-monitor hardware. This fails against
-    showFullScreen() and passes against plain show()."""
-    from PySide6.QtGui import QScreen
+def test_CAP_14_activate_gives_each_screen_its_own_window_at_its_own_geometry(qapp, monkeypatch):
+    """TA-232: the root cause of the HiDPI under-coverage was a *single*
+    window sized to `virtualGeometry()` - Qt can only give one top-level
+    window one devicePixelRatio (the primary's), so any other screen was
+    under-covered by exactly its own DPI ratio (1536 logical units painted
+    1:1 on a laptop panel that is actually 1920 device pixels wide at
+    1.25x). The fix is one `_OverlayWindow` per screen, each set to that
+    screen's own `.geometry()` so it inherits that screen's own DPR rather
+    than a borrowed one - this proves activate() actually builds that,
+    reachable even on the offscreen platform's one real screen because
+    QApplication.screens() is stubbed rather than relying on a second
+    monitor."""
     from capture import ScreenshotOverlay
 
-    reported_hardware = QRect(-1920, 0, 3840, 1032)
-    monkeypatch.setattr(QScreen, "virtualGeometry", lambda self: reported_hardware)
+    laptop = QRect(-1920, 0, 1536, 864)
+    external = QRect(0, 0, 1920, 1080)
+
+    class _Stub:
+        def __init__(self, geometry):
+            self._geometry = geometry
+
+        def geometry(self):
+            return self._geometry
+
+    monkeypatch.setattr(QApplication, "screens", staticmethod(lambda: [_Stub(laptop), _Stub(external)]))
 
     overlay = ScreenshotOverlay()
     overlay.activate()
-    # showFullScreen()'s platform-level override is applied while processing
-    # the resulting show/resize events, not synchronously inside the call -
-    # asserting immediately after activate() would pass against the buggy
-    # code too, for the wrong reason (the requested geometry hadn't been
-    # overridden *yet*, not because it was never overridden).
     qapp.processEvents()
 
-    assert overlay.geometry() == reported_hardware, (
-        f"requested {reported_hardware} but the overlay reports "
-        f"{overlay.geometry()} - it is not covering the full virtual desktop"
+    assert len(overlay._windows) == 2, "one overlay window per connected screen, not one spanning both"
+    assert overlay._windows[0].geometry() == laptop, (
+        f"requested {laptop} for the laptop's own window but it reports "
+        f"{overlay._windows[0].geometry()} - it is not covering that screen"
     )
-    overlay.hide()
+    assert overlay._windows[1].geometry() == external
+    overlay.close()
 
 
-def test_CAP_14b_activate_stores_the_origin_and_hiding_does_not_change_it(qapp, monkeypatch):
-    """_grab's correctness depends on the mouse-event pipeline using the
-    origin captured at activate() time, not geometry read back from the
-    widget after it has been hidden - a hidden or restored window is not
-    guaranteed to still report the geometry it had while shown."""
-    from PySide6.QtGui import QScreen
+def test_CAP_14b_a_windows_screen_geometry_is_fixed_at_construction_not_reread_after_hiding(qapp, monkeypatch):
+    """_grab's correctness depends on each window's own screen geometry,
+    not geometry read back from the widget after it has been hidden - a
+    hidden or restored window is not guaranteed to still report the
+    geometry it had while shown. Each `_OverlayWindow` now stores
+    `screen_geometry` as a plain attribute captured once at construction,
+    so this holds structurally rather than needing activate()-time
+    workaround."""
     from capture import ScreenshotOverlay
 
-    reported_hardware = QRect(-1920, 0, 3840, 1032)
-    monkeypatch.setattr(QScreen, "virtualGeometry", lambda self: reported_hardware)
+    laptop = QRect(-1920, 0, 1536, 864)
+
+    class _Stub:
+        def geometry(self):
+            return laptop
+
+    monkeypatch.setattr(QApplication, "screens", staticmethod(lambda: [_Stub()]))
 
     overlay = ScreenshotOverlay()
     overlay.activate()
+    window = overlay._windows[0]
 
-    assert overlay._virtual_origin == reported_hardware.topLeft()
+    assert window.screen_geometry == laptop
 
-    overlay.hide()
+    window.hide()
 
-    assert overlay._virtual_origin == reported_hardware.topLeft(), \
-        "hiding the overlay must not change the origin the capture pipeline relies on"
+    assert window.screen_geometry == laptop, \
+        "hiding a window must not change the geometry the capture pipeline relies on"
+    overlay.close()
 
 
 def test_CAP_21_a_selection_extending_into_the_taskbar_band_is_captured(qapp, monkeypatch):
-    """activate() switched from availableVirtualGeometry() to
-    virtualGeometry() specifically so the overlay covers - and can
-    therefore be dragged across - the taskbar/notification band, not just
-    the desktop area that excludes it (see activate()'s own docstring).
-    CAP-14 already pins which method gets called; this proves the
-    end-to-end behaviour that change exists for: a screen whose
-    availableGeometry() reserves a band that geometry() does not, a
-    selection dragged into that band, and a real, uncropped capture of it -
-    not merely an overlay wide enough to start the drag."""
+    """Each per-screen window is set to that screen's own geometry(), not
+    availableGeometry() - so the overlay covers, and can be dragged
+    across, the taskbar/notification band rather than stopping at the
+    desktop area that excludes it (see activate()'s own docstring). Proves
+    the end-to-end behaviour: a screen whose availableGeometry() reserves a
+    band that geometry() does not, a selection dragged into that band, and
+    a real, uncropped capture of it - not merely a window wide enough to
+    start the drag."""
     from capture import ScreenshotOverlay
 
     full = QRect(0, 0, 1920, 1080)
@@ -1664,13 +1674,7 @@ def test_CAP_21_a_selection_extending_into_the_taskbar_band_is_captured(qapp, mo
         def geometry(self):
             return full
 
-        def virtualGeometry(self):
-            return full
-
         def availableGeometry(self):
-            return available
-
-        def availableVirtualGeometry(self):
             return available
 
         def devicePixelRatio(self):
@@ -1689,9 +1693,9 @@ def test_CAP_21_a_selection_extending_into_the_taskbar_band_is_captured(qapp, mo
     overlay.activate()
     qapp.processEvents()
 
-    assert overlay.geometry() == full, (
-        "the overlay must cover the taskbar band (virtualGeometry), not "
-        "stop at availableGeometry - otherwise a drag can never start or "
+    assert overlay._windows[0].geometry() == full, (
+        "the overlay window must cover the taskbar band (geometry()), not "
+        "stop at availableGeometry() - otherwise a drag can never start or "
         "end there in the first place"
     )
 
@@ -1712,12 +1716,16 @@ def test_CAP_21_a_selection_extending_into_the_taskbar_band_is_captured(qapp, mo
     overlay.close()
 
 
-def test_CAP_15_the_dead_zone_between_mismatched_screens_is_not_dimmed(qapp, monkeypatch):
+def test_CAP_15_the_dead_zone_between_mismatched_screens_is_covered_by_no_window(qapp, monkeypatch):
     """A virtual-desktop rectangle can include gaps that belong to no screen
     at all - e.g. a laptop panel and an external monitor of different
-    heights, top-aligned. Dimming that gap the same as a real, selectable
-    area invites a drag that silently yields nothing there; it must be
-    visibly excluded before the user commits to a selection."""
+    heights, top-aligned. Under TA-232's per-screen-window design there is
+    nothing to separately exclude from the dim: no window's geometry
+    reaches that gap in the first place, so drawing every window in full
+    (no clip region needed) already leaves it undimmed and unselectable in
+    a way that is visible before the user commits to a drag - see
+    docs/TA-231.md for the recorded decision that this removes TA-231's
+    unmapped-region case as a side effect of this fix."""
     from capture import ScreenshotOverlay
 
     laptop = QRect(-1920, 0, 1536, 864)      # logical x: -1920..-384
@@ -1727,17 +1735,16 @@ def test_CAP_15_the_dead_zone_between_mismatched_screens_is_not_dimmed(qapp, mon
     )
 
     overlay = ScreenshotOverlay()
-    overlay._virtual_origin = QPoint(-1920, 0)
+    overlay.activate()
 
-    region = overlay._covered_region()
+    dead_zone = QPoint(-300, 900)    # -384 < -300 < 0, and below the laptop's own y=864 bottom edge
+    on_laptop = QPoint(-1000, 100)
+    on_external = QPoint(500, 100)
 
-    dead_zone = overlay._to_local(QPoint(-300, 100))   # -384 < -300 < 0: no screen here
-    on_laptop = overlay._to_local(QPoint(-1000, 100))
-    on_external = overlay._to_local(QPoint(500, 100))
-
-    assert not region.contains(dead_zone), "the gap between the two screens must not be dimmed"
-    assert region.contains(on_laptop)
-    assert region.contains(on_external)
+    covering = [w for w in overlay._windows if w.screen_geometry.contains(dead_zone)]
+    assert covering == [], "the gap between the two screens must be covered by no overlay window"
+    assert any(w.screen_geometry.contains(on_laptop) for w in overlay._windows)
+    assert any(w.screen_geometry.contains(on_external) for w in overlay._windows)
     overlay.close()
 
 
@@ -2030,10 +2037,9 @@ def test_CAP_11_a_negative_origin_overlay_still_grabs_the_secondary(qapp, monkey
     monkeypatch.setattr(QApplication, "screens", staticmethod(lambda: [primary, secondary]))
     monkeypatch.setattr(QApplication, "primaryScreen", staticmethod(lambda: primary))
 
-    # As activate() would set on this layout: the virtual desktop's origin
-    # is the secondary screen's top-left.
+    # The secondary screen's own top-left - what a real drag's
+    # globalPosition() is measured against on this layout.
     origin = QPoint(-1920, 0)
-    overlay._virtual_origin = origin
 
     captured: list[QPixmap] = []
     overlay.capture_ready.connect(captured.append)
