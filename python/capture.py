@@ -505,9 +505,18 @@ class ScreenshotOverlay(QObject):
         ratio = composite_ratio(pieces, [screen.devicePixelRatio() for screen in screens])
         size = device_result_size(pieces, ratio)
 
-        result = QPixmap(size)
-        result.fill(Qt.GlobalColor.transparent)
-        painter = QPainter(result)
+        # TA-232 HW-1: QPixmap(size) does not reliably carry an alpha
+        # channel on every platform/build, so fill(transparent) below
+        # silently produced opaque black instead of real transparency -
+        # confirmed on hardware as a solid black rectangle exactly where a
+        # short piece (e.g. one screen's edge clipping a piece shorter than
+        # its neighbour) left the canvas unpainted. QImage in an explicit
+        # ARGB format always has a real alpha channel, so build the canvas
+        # there and convert once at the end instead of filling a QPixmap
+        # directly.
+        canvas = QImage(size, QImage.Format.Format_ARGB32_Premultiplied)
+        canvas.fill(Qt.GlobalColor.transparent)
+        painter = QPainter(canvas)
         for piece in pieces:
             screen = screens[piece.screen_index]
             local = piece.screen_local_rect
@@ -516,10 +525,28 @@ class ScreenshotOverlay(QObject):
             # destination is the same region scaled by `ratio`, so a piece
             # from a screen already at `ratio` is a 1:1 blit with no
             # resampling at all.
-            painter.drawPixmap(
-                to_device_rect(piece.dest, local.size(), ratio), grabbed, grabbed.rect()
+            dest_rect = to_device_rect(piece.dest, local.size(), ratio)
+            # TA-239: a spanning capture across mixed-DPI screens showed a
+            # ~5px seam at the join in the saved PNG. The coordinate math
+            # that produces dest_rect is now covered by an exhaustive
+            # synthetic test (test_TA_239_two_piece_join_holds_at_random_non_round_widths
+            # in test_screen_geometry.py) and cannot itself explain a seam -
+            # the two remaining candidates are (a) grabWindow() not
+            # returning exactly local.size()*ratio device pixels on real
+            # hardware, and (b) drawPixmap() blending at the destination
+            # edge even for nominally-adjacent rects. This logs exactly
+            # what each piece actually measures, so a real two-screen drag
+            # can show which. See docs/ISSUE-TA-239.md.
+            debug_log.log(
+                f"TA-239 grab piece: screen_index={piece.screen_index} "
+                f"local_rect={local.getRect()} ratio={ratio} "
+                f"dest_rect={dest_rect.getRect()} "
+                f"expected_grabbed_size=({round(local.width() * ratio)}, {round(local.height() * ratio)}) "
+                f"actual_grabbed_size=({grabbed.width()}, {grabbed.height()})"
             )
+            painter.drawPixmap(dest_rect, grabbed, grabbed.rect())
         painter.end()
+        result = QPixmap.fromImage(canvas)
         result.setDevicePixelRatio(1.0)
 
         self.capture_ready.emit(result)

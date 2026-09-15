@@ -1996,6 +1996,49 @@ def test_DSP_08_grab_closes_the_gap_between_two_screens(qapp, monkeypatch):
     overlay.close()
 
 
+def test_TA232_HW1_unpainted_corner_between_unequal_height_pieces_stays_transparent(
+    qapp, monkeypatch
+):
+    """TA-232 HW-1, real hardware: a drag across two side-by-side screens of
+    unequal height left one piece shorter than the other, and the resulting
+    unpainted corner rendered as a solid opaque black rectangle in the saved
+    PNG instead of transparency - confirmed via Pillow (mode RGB, sampled
+    pixel (0,0,0,255)). Filling a bare QPixmap(size) with
+    Qt.GlobalColor.transparent does not reliably carry a real alpha channel
+    on every platform/build; the fix builds the canvas as an explicit
+    QImage(Format_ARGB32_Premultiplied), which always does.
+
+    This also re-verifies TA-231 (closing the gap between screens leaves an
+    unpainted corner, not a coordinate-accurate hole) with a real alpha
+    check rather than trusting it was resolved as a side effect."""
+    from capture import ScreenshotOverlay
+
+    overlay = ScreenshotOverlay()
+    short_left = _StubScreen(QRect(0, 0, 1000, 200), "red")
+    tall_right = _StubScreen(QRect(1000, 0, 1000, 800), "blue")
+    monkeypatch.setattr(QApplication, "screens", staticmethod(lambda: [short_left, tall_right]))
+    monkeypatch.setattr(QApplication, "primaryScreen", staticmethod(lambda: short_left))
+
+    captured: list[QPixmap] = []
+    overlay.capture_ready.connect(captured.append)
+    # Left intersection is clipped to 100px tall by short_left's bottom
+    # edge (y=100..200); right intersection is the full 200px (y=100..300).
+    overlay._grab(QRect(800, 100, 600, 200))
+
+    assert len(captured) == 1
+    result = captured[0]
+    assert (result.width(), result.height()) == (600, 200)
+    image = result.toImage()
+    # Below the short piece, left of the tall one: painted by neither.
+    assert image.pixelColor(100, 150).alpha() == 0, (
+        "the unpainted corner must be transparent, not opaque black"
+    )
+    # Sanity: both pieces themselves are still actually painted.
+    assert image.pixelColor(100, 50).alpha() > 0, "short piece unpainted"
+    assert image.pixelColor(400, 150).alpha() > 0, "tall piece unpainted"
+    overlay.close()
+
+
 def test_DSP_04_grab_stacks_vertically_without_a_band(qapp, monkeypatch):
     """DSP-04, reported after e201cdb: two screens stacked vertically (same
     x-range, separated in y) were still packed side by side, since _grab()
