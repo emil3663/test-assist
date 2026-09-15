@@ -5,9 +5,11 @@ This covers the **browser build** — the vanilla-JS app at the repo root
 https://emil3663.github.io/test-assist/. If you're picking up front-end
 work, this is almost certainly the codebase you want.
 
-The **desktop build** (`python/`, PySide6/Qt, Windows-only) is a separate
-codebase with its own test suite and its own `docs/DESKTOP_TEST_PLAN.md` —
-not in scope here unless you're specifically asked to touch it.
+The **desktop build** (`python/`, PySide6/Qt) is a separate codebase with
+its own test suite and its own `docs/DESKTOP_TEST_PLAN.md` — not in scope
+here unless you're specifically asked to touch it. Windows is its primary
+target and the only one with a packaged release; it also runs from source
+on macOS and Linux, and builds a macOS `.app` via `python/build.sh`.
 
 ## Prerequisites
 
