@@ -165,6 +165,35 @@ def test_CRP_03_a_tiny_crop_is_ignored(canvas):
     assert canvas.export_pixmap().width() == before
 
 
+def test_TA231_export_pixmap_preserves_a_transparent_region(qapp):
+    """TA-231: export_pixmap() built its result as a bare QPixmap(size) with
+    no fill at all, the second, independent instance of the exact bug
+    1df09f9 fixed in capture.py::_grab() (TA-232 HW-1). A bare QPixmap(size)
+    is uninitialised memory, not guaranteed-opaque and not guaranteed to
+    carry a real alpha channel, so any transparent region in the source
+    image (e.g. a screenshot with an unpainted corner, per TA-232 HW-1)
+    composited onto garbage instead of staying transparent through Save
+    PNG / clipboard copy / history snapshot. The fix mirrors _grab()'s
+    pattern: build the canvas as an explicit
+    QImage(Format_ARGB32_Premultiplied), fill it transparent, then convert."""
+    from PySide6.QtGui import QPainter
+
+    source = QImage(QSize(200, 160), QImage.Format.Format_ARGB32_Premultiplied)
+    source.fill(Qt.GlobalColor.transparent)
+    painter = QPainter(source)
+    painter.fillRect(0, 0, 100, 160, QColor("#3a5a8a"))
+    painter.end()
+
+    canvas = AnnotationCanvas()
+    canvas.set_pixmap(QPixmap.fromImage(source))
+
+    result = canvas.export_pixmap().toImage()
+    assert result.pixelColor(150, 80).alpha() == 0, (
+        "the untouched right half must stay transparent, not garbage/opaque"
+    )
+    assert result.pixelColor(50, 80).alpha() > 0, "painted left half unpainted"
+
+
 # ── 3.5 Blur ─────────────────────────────────────────────────────────────────
 
 def test_BLR_01_blur_is_recorded_as_an_annotation(canvas):
