@@ -14,7 +14,7 @@ mix-up).
 | HW-4 | Drag a selection starting on one screen, ending on the other | Single composited image, no truncation, no duplication — the cross-screen `grabMouse()` handoff working for real, not just in the stubbed test | ⬜ blocked this pass (see note) |
 | HW-5 | Drag slowly across the laptop/external boundary, watching closely | Selection rectangle tracks the cursor smoothly, no visible jump or resize at the crossing (`TA-223` — has never been confirmed on hardware; debug logging is already in place in `capture.py` if this needs a closer look after) | ⬜ |
 | HW-6 | Watch the capture cursor/reticle during a normal drag | Tracks the region actually being drawn (`TA-233` — evidence so far was hand-annotated, not measured; check whether this reads as resolved now or still needs its own fix) | ⬜ |
-| HW-7 | On the **external** screen only: full quick capture over the taskbar clock, on a fresh launch of the confirmed build, **no restart in between** | Captures the clock in full on the first attempt (2026-09-12 handover §8 — a *different* screen and a *different* symptom shape than TA-232, never re-tested on a build known to be correct) | ⬜ |
+| HW-7 | On the **external** screen only: full quick capture over the taskbar clock, on a fresh launch of the confirmed build, **no restart in between** | Captures the clock in full on the first attempt (2026-09-12 handover §8 — a *different* screen and a *different* symptom shape than TA-232, never re-tested on a build known to be correct) | ✅ PASS (2026-09-15, measured) |
 
 If HW-1 through HW-4 all pass, TA-232's Acceptance section in `docs/ISSUE-TA-232.md`
 is fully met — that's the point where the commit trailer becomes `Closes #21`
@@ -88,3 +88,49 @@ Full account in `SESSION_HANDOVER_2026-09-13.md` §9. Summary:
   sometimes didn't register a click at all, with no visible error. Clicking
   the TA icon first, then the camera icon, in the same short burst (no
   other clicks in between) was the only sequence that worked reliably.
+
+## 2026-09-15 pass — HW-7 result, and a focus/z-order observation that may reframe TA-240
+
+**HW-7: PASS, measured.** Test Assist was fully closed (confirmed absent from
+Task Manager's process list, sub-processes included) and relaunched fresh —
+no prior captures, no restart in between launch and capture. On the very
+first quick-capture, the user dragged a selection over the external screen's
+taskbar clock and saved it (`Documents\Test Assist\test-assist-1789503144.png`,
+199×90). Pillow bounding-box of the clock/date text's bright pixels: (127,54)
+to (187,79) — 11px clear margin to the right edge, 10px clear margin to the
+bottom edge, nothing touching any border. The clock ("22:12") and date
+("2026/09/15") are both captured in full, not clipped. This does not
+reproduce the 2026-09-12 handover §8 theory (stale display geometry from
+before the external was connected persisting until restart) on this build.
+
+**Why this one had to be done by the user, not remotely:** the remote
+computer-use bridge's permission model gives Windows shell apps (File
+Explorer, and by extension the taskbar it owns) a permanently click-only
+tier — no drag gestures — as a deliberate restriction, not a bug. Since the
+capture region has to end on the taskbar, the drag itself can't be issued
+through the bridge. Noted here in case a future remote pass hits the same
+wall.
+
+**Observation, not yet a confirmed diagnosis — logged for whoever picks up
+`TA-240`:** during this same session, the remote bridge also could not get
+**Task Manager** (an unrelated Windows shell app, not part of Test Assist)
+to respond to *any* interaction — row selection, column-header sort,
+End Task, minimize, or close all silently no-opped across roughly a dozen
+attempts, while live data in the window kept refreshing normally. Switching
+to Test Assist's own window on the external monitor and clicking inside it
+did not transfer OS focus either: a subsequent keystroke was still rejected
+with "Taskmgr is granted at tier click" as if it were still the foreground
+window. Separately, the user reported firsthand (this session, not
+reproduced by Claude) that neither Test Assist's floating-toolbar icon nor
+its taskbar icon, **nor Notepad's taskbar icon**, would bring their window
+to the front on the same screen. Notepad is not part of this codebase, which
+points at something at the session/OS level — possibly the Claude desktop
+app's own window holding foreground/focus during a bridged session — rather
+than a defect in Test Assist's own window-raise code. `TA-240` was filed
+assuming a Test Assist-specific cause (`activateWindow()` / `raise_()` /
+`SetForegroundWindow` in the canvas or floating-toolbar code); this
+observation doesn't rule that out, but the Notepad data point means it
+shouldn't be assumed either until someone reproduces TA-240's symptom
+**without** a Claude-driven session in the picture at all (person at the
+keyboard, Claude Desktop not running or not bridged). Left as evidence, not
+acted on — no code touched here per the working agreement.
