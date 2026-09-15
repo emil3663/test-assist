@@ -79,10 +79,23 @@ class FloatingLauncher(QWidget):
         }
 
         # Window chrome
+        # WindowDoesNotAcceptFocus (TA-241): without it, clicking any button
+        # here - including the TA icon - makes this Tool window briefly the
+        # OS-active window on Windows, since normal click-to-focus applies to
+        # Tool windows same as any other. bring_forward()'s minimize toggle
+        # (TA-220) reads editor.isActiveWindow() synchronously inside that
+        # same click's handler, so it saw False and re-raised instead of
+        # minimizing an editor that was, from the user's perspective, already
+        # open and frontmost. The launcher has no keyboard input of its own
+        # (TA-211 moved key handling to OS-level RegisterHotKey specifically
+        # because a focused-window handler can't satisfy "capture whatever
+        # else has focus"), so refusing activation costs it nothing - it
+        # still receives mouse clicks normally.
         self.setWindowFlags(
             Qt.WindowType.FramelessWindowHint
             | Qt.WindowType.WindowStaysOnTopHint
             | Qt.WindowType.Tool
+            | Qt.WindowType.WindowDoesNotAcceptFocus
         )
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self.setFixedWidth(280)

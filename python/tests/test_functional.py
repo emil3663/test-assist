@@ -1479,6 +1479,22 @@ def test_LCH_07_launcher_is_always_on_top(qapp, editor):
     assert launcher.windowFlags() & Qt.WindowType.WindowStaysOnTopHint
 
 
+def test_TA241_launcher_does_not_accept_focus(qapp, editor):
+    """TA-241: clicking a launcher button (e.g. the TA icon) must not make
+    the launcher itself the OS-active window, or bring_forward()'s minimize
+    toggle (TA-220) reads editor.isActiveWindow() as False at exactly the
+    moment it's checking whether the editor - actually still frontmost from
+    the user's point of view - was already open, and re-raises instead of
+    minimizing. WindowDoesNotAcceptFocus is the flag that stops a Tool
+    window from taking activation on click; this pins that it's set rather
+    than relying on a real two-window OS focus test, which this offscreen
+    suite can't drive."""
+    from launcher import FloatingLauncher
+
+    launcher = FloatingLauncher(editor)
+    assert launcher.windowFlags() & Qt.WindowType.WindowDoesNotAcceptFocus
+
+
 # ── 3.13 Keyboard shortcuts ──────────────────────────────────────────────────
 
 @pytest.mark.parametrize("key,tool", [
