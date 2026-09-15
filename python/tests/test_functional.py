@@ -2010,7 +2010,23 @@ def test_TA232_HW1_unpainted_corner_between_unequal_height_pieces_stays_transpar
 
     This also re-verifies TA-231 (closing the gap between screens leaves an
     unpainted corner, not a coordinate-accurate hole) with a real alpha
-    check rather than trusting it was resolved as a side effect."""
+    check rather than trusting it was resolved as a side effect.
+
+    Caveat, checked directly (stashed the fix and re-ran this test alone):
+    on this dev machine's Qt build, a bare QPixmap(size) already returns a
+    pixmap with a working alpha channel, so the exact defect from the
+    hardware evidence does not reproduce here - this test passes both
+    before and after the fix on this platform. It still earns its place as
+    a pin against regressing to the less-safe default (the assertion right
+    below - QImage(..., Format_ARGB32_Premultiplied).hasAlphaChannel() - is
+    a Qt format guarantee, not a platform-dependent default, which is
+    exactly the property the fix relies on and a bare QPixmap does not
+    promise). Reproducing the original defect itself needs the actual
+    deployed build's platform/Qt configuration, not this stub-screen test."""
+    assert QImage(QSize(1, 1), QImage.Format.Format_ARGB32_Premultiplied).hasAlphaChannel(), (
+        "Format_ARGB32_Premultiplied is documented to always carry alpha - "
+        "if this ever fails, the fix's core assumption no longer holds"
+    )
     from capture import ScreenshotOverlay
 
     overlay = ScreenshotOverlay()
