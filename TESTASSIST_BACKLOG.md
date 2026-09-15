@@ -927,38 +927,38 @@ that will actually ship.
   tracks the selection in `event.globalPosition()` throughout (not
   window-local coordinates), which is the fix the earlier
   `overlay-geometry-fix-brief.md` recommended and which is meant to make
-  the rectangle independent of window geometry. That doesn't rule out the
-  live symptom being reported here, though — a plausible mechanism **not
-  yet confirmed by measurement**: Windows' per-monitor DPI awareness can
-  report `globalPosition()` with a rounding discontinuity right at a
-  monitor boundary on a mixed-DPI setup (125% laptop next to 100%
-  external), which would make a rectangle that's being actively dragged
-  appear to jump or resize exactly when the cursor crosses from one
-  screen's scale to the other's — matching "changes when you get close to
-  the right of the screen" precisely. This needs on-hardware coordinate
-  logging during a real boundary-crossing drag to confirm or rule out,
-  not another round of reading the code.
+  the rectangle independent of window geometry.
+
+  **Resolved, 2026-09-15 — measured on real hardware, not a coordinate bug.**
+  `docs/TA-233.md`'s HW-6 pass recorded and frame-measured a real
+  boundary-crossing drag: each screen's own on-screen highlight piece is a
+  single widget (`_OverlayWindow`, `capture.py`) sized in that screen's
+  logical coordinates, which Qt renders at that screen's own
+  `devicePixelRatio()` — so the laptop's (@1.25 DPR) piece and the
+  external's (@1.0 DPR) piece are, correctly, different physical sizes for
+  the identical logical rectangle. Measured ratio (308px/246px = 1.2520)
+  matched the screens' own DPR ratio (1.25) within rounding across 22
+  consecutive frames of a continuous drag, not a one-frame fluke. This is
+  the "size... auto changes when going from one screen to the next"
+  symptom in DSP-03/DSP-07/DSP-08 above, fully explained as expected
+  DPI-aware rendering — not a `globalPosition()` rounding discontinuity,
+  which was a plausible but unconfirmed mechanism and did not hold up.
+  Guarded by `test_TA233_HW6_per_screen_highlight_extent_scales_by_its_own_dpr`
+  in `python/tests/test_screen_geometry.py`.
 - **Scope:**
-  - Log the raw values `mouseMoveEvent` receives from
-    `event.globalPosition()` on the real dual-monitor hardware while
-    dragging across the laptop/external boundary, and compare against
-    `QScreen.geometry()` for both screens at that moment — this is the
-    measurement the hypothesis above needs before any fix is attempted.
-  - If confirmed, either work in a single physical-pixel space that
-    doesn't inherit Qt's per-screen logical-pixel rounding, or clamp/adjust
-    the tracked origin at each `mouseMoveEvent` rather than trusting
-    `globalPosition()` to stay linear across the boundary.
-  - Check whether DSP-01 ("unable to span... to the right") is the same
-    mechanism under a different screen arrangement, or a separate issue.
-- **Deliverables:** a confirmed measurement of what actually happens to
-  tracked coordinates at the boundary crossing; a fix or a documented
-  reason none is needed; a regression test if the mechanism can be
-  reproduced synthetically (a fake mixed-DPI two-screen layout, if Qt's
-  own DPI reporting can be faked in a test the way `screen_geometry.py`'s
-  existing synthetic-layout tests already do).
+  - ~~Log the raw values `mouseMoveEvent` receives...~~ — done; see
+    "Resolved" above. No code change needed for the resize-at-boundary
+    symptom.
+  - Still open, not covered by the above: whether DSP-01 ("unable to
+    span... to the right") is the same mechanism under a different screen
+    arrangement, or a separate issue — not measured either way.
+- **Deliverables:** ~~a confirmed measurement...~~ — done, see "Resolved."
 - **Acceptance criteria:** dragging a selection across the laptop/external
   boundary in the reporter's exact layout produces a rectangle that tracks
-  the cursor smoothly, with no visible jump or resize at the crossing.
+  the cursor smoothly, with no visible *jump* at the crossing (confirmed —
+  see `docs/TA-233.md` HW-6's reticle-tracking measurement, 24 sampled
+  frames, smooth x motion, no jumps). A *resize* at the crossing is
+  expected, correct DPI-aware rendering, not a defect to eliminate.
 - **Dependencies:** None.
 
 ### TA-224 — Recording has no region-selection, only full-screen

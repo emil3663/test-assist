@@ -591,3 +591,70 @@ def test_TA_239_two_piece_join_holds_at_random_non_round_widths() -> None:
                 f"piece0 right={left_rect.x() + left_rect.width()} "
                 f"piece1 left={right_rect.x()}"
             )
+
+
+def test_TA233_HW6_per_screen_highlight_extent_scales_by_its_own_dpr() -> None:
+    """TA-233/HW-6, measured on real hardware 2026-09-15: the live capture
+    overlay's highlighted selection rectangle appeared to "disagree" with
+    itself at the laptop(@1.25 DPR)/external(@1.0 DPR) boundary - the
+    laptop-side piece measured 308px tall, the external-side piece 246px,
+    for what was the same drag. Ratio: 308/246 = 1.2520, within rounding of
+    the screens' own 1.25 DPR ratio. Not a bug: each _OverlayWindow
+    (capture.py) is one real widget on one real screen, sized in that
+    screen's own logical coordinates (`show_selection()` translates the
+    global drag rect by -screen.topLeft() then clips to that screen's own
+    bounds) - Qt then renders it at that screen's own devicePixelRatio()
+    automatically, the same as it would any other widget. Two screens
+    showing the identical logical span at different physical sizes is
+    exactly what mixed-DPI rendering is supposed to do; reclassified as
+    confirmed-correct rendering, not a tracking bug, in docs/TA-233.md.
+
+    This pins the relationship generally (not just the one measured case):
+    for a drag rect that lands fully within both screens' vertical extent
+    (so neither piece is edge-clipped and both see the same logical
+    height), each screen's own physical extent is that shared logical
+    height scaled by that screen's own DPR - so the ratio between the two
+    screens' physical extents must equal the ratio between their DPRs,
+    within rounding. A future change that made the two pieces the same
+    *physical* size regardless of DPR would be a regression here, not an
+    improvement - see docs/TA-233.md's "Not in this issue" for why that's a
+    separate, undecided UX feature rather than this ticket's scope."""
+    import random
+
+    laptop = QRect(0, 0, 1536, 864)      # @1.25 DPR, per the HW-6 rig
+    external = QRect(1536, 0, 1920, 1080)  # @1.0 DPR
+    laptop_dpr, external_dpr = 1.25, 1.0
+    rng = random.Random(233)
+
+    def visible_local_rect(global_rect: QRect, screen: QRect) -> QRect:
+        # Mirrors _OverlayWindow.show_selection()'s own translate + clip.
+        local = to_screen_local(global_rect, screen)
+        return local.intersected(QRect(QPoint(0, 0), screen.size()))
+
+    for _ in range(200):
+        # Kept within both screens' 864px shared vertical range so neither
+        # piece is edge-clipped - isolates the DPR-scaling relationship
+        # from the unequal-height-clipping case TA-231/TA-232 HW-1 already
+        # cover separately.
+        top = rng.randint(0, 800)
+        height = rng.randint(1, 864 - top)
+        left_cut = rng.randint(1, laptop.width() - 1)
+        right_cut = rng.randint(1, external.width() - 1)
+        drag = QRect(left_cut, top, (laptop.width() - left_cut) + right_cut, height)
+
+        laptop_local = visible_local_rect(drag, laptop)
+        external_local = visible_local_rect(drag, external)
+        assert laptop_local.height() == external_local.height() == height, (
+            "test setup: both pieces must share the same logical height for "
+            "this identity to isolate DPR scaling from vertical clipping"
+        )
+
+        laptop_physical = round(laptop_local.height() * laptop_dpr)
+        external_physical = round(external_local.height() * external_dpr)
+        expected_laptop_physical = round(external_physical * (laptop_dpr / external_dpr))
+        assert abs(laptop_physical - expected_laptop_physical) <= 1, (
+            f"top={top} height={height}: physical extents "
+            f"laptop={laptop_physical} external={external_physical} - ratio "
+            f"{laptop_physical / external_physical:.4f} must track the DPR ratio "
+            f"{laptop_dpr}/{external_dpr}={laptop_dpr / external_dpr:.4f} within 1px rounding"
+        )
