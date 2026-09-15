@@ -548,3 +548,46 @@ def test_an_empty_plan_yields_a_usable_ratio_and_size() -> None:
     meaningless ratio or build a negative-sized pixmap."""
     assert composite_ratio([], [2.0]) == 1.0
     assert device_result_size([], 1.0) == QSize(0, 0)
+
+
+def test_TA_239_two_piece_join_holds_at_random_non_round_widths() -> None:
+    """TA-239: a spanning capture on real hardware (laptop 1536x864@125%,
+    external 1920x1080@100%) left a measured ~5px seam at the join. The
+    test above (test_device_pieces_tile_the_result_without_gap_or_overlap)
+    already proves the two-piece case is gap-free by construction - piece
+    2's dest.x equals piece 1's width, so both sides of the join round the
+    same expression, round(w1*ratio) - but only for one drag position, at
+    intersection widths (512/488 at the tested drag) that are themselves
+    clean multiples of 1/1.25 and 1/1.5. This exercises the same identity
+    against many non-round widths, including 1px slivers at either end, so
+    a rounding bug that only shows up for an inconvenient width cannot hide
+    the way it could in a single hand-picked example.
+
+    Every trial holds exactly (0px gap, 0px overlap) at both of Windows'
+    common scaling presets - confirming, not just tracing by hand, that
+    TA-239's seam is not coming from this arithmetic. See ISSUE-TA-239.md:
+    the remaining candidates are screen.grabWindow()'s actual returned
+    pixmap size and QPainter.drawPixmap()'s compositing behavior, neither
+    of which this pure-geometry test can reach - both need a real
+    two-screen drag with TESTASSIST_DEBUG=1 set."""
+    import random
+
+    laptop = QRect(0, 0, 1536, 864)
+    external = QRect(1536, 0, 1920, 1080)
+    rng = random.Random(239)
+
+    for _ in range(200):
+        left_cut = rng.randint(1, laptop.width() - 1)
+        right_cut = rng.randint(1, external.width() - 1)
+        drag = QRect(left_cut, 50, (laptop.width() - left_cut) + right_cut, 300)
+
+        for ratio in (1.25, 1.5):
+            pieces = plan_capture(drag, [laptop, external])
+            assert len(pieces) == 2, "test setup: the drag must produce exactly two pieces"
+            rects = [to_device_rect(p.dest, p.screen_local_rect.size(), ratio) for p in pieces]
+            left_rect, right_rect = rects
+            assert left_rect.x() + left_rect.width() == right_rect.x(), (
+                f"gap/overlap at left_cut={left_cut} right_cut={right_cut} ratio={ratio}: "
+                f"piece0 right={left_rect.x() + left_rect.width()} "
+                f"piece1 left={right_rect.x()}"
+            )
