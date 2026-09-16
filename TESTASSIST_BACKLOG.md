@@ -1545,6 +1545,36 @@ that will actually ship.
 
   **`XMouseButtonControl.exe`, 2026-09-16: permanently disabled on Emil's dev rig, no longer a live concern for this lane.** It's also not a widely-used tool, so this was a local dev-machine artifact specific to running synthetic test input, not something a real user's mouse click was ever exposed to - nothing here has a product-facing follow-up. Noted so a future pass doesn't wonder whether to check for it again.
 
+  **Selectors fixed and re-run, 2026-09-16 — all three checks pass.**
+  Fresh 1.5.0 build, no stale `TestAssist.exe`. `pytest tests_e2e`, run
+  twice in a row to rule out a fluke: **3 passed** both times, both in
+  under 9 seconds, no flakiness observed. Check 3 specifically —
+  `test_ta_icon_minimizes_and_restores_a_real_os_window`, the direct
+  black-box test of TA-220's minimize-toggle behaviour and TA-241's
+  `WindowDoesNotAcceptFocus` fix for it — now passes for real, on real
+  hardware, via `pywinauto`'s own `is_minimized()`/`is_normal()` (backed
+  by UI Automation's `WindowVisualState`, not this project's own internal
+  Qt state).
+
+  **This is the confirmation TA-241 has been missing.** Every prior
+  account of that fix (the in-process regression test, this evening's
+  earlier hardware click-twice check) could observe Qt's own idea of
+  window state or a person's own eyes, but never the real OS's window
+  manager from outside the process — which is exactly the gap this lane
+  exists to close. TA-228's own acceptance criteria (each check runs
+  against the current build) are now met for checks 2 and 3 as well as
+  check 1; the criteria's other half (each check also *fails* against a
+  deliberately broken build) was not re-verified this pass — not asked
+  for, and would need TA-241 temporarily reverted and rebuilt to test
+  against. Worth doing before calling TA-228 fully closed, but the
+  question this specific re-run was for — does check 3 pass against
+  current `main` — is answered: yes.
+
+  Not revisited here, but worth a fresh look now that the lane runs
+  green end to end: the CI-vs-manual decision above. That call isn't
+  being changed in this pass — flagged so it doesn't get silently
+  forgotten now that the reasons for it are shifting one by one.
+
 ### TA-229 — `to_device_rect()` can seam a three-or-more-piece capture at a fractional device pixel ratio
 
 - **Phase:** 3
@@ -1865,14 +1895,12 @@ tonight per this session's decision (picker, amber default). Standalone —
 genuinely new work, not a bug fix, don't mix it into a bug-fix bundle.
 
 **Bundle F — Testing/infra hygiene:**
-- TA-228 check 3 — re-run 2026-09-16, still open, blocked on a new
-  mechanism. `test_smoke.py`'s selectors are stale against the
-  `ui-polish` launcher rebuild ("Quick Capture" is now "Capture
-  Region"; "Editor" now matches two controls at once) - checks 2 and 3
-  fail on that, not on input delivery, so TA-241's fix is still
-  unconfirmed by this lane, not disproven. See TA-228's own entry above
-  for the full account. Updating `test_smoke.py`'s selectors to match
-  the current UI is the next step, not yet done.
+- TA-228 check 3 — closed 2026-09-16. Selectors fixed
+  (`test_smoke.py`: "Capture Region", `found_index=0`), re-run twice
+  against a fresh build: all three checks pass, no flakiness. TA-241's
+  fix is now confirmed on real hardware via this lane, not just
+  in-process or by a person's own eyes. See TA-228's own entry above for
+  the full account.
 - TA-230 (C) — closed 2026-09-16. See TA-230's own entry above for the
   full account.
 

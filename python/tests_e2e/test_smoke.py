@@ -36,7 +36,11 @@ def test_quick_capture_button_produces_a_real_overlay_window(app, launcher) -> N
     launcher_rect = launcher.rectangle()
     launcher_area = launcher_rect.width() * launcher_rect.height()
 
-    button = launcher.child_window(title="Quick Capture", control_type="Button")
+    # "Quick Capture" was the button's name before the ui-polish launcher
+    # rebuild replaced the single mode-toggle button with three separate
+    # actions (TA-228 check 2's own stale-selector finding, 2026-09-16) -
+    # this is _btn_capture, now titled "Capture Region".
+    button = launcher.child_window(title="Capture Region", control_type="Button")
     button.wait("visible enabled", timeout=5)
     button.click_input()
 
@@ -73,7 +77,13 @@ def test_ta_icon_minimizes_and_restores_a_real_os_window(app, launcher) -> None:
     minimized (the editor), which is exactly the timing this project's
     in-process tests cannot observe.
     """
-    open_editor = launcher.child_window(title="Editor", control_type="Button")
+    # Two controls are both accessible-named "Editor" and both visible at
+    # once when undocked (the header icon button and the wide button below
+    # RECENT) - genuinely the same action, both wired to
+    # self._editor.bring_forward, which is exactly why TA-248 named them
+    # identically. found_index=0 disambiguates the selector; it isn't a
+    # claim that one is "the" Editor button over the other.
+    open_editor = launcher.child_window(title="Editor", control_type="Button", found_index=0)
     open_editor.wait("visible enabled", timeout=5)
     open_editor.click_input()
 
