@@ -102,6 +102,7 @@ def _setup_tray(app: QApplication, launcher: FloatingLauncher, editor: EditorWin
 
     tray.activated.connect(_on_activate)
     tray.show()
+    launcher.set_tray(tray)
     return tray
 
 

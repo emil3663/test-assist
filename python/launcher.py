@@ -72,6 +72,10 @@ class FloatingLauncher(QWidget):
         super().__init__(parent)
         self._editor  = editor
         self._version = version
+        # Set post-construction via set_tray() (TA-247): main.py creates the
+        # tray icon after the launcher, so this starts unset and
+        # _close_launcher() guards on it rather than assuming it exists.
+        self._tray = None
         # Off by default: real Win32 RegisterHotKey calls are shared,
         # global OS state - every test in this suite that just needs *a*
         # launcher would otherwise fight over the literal same Alt+P/
@@ -830,6 +834,15 @@ class FloatingLauncher(QWidget):
         if open_btn is not None and box.clickedButton() is open_btn:
             QDesktopServices.openUrl(QUrl(result.html_url))
 
+    def set_tray(self, tray) -> None:
+        """Wire the tray icon in post-construction (TA-247).
+
+        main.py creates the QSystemTrayIcon after the launcher, the same
+        reason editor.py takes its tray-adjacent callbacks as setters
+        rather than constructor arguments.
+        """
+        self._tray = tray
+
     def _close_launcher(self) -> None:
         """Hides to the tray rather than quitting.
 
@@ -837,8 +850,21 @@ class FloatingLauncher(QWidget):
         tray icon down with it - Show Launcher became unreachable, and
         nothing short of relaunching the exe brought the app back (INS-02).
         Exit in the tray menu is the only full quit now.
+
+        Shows a toast every time (TA-247), not just once per session: the
+        footer text that documents this is easy to never read, and Windows
+        hides a *new* tray icon in the notification area's overflow chevron
+        by default (see editor.py's own comments on the same behaviour), so
+        a user who hides the launcher without having opened the editor first
+        has no other route back and no in-the-moment confirmation of where
+        it went.
         """
         self.hide()
+        if self._tray is not None:
+            self._tray.showMessage(
+                "Test Assist",
+                "Still running — right-click the tray icon to reopen or quit.",
+            )
 
     def restore(self) -> None:
         """Bring the launcher back from the tray - Show Launcher, and a
