@@ -1436,9 +1436,15 @@ class _RecordingThumb(QFrame):
             if self._is_kept_frames
             else (f"Click to open in your video player\n{recording_path.name}")
         )
+        # TA-244: theme.ACCENT at rest, not just on hover - a static
+        # theme.LINE_STRONG border only read as "this is a recording"
+        # once the pointer happened to land on the tile, which is exactly
+        # the "easy to scan straight past" gap this ticket tracks. Reuses
+        # the token _SnapshotThumb's own hover state already uses, rather
+        # than introducing a new colour.
         self.setStyleSheet(f"""
             QFrame {{
-                border: 1px solid {theme.LINE_STRONG};
+                border: 1px solid {theme.ACCENT};
                 border-radius: 8px;
                 background: {theme.BG_800};
             }}
@@ -1460,10 +1466,15 @@ class _RecordingThumb(QFrame):
         # without it. Parented directly to self (a sibling of _preview in
         # the layout, not a child of it) and positioned in resizeEvent,
         # since _preview's own geometry isn't final until layout runs.
+        # TA-244: a bigger glyph on a solid theme.ACCENT background,
+        # replacing the semi-transparent black pill that blended into a
+        # dark-mode thumbnail - the same token the tile's own border
+        # above now uses, so both read as one signal rather than two
+        # independently-coloured elements.
         self._badge = QLabel("▶", self)
         self._badge.setStyleSheet(
-            "QLabel { color: #ffffff; background: rgba(0,0,0,0.55);"
-            " border-radius: 9px; font-size: 11px; padding: 1px 6px 1px 8px; }"
+            f"QLabel {{ color: #ffffff; background: {theme.ACCENT};"
+            f" border-radius: 12px; font-size: 16px; padding: 2px 9px 2px 11px; }}"
         )
         self._badge.adjustSize()
         self._badge.raise_()

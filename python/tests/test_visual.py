@@ -24,9 +24,9 @@ import pytest
 from PySide6.QtGui import QColor
 from PySide6.QtWidgets import QApplication, QPushButton
 
-from editor import EditorWindow
+from editor import EditorWindow, _RecordingThumb, _SnapshotThumb
 import theme
-from theme import BG_700
+from theme import ACCENT, BG_700, LINE
 
 pytestmark = pytest.mark.visual
 
@@ -140,6 +140,77 @@ def test_TA221_copy_and_export_render_full_text_with_no_clipped_descenders(qapp)
         )
 
     editor.close()
+
+
+def _edge_color(image, x: int, y: int) -> QColor:
+    x = max(0, min(image.width() - 1, x))
+    y = max(0, min(image.height() - 1, y))
+    return image.pixelColor(x, y)
+
+
+def _channel_distance(a: QColor, b: QColor) -> int:
+    return abs(a.red() - b.red()) + abs(a.green() - b.green()) + abs(a.blue() - b.blue())
+
+
+@_offscreen
+def test_TA244_a_recording_tile_is_visually_distinct_from_a_snapshot_at_rest(qapp, tmp_path) -> None:
+    """This ticket's own acceptance bar: verified against a real rendered
+    screenshot, not argued from the CSS alone, and _SnapshotThumb checked
+    explicitly rather than assumed untouched. Neither tile is hovered -
+    "at rest, not just on hover" is the whole point of this ticket's fix,
+    since a static theme.LINE_STRONG border only read as "this is a
+    recording" once the pointer happened to land on the tile."""
+    app = QApplication.instance()
+    app.setStyle("Fusion")
+    app.setStyleSheet(theme.editor_style())
+
+    video_path = tmp_path / "ta244-recording.mp4"
+    video_path.write_bytes(b"fake mp4")
+    image_path = tmp_path / "ta244-snapshot.png"
+    from PySide6.QtGui import QPixmap
+    QPixmap(64, 48).save(str(image_path))
+
+    recording_thumb = _RecordingThumb(video_path, 1)
+    snapshot_thumb = _SnapshotThumb(image_path, 1)
+    recording_thumb.show()
+    snapshot_thumb.show()
+    qapp.processEvents()
+
+    try:
+        rec_image = recording_thumb.grab().toImage()
+        snap_image = snapshot_thumb.grab().toImage()
+
+        # Sample the left edge, mid-height - a QFrame's border is drawn
+        # right at the widget's own edge.
+        rec_mid_y = rec_image.height() // 2
+        snap_mid_y = snap_image.height() // 2
+        rec_border = _edge_color(rec_image, 0, rec_mid_y)
+        snap_border = _edge_color(snap_image, 0, snap_mid_y)
+
+        accent = QColor(ACCENT)
+        line = QColor(LINE)
+
+        assert _channel_distance(rec_border, accent) < _channel_distance(rec_border, line), (
+            f"the recording tile's rest-state border {rec_border.getRgb()} reads "
+            f"closer to theme.LINE {line.getRgb()} than theme.ACCENT "
+            f"{accent.getRgb()} - it should be noticeably accented without hovering"
+        )
+        assert _channel_distance(snap_border, line) <= _channel_distance(snap_border, accent), (
+            f"_SnapshotThumb's own border {snap_border.getRgb()} moved toward "
+            f"theme.ACCENT {accent.getRgb()} - it must stay theme.LINE "
+            f"{line.getRgb()}, untouched by this ticket"
+        )
+
+        # The two tiles' borders must actually differ from each other -
+        # the real "identifiable at a glance" claim, not just each one
+        # individually matching its own expected token.
+        assert _channel_distance(rec_border, snap_border) > 30, (
+            "a recording tile and a snapshot tile render with "
+            "indistinguishable borders at rest"
+        )
+    finally:
+        recording_thumb.close()
+        snapshot_thumb.close()
 
 
 @_offscreen

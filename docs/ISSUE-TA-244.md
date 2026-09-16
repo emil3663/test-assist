@@ -86,3 +86,29 @@ today.
   the recent strip has videos though."
 - Badge styling and positioning confirmed by reading `_RecordingThumb` in
   `python/editor.py` directly, not inferred from the screenshot alone.
+
+## 2026-09-16 (later) — implemented and verified against a real render
+
+Both pieces landed exactly as decided: `_RecordingThumb`'s rest-state
+border is `theme.ACCENT` (was `theme.LINE_STRONG`), and the badge is now
+`color: #ffffff` on a solid `theme.ACCENT` background at `font-size: 16px`
+(was the semi-transparent `rgba(0,0,0,0.55)` pill at `11px`).
+`_SnapshotThumb` untouched — confirmed by `git diff`, not assumed, and by
+the test below re-reading its live border colour after the change.
+
+**Verified against a real rendered screenshot**, per this ticket's own
+acceptance bar, not argued from the CSS alone: a `visual`-marked test
+(`test_visual.py`, needs the real `windows` Qt platform plugin, run with
+`pytest -m visual`) builds one `_RecordingThumb` and one `_SnapshotThumb`,
+neither hovered, `.grab()`s both, and samples each tile's actual rendered
+border pixel. Passed on real hardware: the recording tile's border reads
+closer to `theme.ACCENT` than to `theme.LINE`, the snapshot tile's stays
+closer to `theme.LINE` (unchanged), and the two tiles' borders differ from
+each other by a real, measured margin — the literal "identifiable at a
+glance, not just on close inspection" claim this ticket's acceptance bar
+asks for, checked at rest since that is the whole point of the fix.
+
+No test asserted the old literal colour/size values beforehand, so
+nothing needed updating for the change itself; one new visual test added.
+386 tests pass in the default (offscreen) lane, unaffected — the new test
+is correctly excluded there and runs only under `-m visual`.
