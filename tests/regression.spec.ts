@@ -295,6 +295,39 @@ test.describe('3.3 Annotation Tools', () => {
     expect(after.path.every((p: any) => Number.isFinite(p.x) && Number.isFinite(p.y))).toBe(true);
     expect(Number.isNaN(after.x ?? 0)).toBe(false);
   });
+
+  test('AT-17 — the selected tool carries aria-checked, by click and by keyboard shortcut', async ({ page }) => {
+    // TA-252: only a plain .active class marked the current tool; no ARIA
+    // equivalent existed, so a screen-reader user had no way to hear which
+    // tool was armed. All seven .tool-btn elements are a true mutually
+    // exclusive set (exactly one active, ever), matching radiogroup/radio
+    // rather than the tablist/tab pattern Photo/Video already uses -
+    // nothing about the page's panels changes when the tool changes, only
+    // the behaviour of the next canvas interaction.
+    await withImage(page);
+
+    await expect(page.locator('.tool-list')).toHaveAttribute('role', 'radiogroup');
+    await expect(page.locator('.tool-btn[data-tool="select"]')).toHaveAttribute('aria-checked', 'true');
+    for (const tool of ['highlight', 'text', 'circle', 'arrow', 'rect', 'pen']) {
+      await expect(page.locator(`.tool-btn[data-tool="${tool}"]`)).toHaveAttribute('aria-checked', 'false');
+    }
+
+    await selectTool(page, 'circle');
+    await expect(page.locator('.tool-btn[data-tool="circle"]')).toHaveAttribute('aria-checked', 'true');
+    await expect(page.locator('.tool-btn[data-tool="select"]')).toHaveAttribute('aria-checked', 'false');
+
+    // The keyboard shortcut goes through the same click handler (app.js's
+    // keydown listener calls btn.click()) - confirming aria-checked updates
+    // from that path too, not just a direct .click() call.
+    await page.keyboard.press('p');
+    await expect(page.locator('.tool-btn[data-tool="pen"]')).toHaveAttribute('aria-checked', 'true');
+    await expect(page.locator('.tool-btn[data-tool="circle"]')).toHaveAttribute('aria-checked', 'false');
+
+    // Exactly one radio is ever checked - the property the radiogroup
+    // pattern exists to express.
+    const checkedCount = await page.locator('.tool-btn[aria-checked="true"]').count();
+    expect(checkedCount).toBe(1);
+  });
 });
 
 /* ─── 3.4 Undo / redo ──────────────────────────────────────────────────── */
