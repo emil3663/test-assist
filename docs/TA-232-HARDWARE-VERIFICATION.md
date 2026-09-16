@@ -134,3 +134,98 @@ shouldn't be assumed either until someone reproduces TA-240's symptom
 **without** a Claude-driven session in the picture at all (person at the
 keyboard, Claude Desktop not running or not bridged). Left as evidence, not
 acted on — no code touched here per the working agreement.
+
+## 2026-09-16 — TA-222 regression found (settings bar centering)
+
+**Status: TA-222 reopened.** Believed fixed and shipped in `v1.4.0`; confirmed
+during this session's QA work that the fix does not actually achieve the
+centering it claims.
+
+**What was observed:** a QA tester's screenshot of the Editor window (title
+bar "Test Assist 1.4.0 — Editor") shows row 2 of the Editor toolbar (zoom
+controls, stroke-width slider, the "Classic" arrow-style dropdown, opacity
+slider, then Copy / Export / Save PNG) **not** centered under the tool-icon
+row above it. Instead: the left cluster (zoom…opacity) sits flush against the
+window's left edge, Copy/Export/Save PNG sit flush against the right edge,
+and there is a large empty gap in between — visually indistinguishable from
+the original pre-fix bug report.
+
+**Root cause — confirmed by reading `python/editor.py`'s
+`_build_settings_bar()`:** the row is a single `QHBoxLayout`, built in this
+order:
+
+1. `layout.addStretch()` — leading, **stretch factor 0** — added by the
+   TA-222 fix commit `5783f8d` (line 459 on current `main`).
+2. zoom controls → separator → stroke-width slider → separator →
+   arrow-style combo → separator → opacity slider.
+3. `layout.addStretch(1)` — mid-row, **stretch factor 1** — this stretch
+   pre-dates the TA-222 fix commit and was never touched by it (line 531 on
+   current `main`).
+4. Copy, Export, Save PNG buttons, with **no trailing stretch** after them
+   (`return bar` at line 556 on current `main`).
+
+Qt's `QBoxLayout` gives *all* extra horizontal space to whichever stretch
+item has the highest stretch factor; when factors differ, the lower-factor
+stretch does not share in the extra space at all. Here the leading stretch
+(factor 0) gets none of the extra width and collapses to ~0px, while the
+mid-row stretch (factor 1) absorbs the *entire* leftover gap between the
+opacity slider and the Copy button. The result is exactly the "hard left,
+huge gap, hard right" layout in the screenshot — the leading stretch added
+by the fix is present in the code but structurally inert.
+
+This is unlike `_build_tools_bar()` (line ~292), which centers its icon
+group correctly: it uses `addStretch()` (factor 0, no argument) on **both**
+ends, so the two stretches have matching factors and Qt splits the leftover
+space evenly between them, producing true centering.
+
+**The TA-222 fix commit's premise was wrong on two counts**, not one:
+
+- It added a factor-0 stretch to match a factor-1 stretch, so the two ends
+  never compete for space on equal terms (the one-line bug).
+- `_build_tools_bar()` has no mid-row stretch and no right-anchored
+  subgroup at all — it is *just* an icon group between two matching
+  stretches. `_build_settings_bar()` has a third element the tools bar
+  doesn't: the Copy/Export/Save PNG cluster anchored to the right by the
+  mid-row stretch. The fix commit's message claimed to match
+  `_build_tools_bar()`'s pattern, but the two layouts aren't structurally
+  analogous, so "add a leading `addStretch()`" alone can't reproduce that
+  pattern regardless of stretch factor.
+
+**Confirmed present in — this is not a stale-build artifact:**
+
+- `v1.4.0` as tagged and shipped (tag `v1.4.0`, commit `23f1f51`, dated
+  Sep 12) — contains the original "fix" commit `5783f8d`.
+- Current `main` tip (commit `2e49940`).
+- The `ui-polish` review worktree HEAD (commit `90fcf92`) — the pending
+  launcher-rebuild branch under evaluation.
+
+All three read identical code at `_build_settings_bar()` (lines ~431–575).
+Every current build — shipped, mainline, and the branch being evaluated for
+the next release — has this bug.
+
+**Why this needs a decision, not just a one-line tweak:** because of the
+second structural difference above, simply changing `addStretch(1)` to
+`addStretch()` would center the *entire* row (zoom through Save PNG) as one
+block, pulling Copy/Export/Save PNG in from the right edge toward the
+middle — a materially different visual result than "the left cluster is
+centered and the export buttons stay right-anchored," which is also a
+plausible reading of the original bug report and the backlog's acceptance
+wording. Two real options exist:
+
+- **(a)** Remove the mid-row stretch entirely and treat the whole row —
+  zoom through Save PNG — as one centered group, matching
+  `_build_tools_bar()`'s pattern exactly (`addStretch()`, factor 0, on both
+  true ends, nothing else on the row).
+- **(b)** Keep Copy/Export/Save PNG deliberately right-anchored as a
+  separate design intent, in which case only the left cluster should be
+  centered within the remaining space to its left of that right-anchored
+  group, and the ticket's acceptance criteria ("centered below the editing
+  icons") should be read as referring to the left cluster only, not the
+  full row.
+
+This is a product/design call, not something the code alone settles — the
+same open question the original TA-222 ticket text flagged and that was
+not actually resolved by commit `5783f8d`. TA-222 should not be considered
+closed until that decision is made explicit and a corresponding code fix
+(not the current one) lands. No code was changed as part of this finding,
+per the working agreement — this is a documentation-only pass.
