@@ -44,7 +44,7 @@ you already have it: negative coordinates *and* mixed DPI at once.
 | DSP-07 | Capture a region on the **external** | Image says EXTERNAL, not blank | ⬜ |
 | DSP-05 | Compare both exports | Laptop export is ~1.25× the pixel size of the same-sized external selection, or consistently scaled — and consistent between them | ⬜ |
 | DSP-05b | Annotate on the laptop panel | Shapes land under the cursor; no drift on the 125% screen | ⬜ |
-| DSP-08 | Drag a selection **spanning both** screens | One image, LAPTOP and EXTERNAL joined, no gap, no doubling, no vertical offset | ⬜ |
+| DSP-08 | Drag a selection **spanning both** screens | One image, LAPTOP and EXTERNAL joined, no gap, no doubling, no vertical offset. The laptop (864 logical tall) and external (1080) are a different case from this: a drag that extends below the laptop's shorter bottom edge crosses into a region no screen occupies (TA-231) — during the drag that region must show as visually distinct (dimmed by no overlay window, not selectable), and the exported result over it is transparent, not black or a false join, per the recorded TA-231 decision | ⬜ |
 | DSP-09 | Full-screen capture, launcher on the **laptop** | Captures the laptop | ⬜ |
 | DSP-10 | Record a few seconds, launcher on the laptop, then **play it back** | Video shows the laptop. Only visible on playback | ⬜ |
 | DSP-11 | Same recording | Right dimensions, not distorted | ⬜ |

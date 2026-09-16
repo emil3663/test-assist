@@ -12,6 +12,7 @@ from PySide6.QtGui import (
     QColor,
     QFont,
     QFontMetricsF,
+    QImage,
     QPainter,
     QPainterPath,
     QPen,
@@ -359,13 +360,21 @@ class AnnotationCanvas(QWidget):
         """Composite the base image and all annotations into a single QPixmap."""
         if not self._pixmap:
             return None
-        result  = QPixmap(self._pixmap.size())
-        painter = QPainter(result)
+        # TA-231: same bug as TA-232 HW-1 (see capture.py::_grab) - a bare
+        # QPixmap(size) does not reliably carry an alpha channel on every
+        # platform/build, so any region the annotations don't paint over
+        # (or the base image doesn't fully cover) came out as garbage/opaque
+        # rather than transparent in the exported PNG. Build the canvas as
+        # an explicit-ARGB QImage, which always has a real alpha channel,
+        # and convert once at the end.
+        canvas = QImage(self._pixmap.size(), QImage.Format.Format_ARGB32_Premultiplied)
+        canvas.fill(Qt.GlobalColor.transparent)
+        painter = QPainter(canvas)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         painter.drawPixmap(0, 0, self._pixmap)
         self._paint_annotations(painter, export=True)
         painter.end()
-        return result
+        return QPixmap.fromImage(canvas)
 
     def serialisable_annotations(self) -> list[dict]:
         """Return a JSON-serialisable copy of the annotation list."""

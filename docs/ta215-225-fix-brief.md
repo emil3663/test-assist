@@ -1,5 +1,7 @@
 # Brief: implement TA-215, TA-217, TA-220 through TA-225, build, verify, report
 
+**Status: TA-222 REOPENED (2026-09-16), fix decided** — the centering fix this brief locked in and commit `5783f8d` shipped does not actually center the settings bar. The leading `layout.addStretch()` it added has Qt stretch factor 0, while the row's pre-existing mid-row `layout.addStretch(1)` has factor 1; Qt gives all extra space to the higher-factor stretch, so the leading stretch collapses to ~0px and the row still renders hard-left / big-gap / hard-right, matching the original bug report. Confirmed present in shipped `v1.4.0` (`23f1f51`), current `main` (`2e49940`), and the `ui-polish` worktree (`90fcf92`). **Decision (2026-09-16): left-cluster-only centering** — Copy/Export/Save PNG stay right-anchored as-is; only the zoom/stroke/arrow-style/opacity cluster centers, within the space to its left. Recommended fix: change line 531's `layout.addStretch(1)` to `layout.addStretch()` so both stretches share factor 0, matching `_build_tools_bar()`'s own pattern — no widget restructuring needed. See `docs/TA-232-HARDWARE-VERIFICATION.md`'s "2026-09-16 — TA-222 decision recorded: option (b), left cluster only" section for the full reasoning; verify visually after implementing, this hasn't been rendered yet.
+
 ## Why
 
 The rc4 manual pass surfaced two kinds of finding: fixes that regressed or
