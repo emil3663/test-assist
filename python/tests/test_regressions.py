@@ -1341,8 +1341,8 @@ def test_launcher_build_ui_header_controls_have_expected_tooltips(qapp) -> None:
     # place the floating panel names the app - its tooltip carries the name
     # as well as the action. accessibleName stays the bare action, since
     # that is what TA-228's black-box lane finds the button by.
-    assert launcher._btn_open_editor.toolTip() == "Open Editor"
-    assert launcher._btn_open_editor.accessibleName() == "Open Editor"
+    assert launcher._btn_open_editor.toolTip() == "Editor"
+    assert launcher._btn_open_editor.accessibleName() == "Editor"
     assert launcher._btn_check_updates.toolTip() == "Check for Updates"
     # One reduced form, not two: this shrinks to the docked strip, which is
     # the compact mode.

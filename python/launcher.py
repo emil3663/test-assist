@@ -72,6 +72,10 @@ class FloatingLauncher(QWidget):
         super().__init__(parent)
         self._editor  = editor
         self._version = version
+        # Set post-construction via set_tray() (TA-247): main.py creates the
+        # tray icon after the launcher, so this starts unset and
+        # _close_launcher() guards on it rather than assuming it exists.
+        self._tray = None
         # Off by default: real Win32 RegisterHotKey calls are shared,
         # global OS state - every test in this suite that just needs *a*
         # launcher would otherwise fight over the literal same Alt+P/
@@ -180,13 +184,17 @@ class FloatingLauncher(QWidget):
         self._btn_open_editor = QPushButton()
         self._btn_open_editor.setFixedSize(22, 22)
         self._btn_open_editor.setIcon(theme.icon_pixmap("pen", 13, theme.LAUNCHER.MUTED))
-        self._btn_open_editor.setToolTip("Open Editor")
+        # "Editor" rather than "Open Editor" (TA-248): this control also
+        # minimizes an already-frontmost editor on a second click
+        # (bring_forward()'s TA-220/TA-241 toggle), so a verb naming only
+        # the open half is only ever half true.
+        self._btn_open_editor.setToolTip("Editor")
         # setAccessibleName(), not just the tooltip (TA-228): this is an
         # icon-only button, indistinguishable from its unlabeled siblings
         # to UI Automation without one - the black-box e2e lane needs a
         # reliable way to find it from outside the process, and a real
         # accessible name is also what a screen reader would announce.
-        self._btn_open_editor.setAccessibleName("Open Editor")
+        self._btn_open_editor.setAccessibleName("Editor")
         self._btn_open_editor.setStyleSheet(self._style_ghost())
 
         self._btn_check_updates = QPushButton()
@@ -314,12 +322,12 @@ class FloatingLauncher(QWidget):
             recent_row.addWidget(slot)
         float_layout.addLayout(recent_row)
 
-        self._btn_open_editor_wide = QPushButton("  Open Editor")
+        self._btn_open_editor_wide = QPushButton("  Editor")
         self._btn_open_editor_wide.setIcon(theme.icon_pixmap("pen", 14, theme.LAUNCHER.MUTED))
         self._btn_open_editor_wide.setFixedHeight(30)
         self._btn_open_editor_wide.setProperty("iconLabel", True)
         self._btn_open_editor_wide.setStyleSheet(self._style_outline())
-        self._btn_open_editor_wide.setAccessibleName("Open Editor")
+        self._btn_open_editor_wide.setAccessibleName("Editor")
         float_layout.addWidget(self._btn_open_editor_wide)
 
         float_layout.addWidget(self._rule())
@@ -432,8 +440,8 @@ class FloatingLauncher(QWidget):
         btn_dock_editor = QPushButton()
         btn_dock_editor.setFixedSize(40, 30)
         btn_dock_editor.setIcon(theme.icon_pixmap("pen", 15, theme.LAUNCHER.MUTED))
-        btn_dock_editor.setToolTip("Open Editor")
-        btn_dock_editor.setAccessibleName("Open Editor")
+        btn_dock_editor.setToolTip("Editor")
+        btn_dock_editor.setAccessibleName("Editor")
         btn_dock_editor.setStyleSheet(self._style_ghost())
         btn_dock_editor.clicked.connect(self._editor.bring_forward)
         dock_layout.addWidget(btn_dock_editor, 0, Qt.AlignmentFlag.AlignHCenter)
@@ -826,6 +834,15 @@ class FloatingLauncher(QWidget):
         if open_btn is not None and box.clickedButton() is open_btn:
             QDesktopServices.openUrl(QUrl(result.html_url))
 
+    def set_tray(self, tray) -> None:
+        """Wire the tray icon in post-construction (TA-247).
+
+        main.py creates the QSystemTrayIcon after the launcher, the same
+        reason editor.py takes its tray-adjacent callbacks as setters
+        rather than constructor arguments.
+        """
+        self._tray = tray
+
     def _close_launcher(self) -> None:
         """Hides to the tray rather than quitting.
 
@@ -833,8 +850,21 @@ class FloatingLauncher(QWidget):
         tray icon down with it - Show Launcher became unreachable, and
         nothing short of relaunching the exe brought the app back (INS-02).
         Exit in the tray menu is the only full quit now.
+
+        Shows a toast every time (TA-247), not just once per session: the
+        footer text that documents this is easy to never read, and Windows
+        hides a *new* tray icon in the notification area's overflow chevron
+        by default (see editor.py's own comments on the same behaviour), so
+        a user who hides the launcher without having opened the editor first
+        has no other route back and no in-the-moment confirmation of where
+        it went.
         """
         self.hide()
+        if self._tray is not None:
+            self._tray.showMessage(
+                "Test Assist",
+                "Still running — right-click the tray icon to reopen or quit.",
+            )
 
     def restore(self) -> None:
         """Bring the launcher back from the tray - Show Launcher, and a

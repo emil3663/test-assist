@@ -1500,6 +1500,42 @@ def test_TA241_launcher_does_not_accept_focus(qapp, editor):
     assert launcher.windowFlags() & Qt.WindowType.WindowDoesNotAcceptFocus
 
 
+def test_TA247_hiding_the_launcher_shows_a_tray_confirmation(qapp, editor):
+    """TA-247: hiding the launcher (the X button, _close_launcher()) gave no
+    in-the-moment confirmation of where it went - the only documentation was
+    footer text a user could easily never read. Every hide should toast, not
+    just the first one: the footer text problem doesn't get easier to spot
+    the second time either."""
+    from launcher import FloatingLauncher
+
+    launcher = FloatingLauncher(editor)
+
+    class _TrayStub:
+        def __init__(self):
+            self.messages = []
+
+        def showMessage(self, *args, **kwargs):
+            self.messages.append((args, kwargs))
+
+    tray = _TrayStub()
+    launcher.set_tray(tray)
+
+    launcher._close_launcher()
+    launcher._close_launcher()
+
+    assert len(tray.messages) == 2, "every hide should toast, not just the first"
+
+
+def test_TA247_closing_before_a_tray_is_set_does_not_crash(qapp, editor):
+    """set_tray() is called post-construction by main.py, once the tray
+    icon exists - a launcher built without one yet (as every other test in
+    this suite does) must not crash on hide."""
+    from launcher import FloatingLauncher
+
+    launcher = FloatingLauncher(editor)
+    launcher._close_launcher()  # must not raise
+
+
 # ── 3.13 Keyboard shortcuts ──────────────────────────────────────────────────
 
 @pytest.mark.parametrize("key,tool", [
