@@ -229,3 +229,33 @@ not actually resolved by commit `5783f8d`. TA-222 should not be considered
 closed until that decision is made explicit and a corresponding code fix
 (not the current one) lands. No code was changed as part of this finding,
 per the working agreement — this is a documentation-only pass.
+
+## 2026-09-16 — TA-232 re-confirmed on pre-fix build, user signs off on branch fix taking precedence
+
+QA tester's screenshot of the same session (captured alongside the TA-222
+regression above) also showed a dark/dimmed rectangle occupying only the
+top-left portion of the laptop screen during a capture, on the build under
+test (not the `fix/ta-232-overlay-hidpi-coverage` branch). This is TA-232,
+not a new or distinct issue: per `docs/TA-232.md`'s original measurement,
+the overlay dims exactly the laptop's *logical* resolution (1536x864 at
+125% scaling) rather than its full physical panel (1920x1080 device
+pixels), which renders as a dimmed rectangle confined to the upper-left
+corner of the screen with the remaining ~36% (including the taskbar)
+undimmed and unselectable. Brightness values match the original ticket's
+step-function measurement (dimmed ~27, undimmed ~39) exactly.
+
+`docs/TA-232.md`'s "Resolution (2026-09-13)" section already records the
+fix (one `ScreenshotOverlay` window per `QScreen`, each inheriting its own
+screen's DPR) as implemented — that work lives on
+`fix/ta-232-overlay-hidpi-coverage`, not yet on `main` or in any tagged
+release, which is why today's build still reproduces the original
+under-coverage.
+
+**User's explicit sign-off (2026-09-16):** this behavior is expected/known
+on the build tested, and is fine as-is there — the user wants the
+already-implemented fix on `fix/ta-232-overlay-hidpi-coverage` to be the
+version that ships, i.e. this branch's overlay behavior should take
+precedence over the current `main`/`v1.4.0` behavior at merge time. No new
+ticket, no further repro work needed here — this is a merge-sequencing
+note, not an open defect: confirm the branch's per-screen-window overlay
+fix is what lands, and this symptom disappears with it.
