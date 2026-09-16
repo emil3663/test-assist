@@ -73,7 +73,7 @@ def test_ta_icon_minimizes_and_restores_a_real_os_window(app, launcher) -> None:
     minimized (the editor), which is exactly the timing this project's
     in-process tests cannot observe.
     """
-    open_editor = launcher.child_window(title="Open Editor", control_type="Button")
+    open_editor = launcher.child_window(title="Editor", control_type="Button")
     open_editor.wait("visible enabled", timeout=5)
     open_editor.click_input()
 

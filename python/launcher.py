@@ -180,13 +180,17 @@ class FloatingLauncher(QWidget):
         self._btn_open_editor = QPushButton()
         self._btn_open_editor.setFixedSize(22, 22)
         self._btn_open_editor.setIcon(theme.icon_pixmap("pen", 13, theme.LAUNCHER.MUTED))
-        self._btn_open_editor.setToolTip("Open Editor")
+        # "Editor" rather than "Open Editor" (TA-248): this control also
+        # minimizes an already-frontmost editor on a second click
+        # (bring_forward()'s TA-220/TA-241 toggle), so a verb naming only
+        # the open half is only ever half true.
+        self._btn_open_editor.setToolTip("Editor")
         # setAccessibleName(), not just the tooltip (TA-228): this is an
         # icon-only button, indistinguishable from its unlabeled siblings
         # to UI Automation without one - the black-box e2e lane needs a
         # reliable way to find it from outside the process, and a real
         # accessible name is also what a screen reader would announce.
-        self._btn_open_editor.setAccessibleName("Open Editor")
+        self._btn_open_editor.setAccessibleName("Editor")
         self._btn_open_editor.setStyleSheet(self._style_ghost())
 
         self._btn_check_updates = QPushButton()
@@ -314,12 +318,12 @@ class FloatingLauncher(QWidget):
             recent_row.addWidget(slot)
         float_layout.addLayout(recent_row)
 
-        self._btn_open_editor_wide = QPushButton("  Open Editor")
+        self._btn_open_editor_wide = QPushButton("  Editor")
         self._btn_open_editor_wide.setIcon(theme.icon_pixmap("pen", 14, theme.LAUNCHER.MUTED))
         self._btn_open_editor_wide.setFixedHeight(30)
         self._btn_open_editor_wide.setProperty("iconLabel", True)
         self._btn_open_editor_wide.setStyleSheet(self._style_outline())
-        self._btn_open_editor_wide.setAccessibleName("Open Editor")
+        self._btn_open_editor_wide.setAccessibleName("Editor")
         float_layout.addWidget(self._btn_open_editor_wide)
 
         float_layout.addWidget(self._rule())
@@ -432,8 +436,8 @@ class FloatingLauncher(QWidget):
         btn_dock_editor = QPushButton()
         btn_dock_editor.setFixedSize(40, 30)
         btn_dock_editor.setIcon(theme.icon_pixmap("pen", 15, theme.LAUNCHER.MUTED))
-        btn_dock_editor.setToolTip("Open Editor")
-        btn_dock_editor.setAccessibleName("Open Editor")
+        btn_dock_editor.setToolTip("Editor")
+        btn_dock_editor.setAccessibleName("Editor")
         btn_dock_editor.setStyleSheet(self._style_ghost())
         btn_dock_editor.clicked.connect(self._editor.bring_forward)
         dock_layout.addWidget(btn_dock_editor, 0, Qt.AlignmentFlag.AlignHCenter)
