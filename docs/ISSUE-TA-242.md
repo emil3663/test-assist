@@ -29,32 +29,58 @@ have been considered as its own problem.
 
 ## Change
 
-Not yet investigated or decided. Candidate directions, none confirmed or
-ruled out yet:
+**Decided, 2026-09-16:** use Windows' `SetWindowDisplayAffinity` with
+`WDA_EXCLUDEFROMCAPTURE` on the launcher's own HWND, toggled on for the
+duration of a recording and back to `WDA_NONE` when it stops. Rejected the
+other two candidates:
 
-- Exclude the launcher's own window rectangle from each captured frame
-  (crop/mask it out of the composite after the grab, rather than hiding the
-  window itself) — keeps Stop clickable and visible to the user while
-  keeping it out of the recorded output.
-- Temporarily reposition the launcher to a screen corner / off the active
-  capture region for the duration of a recording, if a capture region is
-  known ahead of time (may not apply to full-screen recording).
-- Some OS-level "exclude this window from screen capture" mechanism, if one
-  exists that Qt/Windows exposes and that Test Assist could opt into for its
-  own window specifically (worth checking before assuming a manual
-  crop/mask is the only path).
+- Per-frame crop/mask — ruled out. Requires recomputing the launcher's
+  screen rectangle every frame (it can move/dock mid-recording) and
+  reprocessing every captured frame; `WDA_EXCLUDEFROMCAPTURE` does the same
+  job once, at the compositor level, for free.
+- Temporary reposition — ruled out per the ticket's own note: doesn't apply
+  to full-screen recording, and would make the widget visibly jump on
+  screen during recording, which is worse than the current bug.
+
+`WDA_EXCLUDEFROMCAPTURE` (not the older `WDA_MONITOR`, which blacks the
+window out in capture instead of showing what's behind it) is built for
+exactly this case: the window stays visible and clickable on the physical
+display for the user, but is excluded from `BitBlt`/DWM-composited capture
+surfaces — which is what `QScreen.grabWindow(0)` reads from — so a
+recording shows whatever is behind the launcher instead of the launcher
+itself. Still-image capture is untouched, per this ticket's own acceptance
+bar: apply the affinity change only around `_start_recording()` /
+`_stop_recording()` (`launcher.py:739`/`:750`), never around the
+screenshot path.
+
+Implementation notes:
+- Get the HWND via `int(self.winId())`; call via `ctypes.windll.user32.SetWindowDisplayAffinity(hwnd, WDA_EXCLUDEFROMCAPTURE)` (`WDA_EXCLUDEFROMCAPTURE = 0x11`, `WDA_NONE = 0x0`).
+- Requires Windows 10 2004+. Check the call's return value (nonzero on
+  success per the Win32 API); if it fails (older Windows, or any other
+  reason), log via `debug_log.log(...)` and continue recording normally —
+  the launcher being visible in the recording is the pre-existing
+  behavior, not a new failure, so this must never block or crash a
+  recording.
+- Apply/clear only the launcher's own top-level window. If the app has more
+  than one top-level widget that could be visible during recording (e.g. a
+  docked vs. floating variant is the same window either way per the
+  existing dock/float code — confirm this before assuming a single call
+  site covers both).
+- Set the affinity back to `WDA_NONE` on stop, not left excluded — the
+  launcher should behave normally (including being screenshot-able) once a
+  recording isn't active.
 
 Whichever direction is taken, do not regress the requirement that Stop
 remains visible and clickable throughout the recording.
 
 ## Acceptance
 
-- [ ] Root cause confirmed via the frame-capture code path above (or a
-      different mechanism, if this investigation finds one).
-- [ ] A recording no longer includes the launcher widget's own on-screen
-      area in its captured frames — OR an explicit decision is recorded that
-      this is acceptable/out of scope, with reasoning, rather than left
-      silently unaddressed.
+- [ ] Root cause confirmed via the frame-capture code path above (already
+      done — see Context).
+- [ ] `SetWindowDisplayAffinity(WDA_EXCLUDEFROMCAPTURE)` is applied to the
+      launcher's HWND for the duration of a recording and reverted to
+      `WDA_NONE` when it stops, on both the hotkey-triggered and
+      button-triggered stop/start paths.
 - [ ] Stop stays reachable (visible and clickable) for the whole recording,
       regardless of which direction is taken.
 - [ ] Still-capture behavior (region/full-screen screenshots) is unaffected
