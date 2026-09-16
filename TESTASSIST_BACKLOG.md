@@ -1466,6 +1466,62 @@ that will actually ship.
   an app-behavior reason rather than an infrastructure one. CI-vs-manual
   decision unchanged.
 
+  **Re-run 2026-09-16, after TA-241 shipped — a genuinely new mechanism,
+  not a re-reproduction of the old one.** Fresh 1.5.0 build
+  (`build.ps1`, "Built and verified: Test Assist 1.5.0"), no stale
+  `TestAssist.exe` in the tray, `XMouseButtonControl.exe` confirmed not
+  running (checked via `tasklist`, so it needed no stopping this pass —
+  asked first rather than assuming last session's go-ahead carried
+  forward). `pytest tests_e2e`:
+
+  - **Check 1 — pass.** Same as every prior run.
+  - **Check 2 — fail.** `TimeoutError` waiting for a button titled
+    "Quick Capture" to appear. Confirmed by dumping the real launcher's
+    UI Automation control tree directly: that button is now named
+    **"Capture Region"** — the `ui-polish` launcher rebuild (merged into
+    `main` this session, well after `test_smoke.py` was last touched)
+    replaced the old single "Quick Capture" button with three separate
+    actions, and the test's selector was never updated to match.
+  - **Check 3 — fail.** `pywinauto.findwindows.ElementAmbiguousError:
+    There are 2 elements that match the criteria {'title': 'Editor', ...}`
+    — confirmed via the same control-tree dump: **two** buttons are now
+    named "Editor" in the floating panel simultaneously (the header
+    icon-only button and a separate wide button below RECENT, at
+    different screen rectangles) — both always present together when
+    undocked, which is the launcher's default state. The test's
+    `child_window(title="Editor", ...)` selector, written against the
+    pre-rebuild single-button launcher, is no longer unique.
+
+  **This is not the previous blocker recurring.** The `SendInput`/
+  `XMouseButtonControl.exe` block that defeated checks 2 and 3 before
+  would have produced silent no-effect timeouts with no other symptom;
+  what happened instead is `TimeoutError` (target genuinely doesn't
+  exist under that name) and `ElementAmbiguousError` (pywinauto's own
+  UI Automation query mechanics working correctly, enumerating and
+  disambiguating real controls) — both are pywinauto successfully
+  talking to the real app and failing only on a stale selector, the
+  opposite signature from an input-delivery block. **So the theory this
+  re-run was meant to test — does TA-241's `WindowDoesNotAcceptFocus`
+  fix make check 3 pass — is still unconfirmed, not disproven**: check 3
+  never got far enough to click anything, let alone test a minimize
+  toggle. Filed as this fresh finding rather than folded into the
+  already-closed input-delivery investigation, per that investigation's
+  own scope boundary.
+
+  **CI-vs-manual decision: not revisited, stays local/manual for now** —
+  a stated opinion, not left silent. The original blocker this decision
+  was partly built on (non-interactive contexts not delivering synthetic
+  input) is confirmed gone this run, which does weaken that specific
+  argument. But the lane is not close to reliably green either way right
+  now — 2 of 3 checks fail today, for a reason (selector staleness
+  against `ui-polish`'s launcher rebuild) that has nothing to do with
+  environment interactivity and everything to do with `tests_e2e` not
+  being kept in sync with app changes, which not being CI-wired makes
+  more likely, not less. Promoting an unreliable lane to CI now would
+  just start reporting red for reasons unrelated to real regressions.
+  Worth revisiting once `test_smoke.py`'s selectors are updated to match
+  the current UI and the lane passes cleanly again.
+
 ### TA-229 — `to_device_rect()` can seam a three-or-more-piece capture at a fractional device pixel ratio
 
 - **Phase:** 3
@@ -1757,13 +1813,14 @@ tonight per this session's decision (picker, amber default). Standalone —
 genuinely new work, not a bug fix, don't mix it into a bug-fix bundle.
 
 **Bundle F — Testing/infra hygiene:**
-- TA-228 check 3 — worth re-running now that TA-241 shipped. Check 3 was
-  the direct, black-box test of the exact minimize-toggle behavior TA-241
-  just fixed; it was blocked on a real-input-delivery problem (traced to
-  `XMouseButtonControl.exe`, unrelated to this app) that's since been
-  identified and worked around once already. Re-running it now has a real
-  chance of finally closing TA-228 for good rather than staying open on a
-  stale blocker.
+- TA-228 check 3 — re-run 2026-09-16, still open, blocked on a new
+  mechanism. `test_smoke.py`'s selectors are stale against the
+  `ui-polish` launcher rebuild ("Quick Capture" is now "Capture
+  Region"; "Editor" now matches two controls at once) - checks 2 and 3
+  fail on that, not on input delivery, so TA-241's fix is still
+  unconfirmed by this lane, not disproven. See TA-228's own entry above
+  for the full account. Updating `test_smoke.py`'s selectors to match
+  the current UI is the next step, not yet done.
 - TA-230 (C) — the foreign-hotkey-holder precondition message. Not found
   anywhere in `test_regressions.py` or `global_hotkeys.py` — still
   genuinely open, unlike (A)/(B).
