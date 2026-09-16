@@ -38,7 +38,46 @@ click" problem is fixed:
 
 ## Change
 
-Not yet investigated. First step is confirming the actual mechanism behind
+**Decided, 2026-09-16 — the two proposed UX additions, locked independently
+of the still-open root-cause investigation below:**
+
+- **Auto-dock on record start: yes, implement.** If the launcher is
+  floating/undocked when a recording starts, switch it to the docked strip
+  automatically (same transition `_dock_right()` already performs on a
+  manual click). This isn't just discoverability polish here — docked mode
+  has now been confirmed twice (T3, and the tester's follow-up
+  confirmation) to exhibit *neither* the double-click symptom *nor* the
+  phantom-snapshot side effect, while undocked mode has hit both, twice.
+  Forcing docked state during a recording is a real mitigation for this
+  ticket's whole mechanism, not just a UX nicety, even before that
+  mechanism is fully named.
+  **Required alongside it, not optional:** `_btn_dock_right`/`_btn_undock`
+  (the manual dock/float toggle) must also be hidden or disabled for the
+  duration of a recording, the same way `_refresh_recording_ui()` already
+  hides `_btn_dock_capture`/`_btn_dock_full` during recording (same
+  method, same pattern) — otherwise a user can re-float mid-recording and
+  land right back in the undocked state this mitigation exists to avoid,
+  making the auto-dock a one-time gesture instead of an actual guarantee.
+- **Pulsing/glowing Stop button: yes, implement.** Reuse whichever
+  existing token already renders the recording-state's red
+  border/indicator dot (`_refresh_recording_ui()`'s docstring already
+  calls this "the convention every recorder uses") rather than
+  introducing a new color — this is a treatment of an existing signal, not
+  a new one. Subtle enough not to be distracting over a multi-minute
+  recording; exact animation mechanism (QTimer-driven stylesheet toggle,
+  QPropertyAnimation, etc.) is an implementation choice, not a product one.
+
+**Neither of the above replaces confirming this ticket's actual root
+cause** — they reduce how often the bug is *encountered* in normal use,
+they don't explain or fix the underlying mechanism, and the acceptance
+criteria below (real signal, not assumption) still apply in full,
+especially for the phantom-snapshot side effect, which this ticket's own
+"why this raises priority" note already flags as worse than a UX
+annoyance. Confirm the phantom-snapshot mechanism specifically before
+considering this ticket done, even once the mitigations above ship.
+
+Not yet investigated (unchanged from before): first step is confirming the
+actual mechanism behind
 the double-click, not assuming it's the same "activation swallows the
 first click" pattern found elsewhere in this codebase for a different
 window/button — that needs its own check here, on this button, on this
@@ -186,3 +225,4 @@ not two coincidentally-correlated bugs. Still needs instrumentation to name
 the exact mechanism (see acceptance criteria above) — the docked-vs-
 undocked split is a strong, now twice-confirmed clue for whoever
 investigates, not itself the fix.
+
