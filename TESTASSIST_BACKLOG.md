@@ -699,6 +699,46 @@ that will actually ship.
     is worth an explicit "not in this ticket" note if that's ever
     expected to work.
 
+  **Correction, 2026-09-16 (later) — the "button path never calls
+  dismiss" claim above is wrong, checked against every relevant commit,
+  not just current `main`.** Attempting to implement this ticket's own
+  Scope item 1 found `_dismiss_active_modal_dialog()` already wired into
+  both `_btn_capture` and `_btn_dock_capture`'s shared click handler
+  (`_on_action_click` pre-merge, renamed `_on_capture_click` on
+  `ui-polish` and current `main`) — confirmed by direct `git show`/`git
+  blame` against `v1.4.0` (line 446), pre-merge `main` (`03726da`),
+  unrebased `ui-polish` (`ca71881`), and current `main`. The dismiss call
+  traces back to `5783f8dc` (the rc4 fix itself, 2026-09-09) and survived
+  intact through every rebuild since. `test_TA217_quick_capture_button_closes_an_open_about_dialog_before_capturing`
+  (`test_regressions.py`) already exercises this ticket's own stated
+  acceptance bar — real `.click()`, unstubbed `_start_capture`, asserts
+  `_overlay.isVisible()` and a real non-null grabbed pixmap — and passes.
+  A throwaway repro using `QTest.mouseClick` (a real synthesized Qt mouse
+  event, not a direct `.click()` call) against `_btn_capture` while
+  `editor._open_about()` was genuinely blocked in `dlg.exec()` also
+  dismissed the dialog correctly.
+
+  **So the code-level explanation this ticket has given for the button
+  path's no-op, in every pass from rc4 through tonight, does not match
+  the code and has not for several days.** Both rc4's and tonight's
+  hardware testers independently report the same real symptom (button
+  produces nothing while a modal is open) against builds whose code
+  provably has the dismiss call wired in — which means either (a) the
+  testers were holding a stale build without this fix (a stale `v1.4.0`
+  exe from this exact scenario was found sitting in `python/dist/` this
+  session), or (b) the real mechanism is something in-process/offscreen
+  Qt testing cannot observe at all, e.g. Windows disabling sibling HWNDs
+  at the OS level under a real modal dialog — the same class of gap
+  `TA-228`'s black-box lane exists for. **Not yet determined which.**
+  Scope item 1 as written ("wire dismiss into the button handler") is
+  not actionable — it asks for something that already exists. Before any
+  further code change is scoped here, this needs a fresh hardware repro
+  against current `main` specifically (not the stale build, not
+  `ui-polish` pre-merge), ideally with `TESTASSIST_DEBUG=1` so
+  `_dismiss_active_modal_dialog`'s own log line confirms whether it's
+  even reached on the real click, the same standard this ticket's own
+  hotkey-path finding already met. No code changed here.
+
 ### TA-218 — Check for Updates is present but not recognizable, and only reachable from the launcher
 
 - **Phase:** 2
