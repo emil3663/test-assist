@@ -502,6 +502,15 @@ class ScreenshotOverlay(QObject):
         # against a mixed-DPI layout with literal ratios - CI has no
         # HiDPI screen, and this is precisely the bug that a 1.0-ratio
         # machine cannot see.
+        # TA-246: a 535x418 logical selection on the 125%-laptop screen
+        # saved at 535x418 device pixels instead of the expected 669x523 -
+        # composite_ratio() trusts whatever devicePixelRatio() reports, so
+        # this pins exactly what each screen reported at grab time, per
+        # screen, rather than only the composited result downstream.
+        debug_log.log(
+            f"TA-246 devicePixelRatio at grab: "
+            f"{[(i, s.devicePixelRatio()) for i, s in enumerate(screens)]}"
+        )
         ratio = composite_ratio(pieces, [screen.devicePixelRatio() for screen in screens])
         size = device_result_size(pieces, ratio)
 
