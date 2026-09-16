@@ -259,3 +259,46 @@ precedence over the current `main`/`v1.4.0` behavior at merge time. No new
 ticket, no further repro work needed here — this is a merge-sequencing
 note, not an open defect: confirm the branch's per-screen-window overlay
 fix is what lands, and this symptom disappears with it.
+
+## 2026-09-16 — TA-222 decision recorded: option (b), left cluster only
+
+**User's decision:** keep Copy/Export/Save PNG right-anchored exactly as
+they are today. Only the left-hand controls (zoom, stroke, arrow style,
+opacity) should move to center — within the space to their left of the
+right-anchored export buttons, not across the whole row. Copy/Export/Save
+PNG are explicitly *not* to be pulled toward the middle.
+
+**Recommended implementation — smaller than it first looked.** Re-reading
+`_build_settings_bar()` (`python/editor.py`) with this specific outcome in
+mind: the row is already structured as
+`[leading stretch] [zoom..opacity widgets] [mid-row stretch] [Copy, Export,
+Save PNG]` (lines 459/531). Qt distributes a QHBoxLayout's leftover space
+among its stretch items in proportion to their stretch factors; when two
+stretch items have *equal* factors, Qt splits the leftover space evenly
+between them regardless of what that shared factor is (0 or otherwise) —
+which is exactly `_build_tools_bar()`'s own centering mechanism
+(`addStretch()` / factor 0 on both true ends).
+
+Applied to this row's actual shape: with the leading and mid-row stretches
+holding *equal* factors, the leading stretch and the mid-row stretch each
+absorb half of `(row width - left-cluster width - right-group width)`.
+That pushes the left cluster's center to sit at the midpoint of the space
+*before* the right-anchored group — i.e., exactly "left cluster centered,
+Copy/Export/Save PNG untouched and still right-anchored." No widget needs
+moving into a new sub-layout; the two stretch calls just need matching
+factors.
+
+Concretely: **change line 531 from `layout.addStretch(1)` to
+`layout.addStretch()`**, matching the leading stretch at line 459 (both
+factor 0), the same way `_build_tools_bar()` already does it. This is the
+recommended fix — much smaller than the "separate the groups" framing in
+the section above suggested, once the specific left-cluster-only outcome
+was decided rather than left open between (a) and (b).
+
+**Not verified on a live render** — this is layout-math reasoning from
+reading the code, not a screenshot. Per this project's own standing bar
+(measured, not argued), whoever implements this should take a screenshot
+of the settings bar after the change and confirm the left cluster visually
+centers in the space left of Copy/Export/Save PNG, the same way HW-6's
+DPR-ratio claim was confirmed by pixel measurement rather than accepted on
+reasoning alone.
