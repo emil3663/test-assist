@@ -1522,6 +1522,29 @@ that will actually ship.
   Worth revisiting once `test_smoke.py`'s selectors are updated to match
   the current UI and the lane passes cleanly again.
 
+  **Selector fix decided, 2026-09-16 - no hardware needed for this part.**
+  Both failures are pure `test_smoke.py` staleness, fully diagnosable from
+  the repo:
+  - Check 2: `child_window(title="Quick Capture", ...)` -> `"Capture
+    Region"`, matching `launcher.py`'s `_btn_capture` text directly.
+  - Check 3: `child_window(title="Editor", ...)` is ambiguous because
+    `_btn_open_editor` (header icon) and `_btn_open_editor_wide` (wide
+    button below RECENT) are both accessible-named "Editor" and both
+    visible together when undocked - confirmed in `launcher.py` that both
+    connect to the identical handler, `self._editor.bring_forward`
+    (lines 398-399), so which one the test clicks makes no functional
+    difference. Decided: disambiguate with pywinauto's own
+    `found_index=0` rather than giving the two buttons different
+    accessible names - they are genuinely the same action from a user's
+    perspective (that sameness is *why* TA-248 named them identically),
+    so a real screen-reader user hearing "Editor" from either is correct
+    behavior, not a bug to fix for this test's convenience.
+  This only fixes the selectors so checks 2 and 3 can run at all - it does
+  not answer whether TA-241 actually makes check 3 pass; that still needs
+  a real hardware run once these selectors are in.
+
+  **`XMouseButtonControl.exe`, 2026-09-16: permanently disabled on Emil's dev rig, no longer a live concern for this lane.** It's also not a widely-used tool, so this was a local dev-machine artifact specific to running synthetic test input, not something a real user's mouse click was ever exposed to - nothing here has a product-facing follow-up. Noted so a future pass doesn't wonder whether to check for it again.
+
 ### TA-229 — `to_device_rect()` can seam a three-or-more-piece capture at a fractional device pixel ratio
 
 - **Phase:** 3
