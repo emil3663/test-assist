@@ -1,6 +1,7 @@
 """Colour tokens, fonts and Qt stylesheet for Test Assist (PySide6 edition)."""
 
 import sys
+from types import SimpleNamespace
 
 from PySide6.QtCore import QRectF
 from PySide6.QtGui import QColor, QFont, QIcon
@@ -205,6 +206,27 @@ def use_scheme(light: bool) -> None:
 
 
 use_scheme(light=False)
+
+
+# ── Launcher palette ─────────────────────────────────────────────────────────
+#
+# The launcher is a standalone always-on-top overlay, not a surface of the
+# editor's own identity - its whole point is to stay visually distinct from
+# whatever application is under test, in a dark panel with an amber accent,
+# regardless of what the OS (or the editor, which follows it) is set to.
+# Unlike ACCENT/BG_900/etc. above, these values are a fixed snapshot, not
+# swapped by use_scheme() - launcher.py reads through this namespace instead
+# of the module-level globals so an OS light-mode session doesn't turn the
+# launcher's own indigo-on-light or lose the amber that makes it read as a
+# tool overlaid on the test, not part of it. Values are the original amber
+# palette launcher.py carried before it was routed through theme tokens.
+LAUNCHER = SimpleNamespace(**{
+    **_DARK,
+    "ACCENT":         "#c8763a",
+    "ACCENT_HOVER":   "#d7873d",
+    "ACCENT_PRESSED": "#a86030",
+    "PANEL_BORDER":   (200, 120, 60, 80),
+})
 
 
 def editor_style() -> str:

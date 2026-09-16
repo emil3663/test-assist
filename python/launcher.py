@@ -157,7 +157,7 @@ class FloatingLauncher(QWidget):
         badge.setFixedSize(24, 24)
         badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
         badge.setStyleSheet(
-            f"background:{theme.ACCENT}; color:#ffffff; border-radius:6px;"
+            f"background:{theme.LAUNCHER.ACCENT}; color:#ffffff; border-radius:6px;"
             f" font-size:10px; font-weight:800;"
         )
         header_row.addWidget(badge)
@@ -166,11 +166,11 @@ class FloatingLauncher(QWidget):
         name_col.setSpacing(0)
         title_lbl = QLabel("Test Assist")
         title_lbl.setStyleSheet(
-            f"color:{theme.TEXT}; font-size:13px; font-weight:700; background:transparent;"
+            f"color:{theme.LAUNCHER.TEXT}; font-size:13px; font-weight:700; background:transparent;"
         )
         version_lbl = QLabel(f"v{self._version}" if self._version else "")
         version_lbl.setStyleSheet(
-            f"color:{theme.MUTED}; font-size:9px; background:transparent;"
+            f"color:{theme.LAUNCHER.MUTED}; font-size:9px; background:transparent;"
         )
         name_col.addWidget(title_lbl)
         name_col.addWidget(version_lbl)
@@ -179,7 +179,7 @@ class FloatingLauncher(QWidget):
 
         self._btn_open_editor = QPushButton()
         self._btn_open_editor.setFixedSize(22, 22)
-        self._btn_open_editor.setIcon(theme.icon_pixmap("pen", 13, theme.MUTED))
+        self._btn_open_editor.setIcon(theme.icon_pixmap("pen", 13, theme.LAUNCHER.MUTED))
         self._btn_open_editor.setToolTip("Open Editor")
         # setAccessibleName(), not just the tooltip (TA-228): this is an
         # icon-only button, indistinguishable from its unlabeled siblings
@@ -191,7 +191,7 @@ class FloatingLauncher(QWidget):
 
         self._btn_check_updates = QPushButton()
         self._btn_check_updates.setFixedSize(22, 22)
-        self._btn_check_updates.setIcon(theme.icon_pixmap("updates", 13, theme.MUTED))
+        self._btn_check_updates.setIcon(theme.icon_pixmap("updates", 13, theme.LAUNCHER.MUTED))
         self._btn_check_updates.setToolTip("Check for Updates")
         self._btn_check_updates.setAccessibleName("Check for Updates")
         self._btn_check_updates.setStyleSheet(self._style_ghost())
@@ -201,14 +201,14 @@ class FloatingLauncher(QWidget):
         # what it does and what the suite already calls it.
         self._btn_dock_right = QPushButton()
         self._btn_dock_right.setFixedSize(22, 22)
-        self._btn_dock_right.setIcon(theme.icon_pixmap("minimise", 13, theme.MUTED))
+        self._btn_dock_right.setIcon(theme.icon_pixmap("minimise", 13, theme.LAUNCHER.MUTED))
         self._btn_dock_right.setToolTip("Shrink to the compact strip")
         self._btn_dock_right.setAccessibleName("Shrink to strip")
         self._btn_dock_right.setStyleSheet(self._style_ghost())
 
         self._btn_close = QPushButton()
         self._btn_close.setFixedSize(22, 22)
-        self._btn_close.setIcon(theme.icon_pixmap("close", 13, theme.MUTED))
+        self._btn_close.setIcon(theme.icon_pixmap("close", 13, theme.LAUNCHER.MUTED))
         self._btn_close.setToolTip("Hide to the tray - click the tray icon to bring it back")
         self._btn_close.setAccessibleName("Hide to tray")
         self._btn_close.setStyleSheet(self._style_ghost())
@@ -238,7 +238,7 @@ class FloatingLauncher(QWidget):
         action_row.setSpacing(8)
 
         self._btn_full_capture = QPushButton("  Full Screen")
-        self._btn_full_capture.setIcon(theme.icon_pixmap("fullscreen", 14, theme.MUTED))
+        self._btn_full_capture.setIcon(theme.icon_pixmap("fullscreen", 14, theme.LAUNCHER.MUTED))
         self._btn_full_capture.setFixedHeight(32)
         self._btn_full_capture.setToolTip("Capture the whole screen, including the taskbar and clock")
         self._btn_full_capture.setAccessibleName("Full Screen")
@@ -264,15 +264,15 @@ class FloatingLauncher(QWidget):
         rec_row.setSpacing(6)
         self._rec_dot = QLabel("\u25cf")
         self._rec_dot.setStyleSheet(
-            f"color:{theme.DANGER}; font-size:15px; background:transparent;"
+            f"color:{theme.LAUNCHER.DANGER}; font-size:15px; background:transparent;"
         )
         rec_word = QLabel("Recording")
         rec_word.setStyleSheet(
-            f"color:{theme.DANGER}; font-size:12px; font-weight:700; background:transparent;"
+            f"color:{theme.LAUNCHER.DANGER}; font-size:12px; font-weight:700; background:transparent;"
         )
         self._rec_label = QLabel("00:00")
         self._rec_label.setStyleSheet(
-            f"color:{theme.TEXT}; font-size:15px; font-weight:700; background:transparent;"
+            f"color:{theme.LAUNCHER.TEXT}; font-size:15px; font-weight:700; background:transparent;"
         )
         rec_row.addWidget(self._rec_dot)
         rec_row.addWidget(rec_word)
@@ -293,7 +293,7 @@ class FloatingLauncher(QWidget):
         # ── Recent captures ───────────────────────────────────────────────
         self._recent_hdr = QLabel("RECENT")
         self._recent_hdr.setStyleSheet(
-            f"color:{theme.MUTED}; font-size:9px; font-weight:700;"
+            f"color:{theme.LAUNCHER.MUTED}; font-size:9px; font-weight:700;"
             f" letter-spacing:1.2px; background:transparent;"
         )
         float_layout.addWidget(self._recent_hdr)
@@ -307,7 +307,7 @@ class FloatingLauncher(QWidget):
             slot.setAlignment(Qt.AlignmentFlag.AlignCenter)
             slot.setScaledContents(False)
             slot.setStyleSheet(
-                f"background:{theme.BG_700}; border:1px solid {theme.LINE};"
+                f"background:{theme.LAUNCHER.BG_700}; border:1px solid {theme.LAUNCHER.LINE};"
                 f" border-radius:6px;"
             )
             self._recent_slots.append(slot)
@@ -315,7 +315,7 @@ class FloatingLauncher(QWidget):
         float_layout.addLayout(recent_row)
 
         self._btn_open_editor_wide = QPushButton("  Open Editor")
-        self._btn_open_editor_wide.setIcon(theme.icon_pixmap("pen", 14, theme.MUTED))
+        self._btn_open_editor_wide.setIcon(theme.icon_pixmap("pen", 14, theme.LAUNCHER.MUTED))
         self._btn_open_editor_wide.setFixedHeight(30)
         self._btn_open_editor_wide.setProperty("iconLabel", True)
         self._btn_open_editor_wide.setStyleSheet(self._style_outline())
@@ -330,7 +330,7 @@ class FloatingLauncher(QWidget):
         self._hint_lbl = QLabel("")
         self._hint_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._hint_lbl.setStyleSheet(
-            f"color:{theme.MUTED}; font-size:9px; background:transparent;"
+            f"color:{theme.LAUNCHER.MUTED}; font-size:9px; background:transparent;"
         )
         self._hint_lbl.hide()
         float_layout.addWidget(self._hint_lbl)
@@ -341,7 +341,7 @@ class FloatingLauncher(QWidget):
         self._exit_hint = QLabel("Hides to the tray  \u00b7  right-click  \u2192  Quit")
         self._exit_hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._exit_hint.setStyleSheet(
-            f"color:{theme.MUTED}; font-size:9px; background:transparent;"
+            f"color:{theme.LAUNCHER.MUTED}; font-size:9px; background:transparent;"
         )
         float_layout.addWidget(self._exit_hint)
 
@@ -385,7 +385,7 @@ class FloatingLauncher(QWidget):
         dock_badge.setFixedSize(28, 28)
         dock_badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
         dock_badge.setStyleSheet(
-            f"background:{theme.ACCENT}; color:#ffffff; border-radius:7px;"
+            f"background:{theme.LAUNCHER.ACCENT}; color:#ffffff; border-radius:7px;"
             f" font-size:10px; font-weight:800;"
         )
         dock_layout.addWidget(dock_badge, 0, Qt.AlignmentFlag.AlignHCenter)
@@ -395,7 +395,7 @@ class FloatingLauncher(QWidget):
         # panel with the labels removed rather than a different tool.
         self._btn_dock_capture = QPushButton()
         self._btn_dock_capture.setFixedSize(40, 36)
-        self._btn_dock_capture.setIcon(theme.icon_pixmap("region", 18, theme.TEXT))
+        self._btn_dock_capture.setIcon(theme.icon_pixmap("region", 18, theme.LAUNCHER.TEXT))
         self._btn_dock_capture.setToolTip("Capture region")
         self._btn_dock_capture.setAccessibleName("Capture Region")
         self._btn_dock_capture.setStyleSheet(self._style_icon_btn())
@@ -403,7 +403,7 @@ class FloatingLauncher(QWidget):
 
         self._btn_dock_full = QPushButton()
         self._btn_dock_full.setFixedSize(40, 36)
-        self._btn_dock_full.setIcon(theme.icon_pixmap("fullscreen", 18, theme.TEXT))
+        self._btn_dock_full.setIcon(theme.icon_pixmap("fullscreen", 18, theme.LAUNCHER.TEXT))
         self._btn_dock_full.setToolTip("Capture full screen")
         self._btn_dock_full.setAccessibleName("Full Screen")
         self._btn_dock_full.setStyleSheet(self._style_icon_btn())
@@ -422,7 +422,7 @@ class FloatingLauncher(QWidget):
         self._dock_rec_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._dock_rec_label.setFixedHeight(13)
         self._dock_rec_label.setStyleSheet(
-            f"color:{theme.DANGER}; font-size:10px; font-weight:700; background:transparent;"
+            f"color:{theme.LAUNCHER.DANGER}; font-size:10px; font-weight:700; background:transparent;"
         )
         self._dock_rec_label.hide()
         dock_layout.addWidget(self._dock_rec_label)
@@ -431,7 +431,7 @@ class FloatingLauncher(QWidget):
 
         btn_dock_editor = QPushButton()
         btn_dock_editor.setFixedSize(40, 30)
-        btn_dock_editor.setIcon(theme.icon_pixmap("pen", 15, theme.MUTED))
+        btn_dock_editor.setIcon(theme.icon_pixmap("pen", 15, theme.LAUNCHER.MUTED))
         btn_dock_editor.setToolTip("Open Editor")
         btn_dock_editor.setAccessibleName("Open Editor")
         btn_dock_editor.setStyleSheet(self._style_ghost())
@@ -440,7 +440,7 @@ class FloatingLauncher(QWidget):
 
         self._btn_undock = QPushButton()
         self._btn_undock.setFixedSize(40, 30)
-        self._btn_undock.setIcon(theme.icon_pixmap("expand", 15, theme.MUTED))
+        self._btn_undock.setIcon(theme.icon_pixmap("expand", 15, theme.LAUNCHER.MUTED))
         self._btn_undock.setToolTip("Expand to the full panel")
         self._btn_undock.setAccessibleName("Expand")
         self._btn_undock.setStyleSheet(self._style_ghost())
@@ -460,7 +460,7 @@ class FloatingLauncher(QWidget):
     def _rule(self) -> QFrame:
         line = QFrame()
         line.setFixedHeight(1)
-        line.setStyleSheet(f"background:{theme.LINE}; border:none;")
+        line.setStyleSheet(f"background:{theme.LAUNCHER.LINE}; border:none;")
         return line
 
     # ── Global hotkeys ───────────────────────────────────────────────────────
@@ -662,8 +662,8 @@ class FloatingLauncher(QWidget):
         for index, slot in enumerate(slots):
             newest = index == 0 and bool(files)
             slot.setStyleSheet(
-                f"background:{theme.BG_700}; border:1px solid "
-                f"{theme.ACCENT if newest else theme.LINE}; border-radius:6px;"
+                f"background:{theme.LAUNCHER.BG_700}; border:1px solid "
+                f"{theme.LAUNCHER.ACCENT if newest else theme.LAUNCHER.LINE}; border-radius:6px;"
             )
             if index < len(files):
                 pixmap = QPixmap(str(files[index]))
@@ -918,12 +918,12 @@ class FloatingLauncher(QWidget):
         # reading a label - which is the difference between noticing a
         # recording is still running and not.
         if self._rec_timer.isActive():
-            border = QColor(theme.DANGER)
+            border = QColor(theme.LAUNCHER.DANGER)
             border.setAlpha(220)
             p.setPen(QPen(border, 2))
         else:
-            p.setPen(QPen(QColor(*theme.PANEL_BORDER), 1))
-        p.setBrush(QBrush(QColor(*theme.PANEL_BG)))
+            p.setPen(QPen(QColor(*theme.LAUNCHER.PANEL_BORDER), 1))
+        p.setBrush(QBrush(QColor(*theme.LAUNCHER.PANEL_BG)))
         p.drawRoundedRect(self.rect().adjusted(1, 1, -1, -1), 20, 20)
         p.end()
 
@@ -998,30 +998,30 @@ class FloatingLauncher(QWidget):
     def _style_primary() -> str:
         return f"""
             QPushButton {{
-                background-color: {theme.ACCENT};
+                background-color: {theme.LAUNCHER.ACCENT};
                 color: #ffffff;
                 border: none;
                 border-radius: 10px;
                 font-weight: 700;
                 font-size: 13px;
             }}
-            QPushButton:hover   {{ background-color: {theme.ACCENT_HOVER}; }}
-            QPushButton:pressed {{ background-color: {theme.ACCENT_PRESSED}; }}
+            QPushButton:hover   {{ background-color: {theme.LAUNCHER.ACCENT_HOVER}; }}
+            QPushButton:pressed {{ background-color: {theme.LAUNCHER.ACCENT_PRESSED}; }}
         """
 
     @staticmethod
     def _style_danger() -> str:
         return f"""
             QPushButton {{
-                background-color: {theme.DANGER};
+                background-color: {theme.LAUNCHER.DANGER};
                 color: #ffffff;
                 border: none;
                 border-radius: 10px;
                 font-weight: 700;
                 font-size: 13px;
             }}
-            QPushButton:hover   {{ background-color: {theme.DANGER_HOVER}; }}
-            QPushButton:pressed {{ background-color: {theme.DANGER_PRESSED}; }}
+            QPushButton:hover   {{ background-color: {theme.LAUNCHER.DANGER_HOVER}; }}
+            QPushButton:pressed {{ background-color: {theme.LAUNCHER.DANGER_PRESSED}; }}
         """
 
     @staticmethod
@@ -1029,13 +1029,13 @@ class FloatingLauncher(QWidget):
         return f"""
             QPushButton {{
                 background-color: transparent;
-                color: {theme.MUTED};
+                color: {theme.LAUNCHER.MUTED};
                 border: 1px solid rgba(124,131,253,0.30);
                 border-radius: 10px;
                 font-weight: 600;
                 font-size: 13px;
             }}
-            QPushButton:hover    {{ border-color: {theme.ACCENT}; color: {theme.ACCENT}; }}
+            QPushButton:hover    {{ border-color: {theme.LAUNCHER.ACCENT}; color: {theme.LAUNCHER.ACCENT}; }}
             QPushButton:disabled {{ color: #4a4f63; border-color: rgba(124,131,253,0.10); }}
         """
 
@@ -1050,7 +1050,7 @@ class FloatingLauncher(QWidget):
                 border: 1px solid transparent;
                 border-radius: 5px;
             }}
-            QPushButton:hover {{ background-color: {theme.BG_700}; }}
+            QPushButton:hover {{ background-color: {theme.LAUNCHER.BG_700}; }}
         """
 
     @staticmethod
@@ -1060,12 +1060,12 @@ class FloatingLauncher(QWidget):
         square it becomes while recording is recognisably the same button."""
         return f"""
             QPushButton {{
-                background-color: {theme.DANGER};
+                background-color: {theme.LAUNCHER.DANGER};
                 border: none;
                 border-radius: {radius}px;
             }}
-            QPushButton:hover {{ background-color: {theme.DANGER_HOVER}; }}
-            QPushButton:pressed {{ background-color: {theme.DANGER_PRESSED}; }}
+            QPushButton:hover {{ background-color: {theme.LAUNCHER.DANGER_HOVER}; }}
+            QPushButton:pressed {{ background-color: {theme.LAUNCHER.DANGER_PRESSED}; }}
         """
 
     @staticmethod
@@ -1074,7 +1074,7 @@ class FloatingLauncher(QWidget):
         return f"""
             QPushButton {{
                 background-color: rgba(124,131,253,0.08);
-                color: {theme.MUTED};
+                color: {theme.LAUNCHER.MUTED};
                 border: 1px solid rgba(124,131,253,0.25);
                 border-radius: 6px;
                 font-size: 11px;
@@ -1082,7 +1082,7 @@ class FloatingLauncher(QWidget):
             }}
             QPushButton:hover {{
                 background-color: rgba(124,131,253,0.18);
-                color: {theme.ACCENT};
+                color: {theme.LAUNCHER.ACCENT};
                 border-color: rgba(124,131,253,0.50);
             }}
             QPushButton:pressed {{ background-color: rgba(124,131,253,0.30); }}
