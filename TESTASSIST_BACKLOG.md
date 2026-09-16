@@ -646,6 +646,59 @@ that will actually ship.
   dialog open blocking input, nor closes it without capturing.
 - **Dependencies:** None.
 
+  **Re-verified on hardware, Launcher Evaluation Pass T5, 2026-09-16 —
+  sub-item 1 still fails exactly as rc4 left it; sub-item 2 is not what
+  rc4's report described.**
+
+  1. *Button path (both floating and docked widgets):* tester's report:
+     "both docked and floating widgets are not able to capture the about
+     or anything else" while the About dialog is open. Matches rc4's
+     finding exactly — `_dismiss_active_modal_dialog()` is still only
+     wired into `_on_global_hotkey()`, not into either Quick Capture
+     button's click handler (`launcher.py`, `_btn_capture` /
+     `_btn_dock_capture`). Still an unqualified no-op by design, not a
+     new regression.
+
+  2. *Hotkey path:* re-tested with `TESTASSIST_DEBUG=1` enabled (the
+     opt-in logging this ticket's own Scope asked for), rather than
+     relying on another unaided manual report. `history/debug.log`:
+
+     ```
+     [2026-09-16 03:08:29] _dismiss_active_modal_dialog: activeModalWidget=<PySide6.QtWidgets.QDialog(0x1a0ddfbe7a0) at 0x000001A0C4512A40>
+     [2026-09-16 03:08:29] _start_capture: singleShot fired, calling _overlay.activate()
+     [2026-09-16 03:08:33] TA-223 drag move: globalPosition=(431, 109) ...
+     [2026-09-16 03:08:34] TA-225 grab: dragged_rect=(430, 107, 855, 641) ...
+     ```
+
+     This is the first time `activeModalWidget` has ever logged as
+     non-`None` in this file's history — a real modal was up, Alt+P (the
+     tester said "ctrl+p"; the bound hotkey is actually Alt+P per
+     `_register_hotkeys()` — likely just a naming slip, the behavior
+     matches Alt+P's code path either way) dismissed it, the overlay
+     activated, and a full drag-to-grab cycle completed successfully.
+     **rc4's "hotkey path itself no longer captures" is not reproduced
+     here — the capture mechanism works end-to-end via the hotkey.**
+
+     But the resulting file
+     (`history/snapshot-20260916-030834-537324.png`, viewed directly)
+     shows the Editor window from an *earlier*, unrelated capture — not
+     the About dialog. Mechanism: dismiss happens, then only *after*
+     that does `_start_capture()`'s 220ms `singleShot` fire and the
+     overlay appear — so by the time a selection can be dragged, About is
+     already gone. The hotkey path was never going to be able to
+     capture About's own content, regardless of whether the capture
+     itself succeeds afterward. So "you can't get a screenshot of the
+     About dialog via Quick Capture" is confirmed true for both paths —
+     just for two different reasons (button: no-ops entirely; hotkey:
+     works, but only on whatever is left after About closes).
+  - This ticket's Scope/Acceptance criteria stand as written; item 1
+    above is what they still need to fix, and the acceptance criteria's
+    "produce a working, interactive capture overlay afterward" is now
+    confirmed met for the hotkey path specifically — it's the capturing
+    *of the dialog itself* that was never in scope or possible here, and
+    is worth an explicit "not in this ticket" note if that's ever
+    expected to work.
+
 ### TA-218 — Check for Updates is present but not recognizable, and only reachable from the launcher
 
 - **Phase:** 2
