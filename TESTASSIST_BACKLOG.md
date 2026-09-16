@@ -1594,6 +1594,35 @@ that will actually ship.
   user-facing behaviour is involved. (C) is developer experience; (A) and
   (B)'s instances were both caused by PR #19's rebuild, which is deferred.
 
+**2026-09-16 (later) — (C) closed.** `hotkeys_available`, a fixture in
+`test_regressions.py`, probes the same three combinations
+`_register_hotkeys()` registers (claim-and-release with a throwaway id,
+`MOD_NOREPEAT` included to match `GlobalHotkeyManager.register()`
+exactly) and is applied to the four tests that construct a real launcher
+with `register_global_hotkeys=True` for reasons other than deliberately
+testing a conflict — `test_TA211_global_hotkeys_register_and_are_advertised`,
+`test_TA211_global_hotkey_dispatch_routes_to_the_right_action`,
+`test_TA211_an_unrelated_native_message_is_ignored`,
+`test_TA211_hotkeys_are_released_on_close`.
+`test_TA211_a_failed_registration_is_surfaced_and_not_advertised` is
+deliberately left without it, per this ticket's own Scope — it exists to
+create exactly the condition the precondition detects, on purpose.
+Verified end to end, not just read from the code: with Alt+P claimed
+from an external process, the four guarded tests now skip with `Alt+P is
+held by another process; close any running Test Assist (check the
+tray)` instead of failing; the excluded test fails at its own setup
+assertion in that same run, which is expected and correct — it has no
+precondition by design, and a real external conflict coinciding with its
+own simulated one is exactly the contrived case it isn't equipped for.
+`test_TA230C_precondition_names_a_deliberately_held_hotkey` covers the
+ticket's own acceptance bar (claims Alt+P from the test itself, same
+pattern as the excluded test, asserts the precondition names it
+specifically). (A) and (B) were already confirmed closed earlier this
+session (see the 1.5.0 status section above) — all three sub-problems
+are now closed. The convention note is in `docs/WORKING_AGREEMENTS.md`'s
+"Two things already learned here" section, a third entry alongside the
+two this ticket's own text already referenced.
+
 ### Gate A — Code complete
 - TA-201, TA-202, TA-203 merged
 - Suite green, no skips, no test opens a socket
@@ -1764,9 +1793,8 @@ genuinely new work, not a bug fix, don't mix it into a bug-fix bundle.
   identified and worked around once already. Re-running it now has a real
   chance of finally closing TA-228 for good rather than staying open on a
   stale blocker.
-- TA-230 (C) — the foreign-hotkey-holder precondition message. Not found
-  anywhere in `test_regressions.py` or `global_hotkeys.py` — still
-  genuinely open, unlike (A)/(B).
+- TA-230 (C) — closed 2026-09-16. See TA-230's own entry above for the
+  full account.
 
 **Bundle G — Documentation & bookkeeping catch-up** (no code risk, but
 real accuracy debt):

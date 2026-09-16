@@ -146,3 +146,22 @@ path a suite deliberately avoids: `_apply_hotkey_labels()` runs only when
 real OS state — so a refactor removed two buttons it referenced, 350 tests
 stayed green, and the app died on startup. Where logic can be exercised
 without the real resource, exercise it that way as well.
+
+**A default-off flag guarding real OS state is a coverage hazard on its
+own, separate from what it guards.** `register_global_hotkeys` defaults to
+`False` for a sound reason — `RegisterHotKey` claims process-wide state
+concurrent tests would fight over — but that same reason means the `True`
+path is exercised by a handful of tests, no more, and whatever those tests
+assume about the machine they run on becomes an assumption the whole path
+inherits silently. TA-230 cost real time three separate ways from this one
+flag before the hazard was named: a coverage gap (dead code only the
+`True` path reaches), a cross-platform blind spot (a `skipif`-guarded test
+rotting unseen off Windows), and a foreign-holder collision (a leftover
+`TestAssist.exe` already holding a hotkey, read as a code regression
+during a release gate until someone diagnosed it under time pressure).
+None of the three announces itself in a green suite — each needed someone
+to go looking. Any other default-off flag guarding a real, shared resource
+(a port, a file lock, a registered protocol handler) is worth the same
+question: what does the suite assume is true about the machine while that
+path is skipped, and does anything check the assumption before trusting
+its result.

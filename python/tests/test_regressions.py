@@ -537,8 +537,66 @@ def test_launcher_build_ui_buttons_include_shortcut_hints(qapp) -> None:
 # exercises the real Win32 RegisterHotKey/UnregisterHotKey API - no
 # substitution - since that binding, not a label, is the actual claim.
 
+def _find_held_hotkey() -> str | None:
+    """TA-230(C): probes the same three combinations the launcher itself
+    registers (launcher.py's _register_hotkeys(), MOD_NOREPEAT included to
+    match exactly what GlobalHotkeyManager.register() itself ORs in) by
+    claiming and immediately releasing each with a throwaway id - the same
+    pattern test_TA211_a_failed_registration_is_surfaced_and_not_advertised
+    and test_TA211_hotkeys_are_released_on_close already use elsewhere in
+    this file. Returns the label of the first one already held by another
+    process, or None if all three are free.
+
+    A plain function, not the fixture itself, so the probe logic is
+    directly testable (see
+    test_TA230C_precondition_names_a_deliberately_held_hotkey below)
+    without needing to assert on pytest's own skip machinery.
+    """
+    import ctypes
+
+    from global_hotkeys import MOD_ALT, MOD_NOREPEAT, MOD_SHIFT
+
+    user32 = ctypes.windll.user32
+    probe_id = 0xF00A
+    combos = [
+        ("Alt+P", MOD_ALT, ord("P")),
+        ("Alt+Shift+P", MOD_ALT | MOD_SHIFT, ord("P")),
+        ("Alt+V", MOD_ALT, ord("V")),
+    ]
+    for label, modifiers, virtual_key in combos:
+        claimed = user32.RegisterHotKey(None, probe_id, modifiers | MOD_NOREPEAT, virtual_key)
+        if not claimed:
+            return label
+        user32.UnregisterHotKey(None, probe_id)
+    return None
+
+
+@pytest.fixture
+def hotkeys_available():
+    """TA-230(C): a precondition, not a fix - RegisterHotKey is process-wide
+    OS state, and a genuinely running Test Assist instance (or anything
+    else already holding one of the three combinations the launcher
+    registers) makes every test below fail with a bare assertion that
+    reads as a code regression. That is exactly what cost real time during
+    PR #8's release gate: three opaque phantom failures, correctly
+    diagnosed as leftover process state only after investigation,
+    mid-release.
+
+    Skips (not fails) if _find_held_hotkey() finds one genuinely held -
+    not a code defect, RegisterHotKey is behaving correctly - naming the
+    cause explicitly rather than leaving three assertion failures to
+    diagnose from scratch.
+    """
+    held = _find_held_hotkey()
+    if held is not None:
+        pytest.skip(
+            f"{held} is held by another process; close any running "
+            f"Test Assist (check the tray)"
+        )
+
+
 @pytest.mark.skipif(sys.platform != "win32", reason="RegisterHotKey is a Win32 API")
-def test_TA211_global_hotkeys_register_and_are_advertised(qapp) -> None:
+def test_TA211_global_hotkeys_register_and_are_advertised(qapp, hotkeys_available) -> None:
     launcher = FloatingLauncher(_EditorStub(), register_global_hotkeys=True)
     try:
         assert launcher._hotkey_registered == {
@@ -557,7 +615,7 @@ def test_TA211_global_hotkeys_register_and_are_advertised(qapp) -> None:
 
 
 @pytest.mark.skipif(sys.platform != "win32", reason="RegisterHotKey is a Win32 API")
-def test_TA211_global_hotkey_dispatch_routes_to_the_right_action(qapp) -> None:
+def test_TA211_global_hotkey_dispatch_routes_to_the_right_action(qapp, hotkeys_available) -> None:
     """The actual binding: a synthetic WM_HOTKEY (not a real OS-delivered
     key event, which this suite has no way to inject) must reach the same
     actions the old window-focused keyPressEvent used to call directly."""
@@ -592,7 +650,7 @@ def test_TA211_global_hotkey_dispatch_routes_to_the_right_action(qapp) -> None:
 
 
 @pytest.mark.skipif(sys.platform != "win32", reason="RegisterHotKey is a Win32 API")
-def test_TA211_an_unrelated_native_message_is_ignored(qapp) -> None:
+def test_TA211_an_unrelated_native_message_is_ignored(qapp, hotkeys_available) -> None:
     """The event filter must not react to every native message - only
     WM_HOTKEY, and only for a registered id."""
     import ctypes
@@ -835,7 +893,7 @@ def test_TA211_a_failed_registration_is_surfaced_and_not_advertised(qapp) -> Non
 
 
 @pytest.mark.skipif(sys.platform != "win32", reason="RegisterHotKey is a Win32 API")
-def test_TA211_hotkeys_are_released_on_close(qapp) -> None:
+def test_TA211_hotkeys_are_released_on_close(qapp, hotkeys_available) -> None:
     """A hotkey left registered after the launcher is gone would permanently
     deny that combination to every other application until the process
     exits - close() must release it immediately, not just at process exit."""
@@ -855,6 +913,36 @@ def test_TA211_hotkeys_are_released_on_close(qapp) -> None:
     finally:
         if reclaimed:
             user32.UnregisterHotKey(None, probe_id)
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="RegisterHotKey is a Win32 API")
+def test_TA230C_precondition_names_a_deliberately_held_hotkey(qapp) -> None:
+    """TA-230(C)'s own acceptance bar: the precondition must report the
+    right cause when a hotkey is genuinely held, not just stay quiet when
+    the machine happens to be clean - the failure mode this whole ticket
+    exists to name instead of leaving as three opaque assertion failures.
+
+    Claims Alt+P from the test itself, the same pattern
+    test_TA211_a_failed_registration_is_surfaced_and_not_advertised
+    already uses to simulate a conflicting application, rather than
+    inventing a new one. Checks _find_held_hotkey() directly (the plain
+    function hotkeys_available wraps) so this asserts on the actual cause
+    identified, not on pytest's own skip machinery.
+    """
+    import ctypes
+
+    from global_hotkeys import MOD_ALT, MOD_NOREPEAT
+
+    user32 = ctypes.windll.user32
+    claim_id = 0xF00B
+    assert user32.RegisterHotKey(None, claim_id, MOD_ALT | MOD_NOREPEAT, ord("P")), \
+        "test setup: could not claim Alt+P to simulate a conflicting application"
+
+    try:
+        assert _find_held_hotkey() == "Alt+P", \
+            "the precondition must identify Alt+P by name, not just detect that something is wrong"
+    finally:
+        user32.UnregisterHotKey(None, claim_id)
 
 
 def test_TA211_hotkeys_are_not_touched_without_opting_in(qapp) -> None:
