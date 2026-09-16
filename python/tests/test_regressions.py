@@ -1290,6 +1290,137 @@ def test_TA242_a_failed_affinity_call_does_not_block_recording(qapp, monkeypatch
         launcher.close()
 
 
+def test_TA243_recording_auto_docks_and_locks_the_toggle(qapp) -> None:
+    """Docked mode was confirmed twice on hardware to exhibit neither the
+    double-click-to-stop symptom nor the phantom-snapshot side effect,
+    while undocked mode hit both - auto-docking on record start is a real
+    mitigation, not just discoverability polish, but only if the manual
+    dock/float toggle is also locked for the duration; otherwise a user
+    could re-float mid-recording and land right back in the vulnerable
+    state."""
+    launcher = FloatingLauncher(_EditorStub())
+    try:
+        assert launcher._float_panel.isVisibleTo(launcher), \
+            "should start floating, the state this test needs to prove auto-dock from"
+
+        launcher._toggle_recording()  # start
+
+        assert launcher._dock_panel.isVisibleTo(launcher), \
+            "starting a recording while floating must auto-dock"
+        assert not launcher._float_panel.isVisibleTo(launcher)
+        assert launcher._btn_dock_right.isHidden(), \
+            "the manual dock/float toggle must be locked during a recording"
+        assert launcher._btn_undock.isHidden()
+
+        launcher._toggle_recording()  # stop
+
+        assert not launcher._btn_dock_right.isHidden(), \
+            "the toggle must return once the recording stops"
+        assert not launcher._btn_undock.isHidden()
+    finally:
+        launcher.close()
+
+
+def test_TA243_stop_button_pulses_while_recording(qapp) -> None:
+    """The pulse reuses the recording state's existing red token (the
+    opacity effects sit on top of _style_danger()/_style_record(), which
+    are untouched) rather than a new colour - only opacity changes."""
+    launcher = FloatingLauncher(_EditorStub())
+    try:
+        assert launcher._stop_opacity_effect.opacity() == 1.0
+        assert not launcher._pulse_timer.isActive()
+
+        launcher._toggle_recording()  # start
+        assert launcher._pulse_timer.isActive()
+
+        launcher._pulse_stop_button()
+        dimmed = launcher._stop_opacity_effect.opacity()
+        assert dimmed < 1.0, "a pulse tick must actually change the opacity"
+        assert launcher._dock_stop_opacity_effect.opacity() == dimmed, \
+            "both potential Stop widgets must pulse together"
+
+        launcher._pulse_stop_button()
+        assert launcher._stop_opacity_effect.opacity() == 1.0, \
+            "the pulse must alternate back, not just dim once"
+
+        launcher._toggle_recording()  # stop
+        assert not launcher._pulse_timer.isActive()
+        assert launcher._stop_opacity_effect.opacity() == 1.0, \
+            "stopping mid-dim must not leave Stop looking permanently faded"
+        assert launcher._dock_stop_opacity_effect.opacity() == 1.0
+    finally:
+        launcher.close()
+
+
+def test_TA243_instrumentation_logs_which_handler_fires(qapp, monkeypatch, tmp_path) -> None:
+    """This ticket's own acceptance bar: root cause confirmed via a real
+    signal (logging which handler actually fires), not assumed from the
+    symptom alone. Pins that the log calls exist and say which handler
+    ran, the same standard TA-217/225/239/246's own logging already
+    meets."""
+    from PySide6.QtTest import QTest
+
+    monkeypatch.setenv("TESTASSIST_DEBUG", "1")
+    log_path = tmp_path / "debug.log"
+    monkeypatch.setattr(paths, "history_dir", lambda: tmp_path)
+
+    launcher = FloatingLauncher(_EditorStub())
+    try:
+        launcher._toggle_recording()  # start
+        launcher._toggle_recording()  # stop
+
+        # _on_capture_click()/_start_full_capture() both hide() the
+        # launcher and only activate the overlay 220ms later - waited out
+        # and closed rather than left dangling, the same TA-242 lesson:
+        # an unclosed singleShot fires during whatever test runs next.
+        launcher._on_capture_click()
+        QTest.qWait(300)
+        launcher._overlay.close()
+        launcher.show()
+
+        launcher._start_full_capture()
+        QTest.qWait(300)
+        launcher.show()
+    finally:
+        launcher.close()
+
+    logged = log_path.read_text(encoding="utf-8")
+    assert "_toggle_recording: dispatching to _start_recording" in logged
+    assert "_toggle_recording: dispatching to _stop_recording" in logged
+    assert "_on_capture_click: dispatched" in logged
+    assert "_start_full_capture: dispatched" in logged
+
+
+def test_TA243_the_phantom_snapshot_geometry_no_longer_overlaps_once_docked(qapp) -> None:
+    """Measured mechanism (not the ticket's original "stale mode state"
+    guess, which no longer applies - the launcher rebuild replaced mode
+    dispatch with one independent handler per button): in the floating
+    panel, Stop's on-screen rect while recording genuinely overlaps
+    Capture Region's rect once idle, since Stop is a *different widget*
+    occupying roughly the same layout position after Capture/Full/Record
+    collapse. A rapid second click at that same screen point, landing
+    just after Stop's own click already stopped the recording and flipped
+    the layout back, lands on Capture Region instead - silently starting
+    a new still capture. Auto-dock (this ticket's own required mitigation)
+    sidesteps this entirely: the docked strip's Stop control is the *same
+    widget* throughout, never swapped for a different one, so there is no
+    overlapping geometry for a second click to fall into."""
+    launcher = FloatingLauncher(_EditorStub())
+    try:
+        capture_idle_geom = launcher._btn_capture.geometry()
+        launcher._toggle_recording()
+        stop_recording_geom = launcher._btn_stop.geometry()
+        launcher._toggle_recording()
+
+        assert capture_idle_geom.intersects(stop_recording_geom), (
+            "pins the measured mechanism itself - if this ever stops being "
+            "true the floating panel's layout changed and the reasoning "
+            "above needs re-checking, not silent staleness"
+        )
+    finally:
+        launcher.close()
+
+
 def test_TA215_finished_recording_refreshes_history_without_reopening_the_editor(qapp) -> None:
     """record_capture() persists a still capture to History live via
     _persist_history_snapshot(); a finished recording never routed through
