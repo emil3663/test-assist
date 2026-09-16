@@ -22,6 +22,7 @@ from PySide6.QtNetwork import QNetworkAccessManager
 from PySide6.QtWidgets import (
     QApplication,
     QFrame,
+    QGraphicsOpacityEffect,
     QHBoxLayout,
     QLabel,
     QMessageBox,
@@ -128,6 +129,20 @@ class FloatingLauncher(QWidget):
         self._rec_seconds = 0
         self._rec_timer   = QTimer(self)
         self._rec_timer.timeout.connect(self._tick)
+
+        # TA-243: pulses Stop's opacity while recording, so the control
+        # that ends a recording reads as unmistakable even at a glance, not
+        # just on close inspection. Opacity only - the colour stays exactly
+        # theme.LAUNCHER.DANGER, the same token the red border/indicator
+        # dot already use, so this is a treatment of the existing signal,
+        # not a new one.
+        self._stop_opacity_effect = QGraphicsOpacityEffect(self)
+        self._stop_opacity_effect.setOpacity(1.0)
+        self._dock_stop_opacity_effect = QGraphicsOpacityEffect(self)
+        self._dock_stop_opacity_effect.setOpacity(1.0)
+        self._pulse_bright = True
+        self._pulse_timer = QTimer(self)
+        self._pulse_timer.timeout.connect(self._pulse_stop_button)
 
         # Update check - one manager for the process, not one per click.
         self._network_manager = QNetworkAccessManager(self)
@@ -303,6 +318,7 @@ class FloatingLauncher(QWidget):
         self._btn_stop.setStyleSheet(self._style_danger())
         self._btn_stop.setAccessibleName("Stop Recording")
         self._btn_stop.hide()
+        self._btn_stop.setGraphicsEffect(self._stop_opacity_effect)
         float_layout.addWidget(self._btn_stop)
 
         # ── Recent captures ───────────────────────────────────────────────
@@ -428,6 +444,7 @@ class FloatingLauncher(QWidget):
         self._btn_dock_record.setFixedSize(40, 40)
         self._btn_dock_record.setStyleSheet(self._style_record(radius=20))
         self._btn_dock_record.setAccessibleName("Record")
+        self._btn_dock_record.setGraphicsEffect(self._dock_stop_opacity_effect)
         dock_layout.addWidget(self._btn_dock_record, 0, Qt.AlignmentFlag.AlignHCenter)
 
         # TA-215: the strip is the mode a tester actually leaves on screen
@@ -599,6 +616,11 @@ class FloatingLauncher(QWidget):
         dialog was open was silently swallowed by Qt's application-modal
         block exactly as if the fix had never shipped.
         """
+        # TA-243: this is also the handler a click landing on Capture
+        # Region reaches if it lands here instead of Stop (the phantom-
+        # snapshot mechanism) - logged so a real dispatch sequence can be
+        # read back, not just the symptom.
+        debug_log.log("TA-243 _on_capture_click: dispatched")
         self._dismiss_active_modal_dialog()
         self._start_capture()
 
@@ -649,6 +671,15 @@ class FloatingLauncher(QWidget):
         # the click that stops it.
         self._btn_dock_capture.setVisible(not recording)
         self._btn_dock_full.setVisible(not recording)
+
+        # TA-243: the manual dock/float toggle is hidden for the same
+        # reason auto-dock (_start_recording()) forces docked state in the
+        # first place - re-floating mid-recording would put the user right
+        # back in the undocked layout where Stop's position overlaps
+        # Capture Region's once the recording ends, turning the auto-dock
+        # into a one-time gesture instead of an actual guarantee.
+        self._btn_dock_right.setVisible(not recording)
+        self._btn_undock.setVisible(not recording)
 
         self.update()
 
@@ -707,6 +738,7 @@ class FloatingLauncher(QWidget):
 
     def _start_full_capture(self) -> None:
         """Capture the full primary desktop, including taskbar and clock."""
+        debug_log.log("TA-243 _start_full_capture: dispatched")
         self.hide()
         QTimer.singleShot(220, self._grab_full_capture)
 
@@ -738,12 +770,30 @@ class FloatingLauncher(QWidget):
     # ── Recording flow ────────────────────────────────────────────────────────
 
     def _toggle_recording(self) -> None:
-        if self._rec_timer.isActive():
+        # TA-243: which handler actually fires on each click of the stop
+        # sequence is exactly the signal this ticket's own acceptance bar
+        # asked for, not assumed from the symptom alone.
+        recording = self._rec_timer.isActive()
+        debug_log.log(
+            f"TA-243 _toggle_recording: dispatching to "
+            f"{'_stop_recording' if recording else '_start_recording'}"
+        )
+        if recording:
             self._stop_recording()
         else:
             self._start_recording()
 
     def _start_recording(self) -> None:
+        # TA-243: auto-dock if not already docked. Confirmed twice on
+        # hardware (T3, and a tester follow-up) that docked mode exhibits
+        # neither the double-click-to-stop symptom nor the phantom-snapshot
+        # side effect below, while undocked mode hit both - forcing docked
+        # state during a recording is a real mitigation, not just
+        # discoverability polish. _btn_dock_right/_btn_undock are hidden
+        # for the duration by _refresh_recording_ui() below so this can't
+        # be undone mid-recording.
+        if not self._dock_panel.isVisibleTo(self):
+            self._dock_right()
         # TA-242: excluded from capture before the recorder's first frame
         # fires (the recorder's own QTimer only starts below, and its first
         # tick is a full interval away - not synchronous with this call),
@@ -758,6 +808,8 @@ class FloatingLauncher(QWidget):
             "Recording in progress — click Stop to finish and save."
         )
         self._refresh_recording_ui()
+        self._pulse_bright = True
+        self._pulse_timer.start(600)
 
     def _stop_recording(self) -> None:
         self._rec_timer.stop()
@@ -767,8 +819,25 @@ class FloatingLauncher(QWidget):
         # Screen) outside a recording, which excluding it permanently
         # would silently break.
         self._set_recording_capture_affinity(exclude=False)
+        self._pulse_timer.stop()
+        self._stop_opacity_effect.setOpacity(1.0)
+        self._dock_stop_opacity_effect.setOpacity(1.0)
         self._status_lbl.setText("Recording stopped. Saving file…")
         self._refresh_recording_ui()
+
+    def _pulse_stop_button(self) -> None:
+        """Toggle Stop's opacity while recording (TA-243), so the control
+        that ends a recording reads as unmistakable at a glance rather than
+        only on close inspection - the same "notice it without reading a
+        label" reasoning _refresh_recording_ui()'s red border already
+        uses. Alternates on both potential Stop widgets (floating and
+        docked) rather than whichever is currently visible, since either
+        could be the one on screen depending on how a test or a future
+        change reaches this state."""
+        self._pulse_bright = not self._pulse_bright
+        opacity = 1.0 if self._pulse_bright else 0.55
+        self._stop_opacity_effect.setOpacity(opacity)
+        self._dock_stop_opacity_effect.setOpacity(opacity)
 
     def _set_recording_capture_affinity(self, exclude: bool) -> None:
         """Exclude (or restore) this window from what a screen grab sees,

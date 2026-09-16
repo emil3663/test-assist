@@ -226,3 +226,75 @@ the exact mechanism (see acceptance criteria above) — the docked-vs-
 undocked split is a strong, now twice-confirmed clue for whoever
 investigates, not itself the fix.
 
+## 2026-09-16 (later) — phantom-snapshot mechanism confirmed: geometric overlap, not stale mode state
+
+The doc's own hypothesis ("the docked capture/record button's mode state
+is briefly stale during the recording-to-idle transition, a click landing
+in that window could dispatch through `_on_action_click()`'s photo
+branch") **no longer applies to the current code.** The launcher rebuild
+that shipped with 1.5.0 (`ca71881`) removed mode-based dispatch entirely —
+`_on_action_click()` is gone; `_btn_capture`/`_btn_dock_capture`,
+`_btn_full_capture`/`_btn_dock_full` and `_btn_record`/`_btn_dock_record`
+each connect to their own independent handler
+(`_on_capture_click`/`_start_full_capture`/`_toggle_recording`) with no
+shared mode state left to go stale. Confirmed by `grep`, not assumed.
+
+**The actual mechanism, measured directly** (constructing a real
+`FloatingLauncher`, reading real `QWidget.geometry()` values, not argued
+from the layout code alone):
+
+```
+idle:      _btn_capture      geometry=(14, 53, 252, 38)
+recording: _btn_stop         geometry=(14, 77, 252, 44)
+overlap:   (14, 77, 252, 14)  — confirmed via QRect.intersects()
+```
+
+In the **floating panel only**, Stop is not the same widget relabelled —
+`_refresh_recording_ui()` hides `_btn_capture`/`_btn_full_capture`/
+`_btn_record` and shows a *separate* widget, `_btn_stop`, in their place.
+Because `_btn_capture` sits above the row `_btn_stop` ends up occupying
+once the others collapse, their rects genuinely overlap by 14px of
+height. A real `QTest.mouseClick` sequence confirms the consequence
+directly: click #1 inside that overlap region correctly resolves to
+`_btn_stop` and stops the recording; the *same screen point*, re-hit-
+tested immediately afterward (`parent.childAt(point)`, Qt's own hit-test,
+not assumed), now resolves to `_btn_capture`. A second real click there
+dispatches `_on_capture_click()` — the exact call chain
+(`_start_capture()` → overlay → `record_capture()` →
+`_persist_history_snapshot()`) that produces an unrequested
+`snapshot-*.png`.
+
+This is a **different but adjacent** mechanism from the doc's original
+guess — a same-frame widget swap creating a landing trap for a rapid
+second click, not stale mode state — but explains the identical observed
+symptom, and explains why **only** the undocked/floating panel reproduces
+it: the docked strip's Stop control (`_btn_dock_record`) is the *same
+widget* throughout a recording, just re-iconed, so there is no second
+widget for a second click to fall into. This also fits the earlier
+docked-vs-undocked split (confirmed twice on hardware) without needing a
+second, independent explanation.
+
+**Still not confirmed from this environment:** whether the reported
+"first click only focuses the window" step is real OS-level click-to-
+focus behaviour swallowing the very first click, before either the
+overlap mechanism above or a normal click ever gets a chance to run. That
+is an OS window-manager phenomenon no in-process or offscreen Qt test can
+observe (the same limitation this project's `tests_e2e` black-box lane
+exists for, per `TA-228`) — needs a person clicking a real, unfocused
+launcher on real hardware. Whether Capture/Full-screen share that same
+first-click-swallowed symptom (this ticket's own acceptance bar) is
+likewise unconfirmed for the same reason; both buttons now log
+`_on_capture_click: dispatched` / `_start_full_capture: dispatched` via
+`debug_log`, alongside `_toggle_recording`'s own dispatch log, so a real
+hardware pass with `TESTASSIST_DEBUG=1` can read back exactly which
+handler fired on which click, the same standard this ticket's own
+acceptance criteria ask for.
+
+**What ships regardless:** auto-dock on record start plus locking
+`_btn_dock_right`/`_btn_undock` for the duration (already the locked
+decision above) structurally eliminates the vulnerable code path — once
+docked, the floating panel's `_btn_stop` is never shown at all during a
+recording, so the overlap this section measured cannot be reached by a
+real click. This eliminates the confirmed geometric-overlap mechanism
+even though it does not (and was never claimed to) address the separate,
+still-unconfirmed OS-focus question.
