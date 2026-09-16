@@ -29,24 +29,35 @@ was.
 
 ## Change
 
-Not yet decided. The badge mechanism and its underlying data (real/type
-distinction, working thumbnail extraction) don't need to change — only its
-visual prominence. Candidate directions, none chosen yet:
+**Decided, 2026-09-16: a combination, not a single treatment** — enlarging
+the existing corner badge alone still requires looking directly at that
+corner, which is exactly what "easy to scan straight past" means; only a
+whole-tile signal is noticeable at normal scanning speed regardless of
+where the eye lands on the tile.
 
-- Larger badge / larger glyph, less easy to mistake for corner noise.
-- Higher-contrast treatment (a solid accent colour instead of a
-  semi-transparent dark pill, which can blend into a dark-mode thumbnail).
-- A treatment that doesn't depend on a single small corner element at
-  all — e.g. a thin coloured border around the whole tile, or a small
-  label chip near the "Recording N · date" caption rather than only
-  overlaid on the image itself.
-- Any combination of the above.
+- **Whole-tile border, at rest, not just on hover.** `_RecordingThumb`
+  already carries a static `theme.LINE_STRONG` border at rest and only
+  switches to `theme.ACCENT` on hover (`python/editor.py` ~1439) — change
+  the rest-state border itself to `theme.ACCENT`, so a recording tile
+  reads as visually distinct from a snapshot tile in the strip before any
+  interaction, not only when the pointer happens to land on it. Reuses the
+  token already in this exact file (`_SnapshotThumb` uses the same
+  `theme.ACCENT` for its own hover state) — no new color introduced.
+- **Larger, higher-contrast badge.** Bump the glyph's `font-size` and the
+  badge's overall size from its current 11px/tight-padding pill, and swap
+  the semi-transparent `rgba(0,0,0,0.55)` background for a solid
+  `theme.ACCENT` background — the transparent dark pill is exactly what
+  blends into a dark-mode thumbnail; a solid brand color doesn't.
+- **No caption-text chip.** Rejected: the "Recording N · date" caption is
+  already compact, and a whole-tile border already solves "noticeable at a
+  glance" without adding text that competes with that caption for space in
+  a 168px-wide tile.
 
-Whichever direction is taken, this needs a decision recorded, not just
-a size bump guessed at — the existing badge's small size was presumably
-also a deliberate choice at the time (docstring frames it as
-"discoverability only," not a lightbox/player treatment), so worth being
-explicit about the review reasoning, not just increasing pixels ad hoc.
+Both changes reuse `theme.ACCENT`, so a recording tile's accent border and
+its badge read as one consistent signal, not two independently-colored
+elements. `_SnapshotThumb` is untouched by either change — its border
+stays `theme.LINE` at rest, its hover stays `theme.ACCENT`, exactly as
+today.
 
 ## Acceptance
 
