@@ -1596,7 +1596,10 @@ the editor but not the launcher.
   `WindowDoesNotAcceptFocus` flag). Full account: `docs/ISSUE-TA-241.md`.
   `test_TA241_launcher_does_not_accept_focus` confirmed passing against the
   rebuilt `FloatingLauncher` on `ui-polish-rebased`, not just carried
-  through without conflict markers.
+  through without conflict markers. **Also confirmed on real hardware**
+  post-merge (2026-09-16): opening the editor, then clicking the TA icon
+  again while it's frontmost, minimizes it correctly against the merged
+  `main` build — the plan's one remaining unchecked item.
 - **TA-231 — closed.** The black band an unequal-height spanning selection
   produced is real transparency correctly composited, not an opaque-black
   compositing bug (`1df02f9`, gives the composite canvas a real alpha
@@ -1624,3 +1627,9 @@ of the `ui-polish` rebuild — `TA-242` through `TA-247`
 (`docs/ISSUE-TA-242.md`–`TA-247.md`) — none release-blocking; `TA-247` is
 explicitly filed as backlog, not a blocker, per the pass's own decision
 record.
+
+- **TA-248 — carried forward, cosmetic, not a 1.5.0 blocker.** Found
+  during the TA-241 hardware repro above: the editor control's label
+  ("Open Editor," all three call sites) still only describes the "open"
+  half of what `bring_forward()` now correctly does on a second click.
+  `docs/ISSUE-TA-248.md`.
