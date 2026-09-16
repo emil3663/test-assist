@@ -1220,6 +1220,76 @@ def test_TA215_the_docked_record_control_is_distinct_from_the_stills(qapp) -> No
         launcher.close()
 
 
+def test_TA242_recording_excludes_the_launcher_from_capture(qapp, monkeypatch) -> None:
+    """The launcher stays 100% visible on screen throughout a recording (by
+    design, so Stop stays reachable) but nothing kept it out of the
+    recording *itself* - it occluded whatever part of the screen it
+    happened to sit over. SetWindowDisplayAffinity(WDA_EXCLUDEFROMCAPTURE)
+    drops it from the compositor-level surface QScreen.grabWindow(0) reads
+    from while leaving it visible/clickable on the real display, applied
+    only around the recording start/stop paths - not around still capture,
+    which this test also pins as untouched."""
+    import ctypes
+
+    from PySide6.QtTest import QTest
+
+    calls: list[tuple[int, int]] = []
+
+    def _spy_affinity(hwnd, affinity):
+        calls.append((hwnd, affinity))
+        return 1  # nonzero: success, per the real Win32 API
+
+    monkeypatch.setattr(
+        ctypes.windll.user32, "SetWindowDisplayAffinity", _spy_affinity
+    )
+
+    launcher = FloatingLauncher(_EditorStub())
+    try:
+        hwnd = int(launcher.winId())
+
+        launcher._toggle_recording()  # start
+        assert calls == [(hwnd, FloatingLauncher._WDA_EXCLUDEFROMCAPTURE)], \
+            "starting a recording must exclude the launcher's own HWND"
+
+        launcher._toggle_recording()  # stop
+        assert calls[-1] == (hwnd, FloatingLauncher._WDA_NONE), \
+            "stopping a recording must restore normal capture affinity"
+
+        # Still capture is a separate path (_on_capture_click -> _start_capture)
+        # and must never touch window affinity at all. Waited out and closed
+        # rather than left dangling: _start_capture()'s 220ms singleShot
+        # would otherwise activate _overlay well after this test returns,
+        # stealing OS-active-window state from whatever test runs next.
+        calls.clear()
+        launcher._start_capture()
+        QTest.qWait(300)
+        assert not calls, "still capture must not call SetWindowDisplayAffinity"
+        launcher._overlay.close()
+    finally:
+        launcher.close()
+
+
+def test_TA242_a_failed_affinity_call_does_not_block_recording(qapp, monkeypatch) -> None:
+    """Pre-2004 Windows (or any other reason the call fails) must degrade
+    to the pre-existing behaviour - the launcher stays visible in the
+    recording - never to a crash or a blocked recording."""
+    import ctypes
+
+    monkeypatch.setattr(
+        ctypes.windll.user32, "SetWindowDisplayAffinity", lambda hwnd, affinity: 0
+    )
+
+    launcher = FloatingLauncher(_EditorStub())
+    try:
+        launcher._toggle_recording()  # start
+        assert launcher._rec_timer.isActive(), \
+            "a failed affinity call must not stop the recording from starting"
+        launcher._toggle_recording()  # stop
+        assert not launcher._rec_timer.isActive()
+    finally:
+        launcher.close()
+
+
 def test_TA215_finished_recording_refreshes_history_without_reopening_the_editor(qapp) -> None:
     """record_capture() persists a still capture to History live via
     _persist_history_snapshot(); a finished recording never routed through

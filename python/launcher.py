@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import ctypes
+import sys
 from pathlib import Path
 
 from PySide6.QtCore import QPoint, QRectF, QSize, Qt, QTimer, QUrl
@@ -61,6 +63,11 @@ class FloatingLauncher(QWidget):
     _HOTKEY_PHOTO = 1
     _HOTKEY_FULL_CAPTURE = 2
     _HOTKEY_VIDEO = 3
+
+    # TA-242: SetWindowDisplayAffinity values (Win32 winuser.h). Not in
+    # ctypes.wintypes - there's no stdlib constant for either.
+    _WDA_NONE = 0x00000000
+    _WDA_EXCLUDEFROMCAPTURE = 0x00000011
 
     def __init__(
         self,
@@ -737,6 +744,11 @@ class FloatingLauncher(QWidget):
             self._start_recording()
 
     def _start_recording(self) -> None:
+        # TA-242: excluded from capture before the recorder's first frame
+        # fires (the recorder's own QTimer only starts below, and its first
+        # tick is a full interval away - not synchronous with this call),
+        # so no frame ever shows the launcher sitting over the recording.
+        self._set_recording_capture_affinity(exclude=True)
         self._recorder.start(self._current_screen())
         self._rec_seconds = 0
         self._rec_timer.start(1000)
@@ -750,8 +762,49 @@ class FloatingLauncher(QWidget):
     def _stop_recording(self) -> None:
         self._rec_timer.stop()
         self._recorder.stop()
+        # TA-242: back to normal once nothing is being recorded - the
+        # launcher should still be screenshot-able (Quick Capture, Full
+        # Screen) outside a recording, which excluding it permanently
+        # would silently break.
+        self._set_recording_capture_affinity(exclude=False)
         self._status_lbl.setText("Recording stopped. Saving file…")
         self._refresh_recording_ui()
+
+    def _set_recording_capture_affinity(self, exclude: bool) -> None:
+        """Exclude (or restore) this window from what a screen grab sees,
+        for the duration of a recording (TA-242).
+
+        Windows' SetWindowDisplayAffinity(WDA_EXCLUDEFROMCAPTURE) drops a
+        window from BitBlt/DWM-composited capture surfaces - what
+        QScreen.grabWindow(0) reads from - while leaving it fully visible
+        and clickable on the physical display, so Stop stays reachable
+        throughout. This is the one top-level window both the docked strip
+        and the floating panel share (_dock_right()/_undock() only
+        show/hide child widgets and resize/move this same widget), so one
+        call site covers both.
+
+        Requires Windows 10 2004+ and must never be allowed to block or
+        crash a recording: on any failure - older Windows, a non-Windows
+        platform, or anything else - this logs and the launcher simply
+        stays visible in the recording, which is the pre-existing
+        behaviour this ticket is fixing, not a new one.
+        """
+        if sys.platform != "win32":
+            debug_log.log(
+                "_set_recording_capture_affinity: skipped, not Windows"
+            )
+            return
+        try:
+            hwnd = int(self.winId())
+            affinity = self._WDA_EXCLUDEFROMCAPTURE if exclude else self._WDA_NONE
+            ok = ctypes.windll.user32.SetWindowDisplayAffinity(hwnd, affinity)
+            if not ok:
+                debug_log.log(
+                    f"_set_recording_capture_affinity: SetWindowDisplayAffinity"
+                    f"(exclude={exclude}) returned failure"
+                )
+        except Exception as exc:
+            debug_log.log(f"_set_recording_capture_affinity: {exc!r}")
 
     def _tick(self) -> None:
         self._rec_seconds += 1
