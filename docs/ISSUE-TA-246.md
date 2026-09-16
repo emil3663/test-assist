@@ -80,6 +80,54 @@ without a single coordinate anywhere being wrong. The drag tracking, the
 rect math, and the screen assignment are all correct; only the DPR used
 to size the final grab is not.
 
+## 2026-09-16 (later) — rounding-policy hypothesis tested, does not reproduce here
+
+A specific hypothesis was proposed: nothing in this codebase calls
+`QGuiApplication.setHighDpiScaleFactorRoundingPolicy(...)` before
+`QApplication(sys.argv)` (`main.py:210`, confirmed by grep — no hits), and
+Qt's default rounding policy on Windows can round a non-integer scale
+factor to the nearest supported step, which would turn a real 1.25 into a
+flat 1.0 — exactly this ticket's symptom.
+
+Tested directly against the real `ScreenshotOverlay.activate()` → `_grab()`
+→ `composite_ratio()` code path (not a simulated click — a direct method
+call with a hardcoded rect, since synthetic input is unreliable in this
+class of environment, per `TA-228`'s own finding), on real Windows with
+the real `windows` Qt platform (not offscreen), confirmed via
+`SetProcessDpiAwareness` that the physical display is genuinely 1920x1080
+at 125% (reported 1536x864 logical) — the same scale factor this ticket's
+own repro measured, but **only one screen currently connected, no
+external monitor**, so this does not reproduce the original two-screen
+mixed-DPI hardware exactly.
+
+The new `TA-246 devicePixelRatio at grab` log line (added at the
+`composite_ratio()` call site in `capture.py`) read:
+
+```
+[2026-09-16 07:42:16] TA-246 devicePixelRatio at grab: [(0, 1.25)]
+[2026-09-16 07:42:16] TA-239 grab piece: screen_index=0 local_rect=(100, 100, 400, 300) ratio=1.25 dest_rect=(0, 0, 500, 375) expected_grabbed_size=(500, 375) actual_grabbed_size=(500, 375)
+```
+
+`devicePixelRatio()` read `1.25` correctly — **without** the proposed fix.
+Applying `setHighDpiScaleFactorRoundingPolicy(PassThrough)` and repeating
+the identical repro produced an identical result (`1.25`, same saved
+size). **The bug does not reproduce on this hardware at all, with or
+without the fix** — not "the fix doesn't help," the misread was never
+present to begin with here.
+
+This neither confirms nor rules out the rounding-policy hypothesis. The
+most likely explanation: the original report's hardware had *two* screens
+at *different* scale factors connected simultaneously (125% laptop + 100%
+external), and Qt's DPI-rounding defaults are known to behave differently
+specifically under mixed-DPI multi-monitor configurations — a single
+125% screen, which is all that was available for this pass, may simply
+not trigger whatever the real mechanism is. **Needs re-testing on the
+actual two-monitor mixed-DPI rig** before either confirming this fix or
+moving on to the timing/race candidates below. The rounding-policy fix
+itself was *not* applied to the codebase, since it could not be verified
+to do anything on the hardware available — only the diagnostic log line
+was kept.
+
 ## Change
 
 Not yet decided — needs one of:
