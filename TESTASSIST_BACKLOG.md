@@ -1633,3 +1633,126 @@ record.
   ("Open Editor," all three call sites) still only describes the "open"
   half of what `bring_forward()` now correctly does on a second click.
   `docs/ISSUE-TA-248.md`.
+
+---
+
+## Backlog audit & bundles (2026-09-16)
+
+Every ticket TA-201 through TA-248 checked against the current `main`
+(post-1.5.0-merge) code, not against what its own text last claimed —
+each verdict below cites what was actually grepped/read, not the
+ticket's own prior "Verified" note taken on faith where one existed.
+
+### Closed, confirmed against current code
+
+TA-201 (committed/pushed, superseded by every release since), TA-202
+(`paths.py` exists with exactly the scoped functions), TA-207 (`1.4.0`
+tagged and shipped, confirmed in `main`'s own log), TA-211 (global
+hotkeys live — `main.py` passes `register_global_hotkeys=True`, and every
+later ticket's hardware evidence depends on Alt+P actually firing), TA-214
+(`Ctrl+V` shortcut and `getOpenFileName()` both present, comment cites
+TA-214 directly), TA-216, TA-218, TA-219, TA-221 (`setFixedHeight(26)`
+removed from `_btn_copy`/`_btn_export_json` entirely — sizes naturally
+now), TA-222 (`_build_settings_bar()` now has a leading `addStretch()`
+that didn't exist before, matching the centering pattern), TA-223
+(explained and guarded by a passing regression test, not a defect),
+TA-226, TA-227, TA-230 (A)/(B) (`test_LAUNCH_09_...` confirmed present on
+`main` — these mitigations were `ui-polish`-only until tonight's merge,
+now landed), TA-231, TA-232, TA-241.
+
+**TA-220 — closed, but via two different mechanisms worth knowing apart:**
+sub-item 1 (restore to maximized, not windowed) is fixed directly in
+`bring_forward()` (`editor.py`) — checks `WindowState.WindowMaximized`
+before choosing `showMaximized()`/`showNormal()`. Sub-item 2 (the
+minimize-toggle not firing reliably) is fixed by TA-241 — the fix
+isn't in `editor.py` at all, it's `launcher.py`'s
+`WindowDoesNotAcceptFocus` flag stopping the launcher from stealing
+activation in the first place, confirmed on real hardware tonight.
+**Housekeeping gap, not a functional one:** `bring_forward()`'s own
+comment still describes the minimize-toggle cause as "unconfirmed" and
+says it's only logging values rather than fixing it — stale now that
+TA-241 has actually fixed the underlying mechanism elsewhere. Worth a
+one-line comment update so a future reader doesn't re-investigate a
+solved problem.
+
+### Open, real work remaining
+
+**Bundle A — Capture correctness & multi-display geometry** (needs
+hardware; same class of gap, worth one hardware session covering all of
+these together with `TESTASSIST_DEBUG=1`):
+- **TA-246** (P1 — already root-caused precisely: `devicePixelRatio()`
+  misread as 1.0; highest-value fix in this bundle since the mechanism is
+  already known, not just suspected)
+- **TA-239** (instrumentation in place, needs one real cross-screen drag)
+- **TA-242** (launcher visible in its own captures — a real behavioral
+  gap, not just measurement)
+- **TA-225** (blank capture on laptop/secondary-above — still only
+  "instrumented, not fixed" per `docs/BUILD_LOG.md`; worth checking in
+  the same session for any connection to TA-246's DPR bug before assuming
+  it's independent — not yet confirmed either way)
+- **TA-209** (diagonal/L-shaped multi-screen gap — correctly documented as
+  a known limitation, not silently broken; lowest urgency here, no
+  hardware to test 3-screen L layouts anyway)
+- **TA-229** (3+ piece rounding — `xfail(strict=True)`, explicitly not
+  blocking, no 3-screen hardware available)
+
+**Bundle B — TA-217, standalone** (P1, the one still-reopened item from
+1.5.0): wire `_dismiss_active_modal_dialog()` into both Quick Capture
+button handlers, not just the hotkey path. Kept separate from Bundle A —
+it's launcher-dialog interaction, not capture geometry.
+
+**Bundle C — Recording UX polish** (all filed tonight, none blocking):
+TA-243 (undocked double-click-to-stop, stray snapshot), TA-244 (recording
+badge too subtle), TA-245 (dropped frames, no warning). TA-224 (region-
+select recording) sits here too but has an explicit prior decision to
+stay deferred — no action needed, just grouped for visibility.
+
+**Bundle D — Launcher discoverability & labeling** (small, low-risk,
+mostly text/behavior-labeling, good candidate for a quick single-PR
+bundle): TA-247 (tray-hide has no confirmation), TA-248 (Open/Close
+Editor label doesn't cover what the control now does).
+
+**Bundle E — New feature: launcher accent picker.** TA-249, filed
+tonight per this session's decision (picker, amber default). Standalone —
+genuinely new work, not a bug fix, don't mix it into a bug-fix bundle.
+
+**Bundle F — Testing/infra hygiene:**
+- TA-228 check 3 — worth re-running now that TA-241 shipped. Check 3 was
+  the direct, black-box test of the exact minimize-toggle behavior TA-241
+  just fixed; it was blocked on a real-input-delivery problem (traced to
+  `XMouseButtonControl.exe`, unrelated to this app) that's since been
+  identified and worked around once already. Re-running it now has a real
+  chance of finally closing TA-228 for good rather than staying open on a
+  stale blocker.
+- TA-230 (C) — the foreign-hotkey-holder precondition message. Not found
+  anywhere in `test_regressions.py` or `global_hotkeys.py` — still
+  genuinely open, unlike (A)/(B).
+
+**Bundle G — Documentation & bookkeeping catch-up** (no code risk, but
+real accuracy debt):
+- `MULTI_DISPLAY_MANUAL_PASS.md` still shows 27 cases as `⬜`, including
+  several (DSP-03, DSP-07, DSP-08, LCH-13, UPD-12) whose actual outcomes
+  are already documented, case-by-case, elsewhere in this file and in
+  `docs/BUILD_LOG.md`/`docs/SESSION_HANDOVER_*.md`. This is TA-204's own
+  stated acceptance criterion ("no case left ⬜") not actually met by the
+  tracking file itself, even though the underlying testing happened — a
+  backfill pass transcribing the already-known outcomes into that file's
+  checkboxes, not new testing.
+- TA-206 (judge the editor's feel) — no written verdict found anywhere.
+  Either do the pass or record an explicit "no change needed" — currently
+  neither has happened.
+- TA-208 (close out issue #1 on GitHub) — can't be confirmed from the
+  repository alone; needs a manual check that the issue comment was
+  actually posted.
+- TA-203/TA-213 (help.html accuracy) — `ui-polish` did rework `help.html`
+  (light/dark following, redrawn diagrams), but its shortcut table and
+  screenshots haven't been re-checked against the post-merge UI (mode
+  removal, the three separate capture buttons) — worth a fresh pass now
+  that 1.5.0 is the shipped baseline, not assumed done because commits
+  with the right names exist.
+
+### Deferred, no action needed right now
+
+TA-210 (Windows file association, P3, no registry code exists — correctly
+untouched), TA-212 (PrintScreen opt-in, P2, `VK_SNAPSHOT` not referenced
+anywhere — correctly untouched, no urgency signal).
