@@ -17,9 +17,21 @@ if str(ROOT) not in sys.path:
 
 @pytest.fixture(scope="session")
 def qapp() -> QApplication:
+    """The one QApplication, set up the way main.py sets it up.
+
+    The icon font is loaded here rather than left out because the widgets
+    under test genuinely differ without it: an icon button falls back to no
+    icon, which changes sizeHint and so changes layout assertions. A suite
+    that skipped it would be measuring a build nobody ships.
+    """
     app = QApplication.instance()
     if app is None:
         app = QApplication([])
+
+    import theme
+
+    if not theme.ICON_FONT_FAMILY:
+        theme.load_icon_font(ROOT.parent / "assets" / "MaterialIcons-Regular.ttf")
     return app
 
 

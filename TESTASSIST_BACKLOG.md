@@ -1567,3 +1567,60 @@ that will actually ship.
 ### Gate C — Released
 - v1.4.0 tagged, release page shows Assets 3
 - Issue #1 answered with the release link and an honest verification statement
+
+---
+
+## 1.5.0 status (2026-09-16)
+
+`fix/ta-232-overlay-hidpi-coverage` and `ui-polish` both landed on `main`
+for this release. Full sequencing and the `python/launcher.py` collision
+resolution are in `docs/RELEASE_1.5.0_PLAN.md`.
+
+**Deviation from that plan, found during the rebase:** `ff0f276` (the
+indigo/light-follows-OS palette commit the plan called for dropping) could
+not be cleanly excised — commits as little as 16 minutes later
+(`951e24a`, "follow the OS light/dark setting") depend on the theme-token
+plumbing `ff0f276` introduces, so dropping it broke 20+ conflicting hunks
+across `launcher.py`/`theme.py` in the very next commit. Kept `ff0f276`
+and the rest of the chain intact instead. Since `_DARK`'s own `ACCENT` had
+by then become indigo (to match the editor, with amber demoted to a
+light-mode-only accent), restoring amber meant pinning the launcher's
+whole palette independent of the OS light/dark toggle, not swapping one
+token — `69e692c` adds `theme.LAUNCHER`, a fixed dark/amber snapshot
+`launcher.py`'s ~40 styling call sites read instead of the shared
+`theme.*` globals `editor.py` reads, so an OS light-mode session changes
+the editor but not the launcher.
+
+- **TA-241 — closed.** The floating toolbar no longer steals OS focus from
+  an already-open editor (`d8b67b1`, `python/launcher.py`'s
+  `WindowDoesNotAcceptFocus` flag). Full account: `docs/ISSUE-TA-241.md`.
+  `test_TA241_launcher_does_not_accept_focus` confirmed passing against the
+  rebuilt `FloatingLauncher` on `ui-polish-rebased`, not just carried
+  through without conflict markers.
+- **TA-231 — closed.** The black band an unequal-height spanning selection
+  produced is real transparency correctly composited, not an opaque-black
+  compositing bug (`1df02f9`, gives the composite canvas a real alpha
+  channel). Full account: `docs/TA-231.md`.
+- **TA-232 — closed for this release.** The per-screen overlay fix (one
+  `ScreenshotOverlay` per `QScreen`, each inheriting its own DPR) ships on
+  this branch. Re-confirmed on a pre-fix build the same evening
+  (`docs/TA-232-HARDWARE-VERIFICATION.md`'s 2026-09-16 entry) with explicit
+  user sign-off that this branch's overlay behaviour takes precedence over
+  `main`/`v1.4.0`'s at merge time.
+- **TA-217 — left open, reopened.** See the entry above: the button path
+  (`_btn_capture` / `_btn_dock_capture`) is still an unqualified no-op
+  against a modal dialog; the hotkey path completes a real capture but
+  can't reach the dialog itself before it closes. Not fixed in 1.5.0.
+- **TA-239 — carried forward, not a 1.5.0 blocker.** Debug instrumentation
+  (`capture.py::_grab()`, gated by `TESTASSIST_DEBUG=1`) is in place but
+  not yet exercised — needs a real cross-screen drag on hardware once a
+  build with this code is deployed. `docs/ISSUE-TA-239.md`.
+- **HW-5 — carried forward, not a 1.5.0 blocker.** Not code: closing the
+  384px gap between the two screens in Windows Display Settings, then
+  retesting, is an action item for whoever is at the physical rig.
+
+The Launcher Evaluation Pass also filed six new tickets from live testing
+of the `ui-polish` rebuild — `TA-242` through `TA-247`
+(`docs/ISSUE-TA-242.md`–`TA-247.md`) — none release-blocking; `TA-247` is
+explicitly filed as backlog, not a blocker, per the pass's own decision
+record.

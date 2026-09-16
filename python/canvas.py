@@ -19,6 +19,7 @@ from PySide6.QtGui import (
     QPixmap,
 )
 from PySide6.QtWidgets import QApplication, QInputDialog, QWidget
+from theme import ui_font
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -87,6 +88,15 @@ class AnnotationCanvas(QWidget):
         self.color:        str   = "#ff3b30"
         self.stroke_size:  int   = 3
         self.fill_opacity: float = 0.30
+        # Text sits on top of a screenshot, which is by definition busy.
+        # Without a backing plate the glyphs compete with whatever is
+        # underneath them, and a red annotation over a red error banner is
+        # unreadable exactly where it matters most. Black at 55% is dark
+        # enough to carry any annotation colour and light enough to leave
+        # the context visible; 0 turns it off entirely for anyone who wants
+        # bare text over a plain area.
+        self.text_bg_color:   str   = "#000000"
+        self.text_bg_opacity: float = 0.55
         self.arrow_style:  str   = "classic"
 
         # Drawing state
@@ -324,6 +334,8 @@ class AnnotationCanvas(QWidget):
         size: int | None = None,
         opacity: float | None = None,
         arrow_style: str | None = None,
+        bgOpacity: float | None = None,
+        bgColor: str | None = None,
     ) -> None:
         """Apply style updates to the currently selected annotation, if any."""
         if self._selected is None or self._selected not in self._annotations:
@@ -350,6 +362,18 @@ class AnnotationCanvas(QWidget):
 
         if arrow_style is not None and anno.get("type") == "arrow":
             anno["arrow_style"] = arrow_style
+            changed = True
+
+        # Deliberately separate from `opacity`, which is the highlight's
+        # fill: a text annotation has a colour of its own AND a plate
+        # behind it, and folding both onto one key would make "opacity"
+        # mean a different thing depending on the annotation type.
+        if bgOpacity is not None and anno.get("type") == "text":
+            anno["bgOpacity"] = max(0.0, min(1.0, float(bgOpacity)))
+            changed = True
+
+        if bgColor is not None and anno.get("type") == "text":
+            anno["bgColor"] = bgColor
             changed = True
 
         if changed:
@@ -781,7 +805,7 @@ class AnnotationCanvas(QWidget):
 
         elif t == "text":
             font_size = max(14, a.get("size", 3) * 4)
-            f = QFont("Segoe UI", font_size, QFont.Weight.Bold)
+            f = ui_font(font_size, QFont.Weight.Bold)
             p.setFont(f)
             p.setPen(QPen(color))
             
@@ -795,6 +819,17 @@ class AnnotationCanvas(QWidget):
             fm = QFontMetricsF(f)
             lines = self._wrap_text_lines(text, fm, w - 8)
             
+            # The backing plate, painted before the glyphs and the border.
+            # This used to exist only while typing (see _draw_inline_text),
+            # so text was readable as you authored it and lost its backing
+            # the moment you committed - including in the exported PNG,
+            # which is the artefact that actually gets attached to a
+            # defect. Same geometry as the border below, so the two agree.
+            bg = QColor(a.get("bgColor", "#000000"))
+            bg.setAlphaF(float(a.get("bgOpacity", 0.55)))
+            if bg.alpha() > 0:
+                p.fillRect(QRectF(x0 - 2, y0 - 2, w + 4, h), bg)
+
             # Draw a light grey text box border so the annotation remains visible as a layer.
             p.setBrush(Qt.BrushStyle.NoBrush)
             p.setPen(QPen(QColor(198, 198, 198, 210), 1.2))
@@ -808,7 +843,7 @@ class AnnotationCanvas(QWidget):
             # Superscript-like text id marker in the top-right corner.
             text_id = a.get("text_id")
             if text_id is not None:
-                badge_font = QFont("Segoe UI", max(9, int(font_size * 0.55)), QFont.Weight.DemiBold)
+                badge_font = ui_font(max(9, int(font_size * 0.55)), QFont.Weight.DemiBold)
                 p.setFont(badge_font)
                 p.setPen(QPen(QColor(215, 215, 215, 220)))
                 p.drawText(QPointF(x0 + w - 10, y0 - 6), str(text_id))
@@ -971,7 +1006,7 @@ class AnnotationCanvas(QWidget):
     def _draw_inline_text(self, p: QPainter) -> None:
         """Render the text buffer on a resizable box while the user is typing."""
         font_size = max(14, self.stroke_size * 4)
-        f  = QFont("Segoe UI", font_size, QFont.Weight.Bold)
+        f  = ui_font(font_size, QFont.Weight.Bold)
         fm = QFontMetricsF(f)
         p.setFont(f)
 
@@ -989,9 +1024,13 @@ class AnnotationCanvas(QWidget):
         if needed_height > h:
             h = self._text_height = needed_height
 
-        # Semi-transparent dark background
-        bg = QColor(0, 0, 0, 120)
-        p.fillRect(QRectF(x0 - 4, y0 - 4, w + 8, h + 4), bg)
+        # The same plate the committed annotation gets - previously a
+        # hardcoded 120 alpha here and nothing at all there, so the preview
+        # actively misled about how the export would look.
+        bg = QColor(self.text_bg_color)
+        bg.setAlphaF(self.text_bg_opacity)
+        if bg.alpha() > 0:
+            p.fillRect(QRectF(x0 - 4, y0 - 4, w + 8, h + 4), bg)
 
         # Draw text lines
         color = QColor(self.color)
@@ -1027,7 +1066,7 @@ class AnnotationCanvas(QWidget):
     def _start_text_edit(self, pos: QPointF) -> None:
         """Start inline text editing at the given position with initial width for ~10 chars."""
         font_size = max(14, self.stroke_size * 4)
-        f  = QFont("Segoe UI", font_size, QFont.Weight.Bold)
+        f  = ui_font(font_size, QFont.Weight.Bold)
         fm = QFontMetricsF(f)
         # Initial width for approximately 10 characters
         char_width = fm.horizontalAdvance("M")  # Average char width
@@ -1105,6 +1144,12 @@ class AnnotationCanvas(QWidget):
                 "y1":    self._text_pos.y(),
                 "color": self.color,
                 "size":  self.stroke_size,
+                # Stored per annotation rather than read from the canvas at
+                # paint time, so an exported JSON layer re-renders the way
+                # it looked when it was made - changing the default later
+                # must not silently restyle evidence already captured.
+                "bgColor":   self.text_bg_color,
+                "bgOpacity": self.text_bg_opacity,
                 "text":  text,
                 "width": self._text_width,
                 "height": self._text_height,
