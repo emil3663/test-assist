@@ -1454,6 +1454,46 @@ def test_TA215_a_recording_with_nothing_captured_does_not_refresh_history(qapp) 
     launcher.close()
 
 
+def test_TA245_warns_when_duplication_had_to_compensate_meaningfully(qapp) -> None:
+    """Frame-duplication (capture.py's _capture_frame()) keeps the saved
+    duration honest even when the capture rate falls behind, but that
+    compensation is itself worth surfacing when it did real work - a
+    sustained throttle, not one slow frame - or the timing accuracy
+    question this ticket raised stays invisible to the user either way."""
+    editor = _EditorStub()
+    launcher = FloatingLauncher(editor)
+
+    video_path = paths.recordings_dir() / "test-recording-ta245.mp4"
+    video_path.write_bytes(b"fake mp4")
+    try:
+        launcher._recorder._duplicated = launcher._DUPLICATED_FRAMES_WARNING_THRESHOLD
+        launcher._on_record_finished(str(video_path))
+        assert "capture rate dropped" in launcher._status_lbl.text().lower()
+        assert "Saved video" in launcher._status_lbl.text(), \
+            "the warning must be added to the save confirmation, not replace it"
+    finally:
+        video_path.unlink(missing_ok=True)
+        launcher.close()
+
+
+def test_TA245_no_warning_for_a_single_slow_frame(qapp) -> None:
+    """Below the threshold, silent - matching this ticket's own decision
+    that the warning is for a real, sustained throttle, not one slow
+    frame the fix already quietly compensated for."""
+    editor = _EditorStub()
+    launcher = FloatingLauncher(editor)
+
+    video_path = paths.recordings_dir() / "test-recording-ta245-2.mp4"
+    video_path.write_bytes(b"fake mp4")
+    try:
+        launcher._recorder._duplicated = launcher._DUPLICATED_FRAMES_WARNING_THRESHOLD - 1
+        launcher._on_record_finished(str(video_path))
+        assert "capture rate dropped" not in launcher._status_lbl.text().lower()
+    finally:
+        video_path.unlink(missing_ok=True)
+        launcher.close()
+
+
 def test_open_folder_button_appears_after_a_recording_and_opens_its_folder(qapp, monkeypatch) -> None:
     """Fixes the discoverability complaint properly, per the data-locations
     brief: "where did it go" gets a one-click answer instead of a folder name

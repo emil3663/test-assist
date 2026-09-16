@@ -881,6 +881,11 @@ class FloatingLauncher(QWidget):
         self._rec_label.setText(f"{m:02d}:{s:02d}")
         self._dock_rec_label.setText(f"{m:02d}:{s:02d}")
 
+    # TA-245: only worth telling the user about a real, sustained throttle -
+    # roughly a second's worth of backfilled frames at 15fps - not one slow
+    # frame during an otherwise fine recording.
+    _DUPLICATED_FRAMES_WARNING_THRESHOLD = 15
+
     def _on_record_finished(self, path: str) -> None:
         if not path:
             self._status_lbl.setText("Nothing was recorded.")
@@ -898,6 +903,19 @@ class FloatingLauncher(QWidget):
             )
         self._last_recording_path = result
         self._btn_open_folder.show()
+
+        # TA-245: frame-duplication (capture.py's _capture_frame()) keeps
+        # the saved duration matching wall-clock time even when the
+        # capture rate falls behind, but that compensation is itself
+        # worth surfacing when it had to do real work - the timing
+        # accuracy is honest now, silently would not be.
+        duplicated = self._recorder.duplicated_frames
+        if duplicated >= self._DUPLICATED_FRAMES_WARNING_THRESHOLD:
+            self._status_lbl.setText(
+                self._status_lbl.text()
+                + f" Capture rate dropped during recording "
+                f"({duplicated} frame(s) held to keep timing accurate)."
+            )
         # TA-215: a finished recording is saved straight to disk, but
         # nothing told the editor's History panel to look again - it would
         # only show up the next time History rebuilds on its own (e.g. an

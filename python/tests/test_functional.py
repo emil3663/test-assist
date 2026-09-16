@@ -1365,6 +1365,106 @@ def test_a_recording_thumb_backfills_a_missing_thumbnail_off_the_ui_thread(qapp,
     assert thumb._preview.text() == ""
 
 
+def test_TA245_backfills_frames_to_keep_pace_with_wall_clock_time(qapp, isolate_home, monkeypatch):
+    """_encode_frames() assembles the video at a fixed 15fps regardless of
+    how long the recording actually ran, so saved duration is always
+    exactly frame_count/15 - a normal repeating QTimer that falls behind
+    (one tick's own grab+scale+encode+write took longer than 1/15s)
+    silently skips ticks instead of queuing them, so frame_count used to
+    fall behind real elapsed time. Measured directly here: real 11s of
+    elapsed time should produce a saved duration of 11s (within one
+    frame's tolerance), not the 9.4667s this ticket's own evidence
+    measured before the fix, even though only some ticks actually ran."""
+    import capture
+
+    fake_time = [0.0]
+    monkeypatch.setattr(capture.time, "monotonic", lambda: fake_time[0])
+
+    rec = capture.FrameRecorder()
+    rec.start()
+
+    # Ticks 1-3 arrive on schedule, every 1/15s - no backfill needed.
+    for _ in range(3):
+        fake_time[0] += 1 / capture.FrameRecorder._FPS
+        rec._capture_frame()
+    assert rec.frame_count == 3
+    assert rec.duplicated_frames == 0
+
+    # Simulate the exact scenario this ticket measured: real time keeps
+    # moving (other work on the machine, grab+encode falling behind) but
+    # only one more tick actually fires - real elapsed jumps by a full
+    # simulated second's worth of wall-clock time between two ticks.
+    fake_time[0] += 1.0
+    rec._capture_frame()
+
+    # By now ~1.0667s of wall-clock time has passed since start
+    # (3 * 1/15 + 1.0), which at 15fps should be ~16 frames - not the 4
+    # a naive count would show.
+    expected_by_now = int(fake_time[0] * capture.FrameRecorder._FPS)
+    assert rec.frame_count == expected_by_now, \
+        f"frame_count should track wall-clock time, not just ticks that fired"
+    assert rec.duplicated_frames == expected_by_now - 4
+
+    emitted: list[str] = []
+    rec.finished.connect(emitted.append)
+    rec.stop()
+
+    saved_duration = rec.frame_count / capture.FrameRecorder._FPS
+    assert abs(saved_duration - fake_time[0]) < (1 / capture.FrameRecorder._FPS), (
+        f"saved duration {saved_duration:.3f}s must match wall-clock "
+        f"elapsed {fake_time[0]:.3f}s within one frame interval"
+    )
+
+
+def test_TA245_backfill_is_logged_for_a_real_hardware_repro(qapp, isolate_home, monkeypatch, tmp_path) -> None:
+    """This ticket's own acceptance bar: root cause confirmed with
+    instrumentation - log actual per-frame capture timestamps, compare
+    achieved fps against _FPS - not just accepted from the arithmetic
+    alone. Pins that the log lines exist and carry the numbers a real
+    hardware repro would need to read back, the same standard TA-217/
+    225/239/243/246's own logging already meets."""
+    import capture
+
+    monkeypatch.setenv("TESTASSIST_DEBUG", "1")
+    monkeypatch.setattr(capture.paths, "history_dir", lambda: tmp_path)
+
+    fake_time = [0.0]
+    monkeypatch.setattr(capture.time, "monotonic", lambda: fake_time[0])
+
+    rec = capture.FrameRecorder()
+    rec.start()
+    fake_time[0] += 1 / capture.FrameRecorder._FPS
+    rec._capture_frame()
+    fake_time[0] += 1.0  # falls behind - triggers a backfill
+    rec._capture_frame()
+    rec.stop()
+
+    logged = (tmp_path / "debug.log").read_text(encoding="utf-8")
+    assert "TA-245 backfilled" in logged
+    assert "achieved_fps=" in logged
+    assert "TA-245 recording summary" in logged
+    assert f"nominal_fps={capture.FrameRecorder._FPS}" in logged
+
+
+def test_TA245_no_backfill_when_capture_keeps_pace(qapp, isolate_home, monkeypatch):
+    """The regression guard for the fix itself: a recording that never
+    falls behind must not be padded with duplicate frames it doesn't
+    need."""
+    import capture
+
+    fake_time = [0.0]
+    monkeypatch.setattr(capture.time, "monotonic", lambda: fake_time[0])
+
+    rec = capture.FrameRecorder()
+    rec.start()
+    for _ in range(10):
+        fake_time[0] += 1 / capture.FrameRecorder._FPS
+        rec._capture_frame()
+
+    assert rec.frame_count == 10
+    assert rec.duplicated_frames == 0
+
+
 def test_recording_thumbnail_backfill_returns_none_without_raising_when_ffmpeg_is_unavailable(monkeypatch, isolate_home):
     """The pure function underneath the backfill: never raises, whatever
     goes wrong - the caller's job is to fall back to the icon, not to catch
