@@ -116,3 +116,42 @@ format/compatibility.
   `FrameRecorder` in `python/capture.py` directly and checking the actual
   saved file's duration (`ffprobe`, 9.4667s), not inferred from the report
   alone.
+
+## 2026-09-16 (later) — implemented and measured
+
+`_capture_frame()` now tracks wall-clock elapsed time
+(`time.monotonic() - self._started_at`) against `frame_count`, and
+backfills by copying the just-captured frame under sequential filenames
+whenever a real tick fell behind — `_encode_frames()`'s fixed
+`-framerate 15` call is untouched. `duplicated_frames` (a new property,
+alongside the existing `dropped_frames`) counts them; `launcher.py`'s
+`_on_record_finished()` appends a warning to `_status_lbl` when that
+count reaches 15 (roughly a second's worth at 15fps — "a real, sustained
+throttle, not one slow frame," per this doc's own Change section).
+
+**Measured, not just accepted from the arithmetic** — a deliberately-
+loaded scenario, `time.monotonic()` mocked so the numbers are exact
+rather than machine-dependent: 3 ticks arrive on schedule, then one tick
+is deliberately delayed a full simulated second (the same class of
+stall this ticket's own Context section describes: a single capture
+taking far longer than its 66.7ms budget).
+
+| | frame_count | duplicated_frames | saved duration | real elapsed |
+|---|---|---|---|---|
+| **Before this fix** (naive tick count) | 4 | — | 4/15 = **0.267s** | 1.067s |
+| **After this fix** | 16 | 12 | 16/15 = **1.067s** | 1.067s |
+
+Saved duration matches real elapsed time within one frame interval
+(`1/15s`), confirming the fix directly rather than by re-deriving the
+arithmetic. `debug_log` now carries a `TA-245 backfilled N frame(s)`
+line at the moment a backfill happens and a `TA-245 recording summary`
+line on save (elapsed, frame_count, duplicated, dropped, achieved fps),
+so a real hardware repro can read back exactly what happened, the same
+standard this ticket's own Context section (an `ffprobe` measurement,
+not a guess) already set.
+
+Two new tests in `test_functional.py` cover the backfill logic directly
+(and that a recording which never falls behind gets no padding at all),
+two in `test_regressions.py` cover the `_status_lbl` warning crossing
+and staying under the threshold, one covers the instrumentation log
+lines existing and carrying real numbers. 391 tests pass.

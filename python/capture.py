@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import shutil
 import sys
 import time
 from pathlib import Path
@@ -602,6 +603,8 @@ class FrameRecorder(QObject):
         self._frames_dir: Path | None = None
         self._count = 0
         self._dropped = 0
+        self._duplicated = 0
+        self._started_at = 0.0
         self._stamp = 0
         self._screen = None
 
@@ -616,6 +619,17 @@ class FrameRecorder(QObject):
         """Frames the disk could not keep up with. Surfaced so a slow machine
         degrades visibly rather than silently."""
         return self._dropped
+
+    @property
+    def duplicated_frames(self) -> int:
+        """Frames backfilled by _capture_frame()'s catch-up logic (TA-245)
+        because a real QTimer tick was silently skipped - the previous
+        capture's own grab+scale+encode+write took longer than the
+        nominal 1/_FPS interval. Distinct from dropped_frames, which only
+        counts a frame whose image.save() itself failed; this counts
+        frames that were never captured at all, backfilled with a copy of
+        the last one so frame_count/_FPS keeps matching wall-clock time."""
+        return self._duplicated
 
     @property
     def seconds_recorded(self) -> float:
@@ -637,6 +651,8 @@ class FrameRecorder(QObject):
         self._frames_dir.mkdir(parents=True, exist_ok=True)
         self._count = 0
         self._dropped = 0
+        self._duplicated = 0
+        self._started_at = time.monotonic()
         self._timer.start(1000 // self._FPS)
 
     def stop(self) -> None:
@@ -667,16 +683,57 @@ class FrameRecorder(QObject):
             )
 
         path = self._frames_dir / f"frame_{self._count:05d}.jpg"
-        if image.save(str(path), "JPG", self._JPEG_QUALITY):
+        if not image.save(str(path), "JPG", self._JPEG_QUALITY):
+            self._dropped += 1
+            return
+        self._count += 1
+        if self._count % self._FPS == 0:
+            self.progress.emit(self._count // self._FPS)
+
+        # TA-245: _encode_frames() assembles the video at a fixed _FPS
+        # regardless of how long the recording actually ran, so the saved
+        # duration is always exactly frame_count / _FPS. A normal
+        # repeating QTimer doesn't queue up ticks it couldn't keep up
+        # with - it just silently skips them - so whenever this call took
+        # longer than the nominal 1/_FPS interval, frame_count falls
+        # behind real elapsed time and the saved video plays back faster
+        # than real time. Backfilling with a copy of the frame just
+        # captured keeps frame_count/_FPS matching wall-clock time without
+        # touching _encode_frames()'s fixed-framerate call at all - a held
+        # frame during a stutter, the same thing a real recorder shows.
+        elapsed = time.monotonic() - self._started_at
+        expected_count = min(int(elapsed * self._FPS), self._MAX_SECONDS * self._FPS)
+        backfilled = 0
+        while self._count < expected_count:
+            dup_path = self._frames_dir / f"frame_{self._count:05d}.jpg"
+            try:
+                shutil.copyfile(path, dup_path)
+            except OSError:
+                break
             self._count += 1
+            self._duplicated += 1
+            backfilled += 1
             if self._count % self._FPS == 0:
                 self.progress.emit(self._count // self._FPS)
-        else:
-            self._dropped += 1
+        if backfilled:
+            debug_log.log(
+                f"TA-245 backfilled {backfilled} frame(s): elapsed={elapsed:.3f}s "
+                f"frame_count={self._count} expected_count={expected_count} "
+                f"achieved_fps={self._count / elapsed if elapsed else 0:.2f}"
+            )
 
     def _save(self) -> None:
         frames_dir = self._frames_dir
         self._frames_dir = None
+
+        elapsed = time.monotonic() - self._started_at
+        debug_log.log(
+            f"TA-245 recording summary: elapsed={elapsed:.3f}s "
+            f"frame_count={self._count} duplicated={self._duplicated} "
+            f"dropped={self._dropped} nominal_fps={self._FPS} "
+            f"achieved_fps={self._count / elapsed if elapsed else 0:.2f} "
+            f"saved_duration_s={self.seconds_recorded:.3f}"
+        )
 
         if frames_dir is None or self._count == 0:
             self.finished.emit("")
