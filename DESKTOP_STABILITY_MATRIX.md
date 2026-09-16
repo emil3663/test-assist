@@ -1,7 +1,7 @@
 # 🔍 Test Assist — Desktop stability matrix
 
-**Version:** 1.18
-**Last updated:** 2026-09-12
+**Version:** 1.19
+**Last updated:** 2026-09-16
 **Applies to:** the PySide6 desktop build. The browser build has its own matrix
 in `STABILITY_MATRIX.md`.
 
@@ -29,16 +29,32 @@ not. This document is that check.
 | Automated and passing | 183 |
 | Automated, documented known limitation (`xfail`) | 1 |
 | Blocked, documented as manual | 6 |
-| Automated tests | 332 collected (2 deselected: `visual`-marked, TA-226) — 331 pass, 1 `xfail`, no unexplained skips |
+| Automated tests | 411 collected (3 deselected: `visual`-marked, TA-226/TA-244) — 405 pass, 1 `xfail`, 2 skipped (macOS-only, see below) |
 | Wall clock | about 2-3 seconds warm; the first run is slower while the bundled ffmpeg loads |
 
-**A green run is `331 passed, 2 deselected, 1 xfailed`, everywhere.** The 2
-deselected are `test_visual.py`'s real-rendering cases (TA-226), which need
-the real "windows" Qt platform plugin rather than "offscreen" and are run
-explicitly, separately - see `pytest.ini`. The 1 `xfail` is
+**A green run is `405 passed, 3 deselected, 2 skipped, 1 xfailed`, everywhere.**
+The 3 deselected are `test_visual.py`'s real-rendering cases (TA-226, plus
+TA-244's recording-tile-distinctness case added since), which need the real
+"windows" Qt platform plugin rather than "offscreen" and are run explicitly,
+separately - see `pytest.ini`. The 2 skipped are `test_global_hotkeys.py`'s
+two Carbon-API cases, `@pytest.mark.skipif(sys.platform != "darwin", ...)` -
+legitimately absent on this suite's Windows CI. They've existed since
+`ba77855` ("Give global hotkeys a backend per platform, with macOS support",
+closes #3, 2026-09-11) - one day before this document's own v1.18 update,
+which stated "no unexplained skips" for that baseline. That was already
+inaccurate the day it was written, not a gap that crept in since: the v1.18
+update simply didn't account for these two, and this is that correction, not
+a report of something new. The 1 `xfail` is
 `test_three_piece_layout_can_seam_at_a_fractional_ratio` (CAP-20, TA-229): a
 deliberately-documented failure, not a skip, so a fix that accidentally makes
 it pass is caught (`strict=True`) rather than silently welcomed.
+
+**Verified directly against the commit immediately before TA-250 landed**
+(`7f0c284`, `pytest -q -rs`): `396 passed, 2 skipped, 3 deselected, 1 xfailed`
+- the same two `darwin`-only skips, same three deselections, confirming they
+predate TA-250 entirely. TA-250's own 9 new tests (`python/tests/
+test_update_check.py`, TA-250) account for the full 396 → 405 pass-count
+increase; nothing else in the ratio moved.
 
 MP4 assembly used to depend on `opencv-python`, an optional dependency the
 product deliberately shipped without, which made REC-05 skip itself on CI,
