@@ -1582,10 +1582,14 @@ not be cleanly excised — commits as little as 16 minutes later
 (`951e24a`, "follow the OS light/dark setting") depend on the theme-token
 plumbing `ff0f276` introduces, so dropping it broke 20+ conflicting hunks
 across `launcher.py`/`theme.py` in the very next commit. Kept `ff0f276`
-and the rest of the chain intact instead, and the dark/amber-vs-indigo
-accent decision is being handled as a small follow-up commit on
-`ui-polish-rebased` that overrides just the launcher's accent tokens back
-to amber, rather than by removing a commit other commits depend on.
+and the rest of the chain intact instead. Since `_DARK`'s own `ACCENT` had
+by then become indigo (to match the editor, with amber demoted to a
+light-mode-only accent), restoring amber meant pinning the launcher's
+whole palette independent of the OS light/dark toggle, not swapping one
+token — `69e692c` adds `theme.LAUNCHER`, a fixed dark/amber snapshot
+`launcher.py`'s ~40 styling call sites read instead of the shared
+`theme.*` globals `editor.py` reads, so an OS light-mode session changes
+the editor but not the launcher.
 
 - **TA-241 — closed.** The floating toolbar no longer steals OS focus from
   an already-open editor (`d8b67b1`, `python/launcher.py`'s
