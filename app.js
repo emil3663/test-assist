@@ -53,8 +53,12 @@ function resizeCanvases(w, h) {
 /* ─── Tool selection ─── */
 document.querySelectorAll('.tool-btn').forEach(btn => {
   btn.addEventListener('click', () => {
-    document.querySelectorAll('.tool-btn').forEach(b => b.classList.remove('active'));
+    document.querySelectorAll('.tool-btn').forEach(b => {
+      b.classList.remove('active');
+      b.setAttribute('aria-checked', 'false');
+    });
     btn.classList.add('active');
+    btn.setAttribute('aria-checked', 'true');
     currentTool = btn.dataset.tool;
     annoCanvas.style.cursor = cursorForTool(currentTool);
   });

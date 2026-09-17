@@ -111,6 +111,7 @@ classification and the caveat for every case — read it before trusting a ✅.
 | AT-14 | Touch draw on mobile | Works same as mouse draw | ✅ |
 | AT-15 | Select + drag a pen stroke | Whole path moves; no NaN in the export | ✅ |
 | AT-16 | Draw with the browser zoomed | Coordinates match the underlying image | ✅ |
+| AT-17 | Select a tool, by click and by keyboard shortcut | The selected tool's button carries `aria-checked="true"`, every other tool button `aria-checked="false"` | ✅ |
 
 ### 3.4 Undo / Redo
 
