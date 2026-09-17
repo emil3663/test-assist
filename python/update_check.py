@@ -15,6 +15,7 @@ absent network cannot freeze the UI.
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass
 
 from PySide6.QtCore import QObject, QUrl
@@ -48,6 +49,37 @@ def parse_latest_release(payload: bytes) -> tuple[str, str] | None:
         html_url = ""
 
     return tag_name, html_url
+
+
+def parse_known_good_override(payload: bytes) -> str | None:
+    """Look for a "KNOWN_GOOD: vX.Y.Z" line in a release's own notes body.
+
+    TA-250: the rollback marker for a shipped-but-bad release. A maintainer
+    retracts releases/latest by editing *that release's own* GitHub Release
+    notes to add this line - a metadata edit on a release that already
+    exists, not a new tag, build, or CI run. Returns the version to
+    recommend instead, or None if absent, or if the payload doesn't parse -
+    same "never raise" contract as parse_latest_release, since a network
+    response is never trustworthy input.
+    """
+    try:
+        data = json.loads(payload)
+    except (json.JSONDecodeError, UnicodeDecodeError, TypeError):
+        return None
+
+    if not isinstance(data, dict):
+        return None
+
+    body = data.get("body")
+    if not isinstance(body, str):
+        return None
+
+    for line in body.splitlines():
+        match = re.match(r"^\s*KNOWN_GOOD:\s*(\S+)\s*$", line)
+        if match:
+            return match.group(1)
+
+    return None
 
 
 def _parse_version(version: str) -> tuple[int, ...] | None:
@@ -88,6 +120,7 @@ class UpdateResult:
     is_newer: bool = False
     latest_version: str = ""
     html_url: str = ""
+    known_good_override: str = ""
 
 
 class UpdateChecker(QObject):
@@ -142,4 +175,5 @@ class UpdateChecker(QObject):
             is_newer=is_newer(current_version, tag_name),
             latest_version=latest_version,
             html_url=html_url,
+            known_good_override=parse_known_good_override(payload) or "",
         )

@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import json
 
-from update_check import UpdateChecker, is_newer, parse_latest_release
+from update_check import UpdateChecker, is_newer, parse_known_good_override, parse_latest_release
 
 
 # ── parse_latest_release ─────────────────────────────────────────────────────
@@ -48,6 +48,38 @@ def test_parse_latest_release_rejects_a_non_string_tag_name():
 def test_parse_latest_release_tolerates_a_missing_html_url():
     result = parse_latest_release(_payload(tag_name="v1.3.0"))
     assert result == ("v1.3.0", "")
+
+
+# ── parse_known_good_override (TA-250) ───────────────────────────────────────
+
+def test_parse_known_good_override_reads_the_marker_line():
+    body = "Known issue with capture on X.\n\nKNOWN_GOOD: v1.3.0\n\nSee TA-250."
+    assert parse_known_good_override(_payload(tag_name="v1.4.0", body=body)) == "v1.3.0"
+
+
+def test_parse_known_good_override_absent_when_no_marker():
+    assert parse_known_good_override(_payload(tag_name="v1.4.0", body="Normal release notes.")) is None
+
+
+def test_parse_known_good_override_absent_when_there_is_no_body_at_all():
+    assert parse_known_good_override(_payload(tag_name="v1.4.0")) is None
+
+
+def test_parse_known_good_override_rejects_malformed_json():
+    assert parse_known_good_override(b"{not json") is None
+
+
+def test_parse_known_good_override_ignores_a_non_string_body():
+    assert parse_known_good_override(_payload(tag_name="v1.4.0", body=110)) is None
+
+
+def test_parse_known_good_override_ignores_a_non_object_payload():
+    assert parse_known_good_override(b"[1, 2, 3]") is None
+
+
+def test_parse_known_good_override_finds_the_marker_among_other_lines():
+    body = "Line one.\nLine two.\nKNOWN_GOOD: v1.2.5\nLine four."
+    assert parse_known_good_override(_payload(tag_name="v1.4.0", body=body)) == "v1.2.5"
 
 
 # ── is_newer ──────────────────────────────────────────────────────────────────
@@ -121,3 +153,20 @@ def test_interpret_never_reports_a_downgrade_as_an_update():
     result = UpdateChecker.interpret(True, _payload(tag_name="v1.0.0", html_url="https://x"), "1.2.0")
     assert result.ok is True
     assert result.is_newer is False
+
+
+def test_interpret_surfaces_a_known_good_override_from_the_release_body():
+    """TA-250: a maintainer retracts releases/latest by editing its own
+    notes, not by cutting a new release. interpret() must surface that."""
+    body = "This release has a known issue.\n\nKNOWN_GOOD: v1.3.0"
+    result = UpdateChecker.interpret(
+        True, _payload(tag_name="v1.4.0", html_url="https://x", body=body), "1.2.0"
+    )
+    assert result.ok is True
+    assert result.known_good_override == "v1.3.0"
+
+
+def test_interpret_known_good_override_defaults_to_empty_string():
+    result = UpdateChecker.interpret(True, _payload(tag_name="v1.3.0", html_url="https://x"), "1.2.0")
+    assert result.ok is True
+    assert result.known_good_override == ""
